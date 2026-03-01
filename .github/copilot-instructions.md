@@ -8,7 +8,7 @@ allowing coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro model
 - **Runtime**: Node.js
 - **Browser automation**: Playwright (headed mode, dedicated Chrome profile)
 - **Language**: TypeScript
-- **CLI framework**: commander
+- **CLI framework**: citty (UnJS) — TypeScript-native, `defineCommand` pattern, zero dependency
 
 ## Architecture (key modules)
 
