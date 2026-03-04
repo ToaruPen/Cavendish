@@ -1,4 +1,5 @@
 import type { Locator, Page } from 'playwright';
+import { errors } from 'playwright';
 
 import { SELECTORS } from '../constants/selectors.js';
 
@@ -10,7 +11,7 @@ const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
 
 export interface WaitForResponseOptions {
-  /** Timeout in milliseconds (default: 120_000). */
+  /** Timeout in milliseconds (default: 2_400_000). */
   timeout?: number;
   /** Called with cumulative response text as it streams in. */
   onChunk?: (text: string) => void;
@@ -195,7 +196,7 @@ export class ChatGPTDriver {
         return true;
       }
       if (stopButtonAppeared === 'timeout') {
-        progress('Response not detected within timeout', quiet);
+        progress(`Response not detected within ${String(timeout)}ms`, quiet);
         return false;
       }
 
@@ -305,5 +306,5 @@ function delay(ms: number): Promise<void> {
 }
 
 function isTimeoutError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('Timeout');
+  return error instanceof errors.TimeoutError;
 }
