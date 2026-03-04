@@ -6,6 +6,7 @@ Playwright-based CLI that automates ChatGPT's Web UI for coding agents.
 
 - Responses to the user: Japanese
 - LLM-facing documents (CLAUDE.md, AGENTS.md, code comments, commit messages, etc.): English
+- GitHub issues: Japanese (human-reviewed)
 
 ## Commands
 
