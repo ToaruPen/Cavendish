@@ -4,7 +4,23 @@ import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver } from '../core/chatgpt-driver.js';
 import { json, progress, text } from '../core/output-handler.js';
 
-const DEFAULT_TIMEOUT_SEC = 2400;
+const DEFAULT_MODEL = 'Pro';
+const DEFAULT_TIMEOUT_SEC = 120;
+const PRO_TIMEOUT_SEC = 2400;
+
+/**
+ * Resolve the effective timeout: use explicit --timeout if provided,
+ * otherwise pick a model-appropriate default.
+ */
+function resolveTimeoutSec(
+  explicitTimeout: string | undefined,
+  model: string,
+): number {
+  if (explicitTimeout !== undefined) {
+    return Number(explicitTimeout);
+  }
+  return model.toLowerCase() === 'pro' ? PRO_TIMEOUT_SEC : DEFAULT_TIMEOUT_SEC;
+}
 
 /**
  * `cavendish ask` — send a prompt to ChatGPT and return the response.
@@ -22,8 +38,7 @@ export const askCommand = defineCommand({
     },
     timeout: {
       type: 'string',
-      description: 'Response timeout in seconds (default: 2400)',
-      default: String(DEFAULT_TIMEOUT_SEC),
+      description: 'Response timeout in seconds (default: 120, Pro: 2400)',
     },
     quiet: {
       type: 'boolean',
@@ -36,15 +51,17 @@ export const askCommand = defineCommand({
     },
     model: {
       type: 'string',
-      description: 'ChatGPT model to use (e.g. auto, pro)',
+      description: 'ChatGPT model to use (default: Pro)',
+      default: DEFAULT_MODEL,
     },
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
-    const timeoutSec = Number(args.timeout);
+    const model = args.model;
+    const timeoutSec = resolveTimeoutSec(args.timeout, model);
 
     if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-      progress(`Error: --timeout must be a positive number, got "${args.timeout}"`, false);
+      progress(`Error: --timeout must be a positive number, got "${String(args.timeout)}"`, false);
       process.exitCode = 1;
       return;
     }
@@ -63,9 +80,7 @@ export const askCommand = defineCommand({
       const page = await browser.getPage(quiet);
       const driver = new ChatGPTDriver(page);
 
-      if (args.model) {
-        await driver.selectModel(args.model, quiet);
-      }
+      await driver.selectModel(model, quiet);
 
       progress('Sending message...', quiet);
       const initialMsgCount = await driver.getAssistantMessageCount();
@@ -80,7 +95,7 @@ export const askCommand = defineCommand({
       if (format === 'text') {
         text(result.text);
       } else {
-        json(result.text, { partial: !result.completed, model: args.model });
+        json(result.text, { partial: !result.completed, model });
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
