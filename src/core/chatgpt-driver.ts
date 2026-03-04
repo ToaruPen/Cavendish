@@ -1,8 +1,10 @@
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 
 import { SELECTORS } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
+
+type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
@@ -179,28 +181,25 @@ export class ChatGPTDriver {
     const deadline = Date.now() + timeout;
 
     const completionPromise = (async (): Promise<boolean> => {
-      // Phase 1: Wait for stop button to appear (generation started).
-      // Uses the full timeout so slow-to-start responses aren't cut short.
-      try {
-        await stopBtn.waitFor({ state: 'attached', timeout });
-      } catch (error: unknown) {
-        if (!isTimeoutError(error)) {
-          throw error;
-        }
-        // Stop button never appeared within the timeout.
-        // For very fast responses the button may appear and disappear
-        // before we observe it; check if a new assistant message arrived.
-        const currentCount = await this.page
-          .locator(SELECTORS.ASSISTANT_MESSAGE)
-          .count();
-        if (currentCount > msgCountBefore) {
-          return true;
-        }
+      // Phase 1: Race stop-button appearance against a new assistant message.
+      // Fast/non-streamed responses may never show the stop button, so we
+      // poll for assistant messages in parallel to avoid blocking until timeout.
+      const stopButtonAppeared = await this.raceStopButtonAndMessage(
+        stopBtn,
+        msgCountBefore,
+        timeout,
+      );
+
+      if (stopButtonAppeared === 'message') {
+        // Assistant message arrived without ever seeing the stop button.
+        return true;
+      }
+      if (stopButtonAppeared === 'timeout') {
         progress('Response not detected within timeout', quiet);
         return false;
       }
 
-      // Phase 2: Wait for stop button to disappear (generation finished).
+      // Phase 2: Stop button appeared — wait for it to disappear (generation finished).
       // Use remaining time so total wait never exceeds the caller's timeout.
       const remaining = Math.max(deadline - Date.now(), 0);
       try {
@@ -222,6 +221,49 @@ export class ChatGPTDriver {
     }
 
     return completionPromise;
+  }
+
+  /**
+   * Race the stop-button appearance against a new assistant message.
+   *
+   * Returns:
+   * - `'attached'`  — stop button appeared (proceed to Phase 2)
+   * - `'message'`   — assistant message arrived first (response already done)
+   * - `'timeout'`   — neither appeared within the timeout
+   */
+  private async raceStopButtonAndMessage(
+    stopBtn: Locator,
+    msgCountBefore: number,
+    timeout: number,
+  ): Promise<StopButtonResult> {
+    const deadline = Date.now() + timeout;
+
+    // Start listening for the stop button (non-blocking)
+    const stopPromise = stopBtn
+      .waitFor({ state: 'attached', timeout })
+      .then((): StopButtonResult => 'attached')
+      .catch((error: unknown): StopButtonResult => {
+        if (isTimeoutError(error)) {
+          return 'timeout';
+        }
+        throw error;
+      });
+
+    // Poll for a new assistant message in parallel
+    const messagePromise = (async (): Promise<StopButtonResult> => {
+      while (Date.now() < deadline) {
+        const count = await this.page
+          .locator(SELECTORS.ASSISTANT_MESSAGE)
+          .count();
+        if (count > msgCountBefore) {
+          return 'message';
+        }
+        await delay(POLL_INTERVAL_MS);
+      }
+      return 'timeout';
+    })();
+
+    return Promise.race([stopPromise, messagePromise]);
   }
 
   /**
