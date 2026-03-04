@@ -56,16 +56,26 @@ Every feature/fix follows this sequence:
 
 1. **Pull main** — `git pull origin main` to sync
 2. **Create worktree** — isolate work from main
-3. **Implement** — follow the issue scope, no drive-by fixes
-4. **Verify**
+3. **Activate workflow gate** — run `/workflow-start` to enable commit/push gating
+4. **Implement** — follow the issue scope, no drive-by fixes
+5. **Verify**
    - DOM-dependent code (ChatGPTDriver, BrowserManager): live test against ChatGPT
    - DOM-independent code (OutputHandler, ConfigManager, utils): write and run vitest unit tests
-5. **Simplify** — run `/simplify` to clean up code
-6. **Quality gate** — `npm run lint && npm run typecheck && npm test` — all must pass
-7. **Codex review** — run `/codex-review`, fix issues until approved
-8. **Ship** — commit → push → PR creation
+6. **Simplify** — run `/simplify` to clean up code, then mark complete:
+   ```bash
+   jq '.steps.simplify_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state
+   ```
+7. **Quality gate** — `npm run lint && npm run typecheck && npm test` — all must pass
+   (auto-tracked by PostToolUse hook when all three pass in a single command)
+8. **Codex review** — run `/codex-review`, fix issues until approved, then mark complete:
+   ```bash
+   jq '.steps.codex_review_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state
+   ```
+9. **Ship** — commit → push → PR creation
 
 Do NOT skip steps or reorder. Codex review happens after lint/typecheck/test pass.
+
+**Workflow gate**: Steps 6-8 are enforced by a PreToolUse hook that blocks `git commit`/`git push` when `.claude/.workflow-state` exists and steps are incomplete. Use `/workflow-skip` to bypass with a reason. If `.workflow-state` does not exist, commits pass through freely (quick fix mode).
 
 ## References
 

@@ -3,3 +3,4 @@ dist/
 .cavendish/
 *.tsbuildinfo
 *.log
+.claude/.workflow-state

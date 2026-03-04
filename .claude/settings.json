@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/gate-commit.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write",
@@ -8,6 +20,16 @@
             "type": "command",
             "command": "FILE=$(jq -r '.tool_input.file_path // empty') && [ -n \"$FILE\" ] && [ -f \"$FILE\" ] && case \"$FILE\" in *.ts|*.tsx|*.js|*.jsx) RESULT=$(npx eslint --fix \"$FILE\" 2>&1) || { echo \"$RESULT\"; exit 1; } ;; esac",
             "timeout": 15000
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/track-quality-gate.sh",
+            "timeout": 5000
           }
         ]
       }
