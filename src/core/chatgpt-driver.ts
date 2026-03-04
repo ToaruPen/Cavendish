@@ -15,9 +15,9 @@ export interface WaitForResponseOptions {
   /** Suppress stderr progress messages. */
   quiet?: boolean;
   /** Assistant message count captured BEFORE sendMessage to avoid race conditions. */
-  initialMsgCount?: number;
+  initialMsgCount: number;
   /** Copy button count captured BEFORE sendMessage to avoid race conditions. */
-  initialCopyCount?: number;
+  initialCopyCount: number;
 }
 
 export interface WaitForResponseResult {
@@ -52,11 +52,13 @@ export class ChatGPTDriver {
       .filter({ hasText: model });
 
     const count = await item.count();
-    if (count === 0) {
+    if (count !== 1) {
       // Close the menu before throwing
       await this.page.keyboard.press('Escape');
       throw new Error(
-        `Model "${model}" not found in model picker. Check available models in ChatGPT.`,
+        count === 0
+          ? `Model "${model}" not found in model picker. Check available models in ChatGPT.`
+          : `Model "${model}" matched ${String(count)} items. Please provide a more specific model name.`,
       );
     }
 
@@ -86,12 +88,6 @@ export class ChatGPTDriver {
   }
 
   /**
-   * Wait for ChatGPT to finish responding.
-   *
-   * Completion is detected by the appearance of a new copy button.
-   * On timeout, the partial response is returned.
-   */
-  /**
    * Return the current count of assistant messages on the page.
    * Call this BEFORE sendMessage to capture the baseline for race-free response reading.
    */
@@ -107,22 +103,20 @@ export class ChatGPTDriver {
     return this.page.locator(SELECTORS.COPY_BUTTON).count();
   }
 
-  async waitForResponse(options: WaitForResponseOptions = {}): Promise<WaitForResponseResult> {
-    const { timeout = DEFAULT_TIMEOUT_MS, onChunk, quiet = false, initialMsgCount } = options;
+  async waitForResponse(options: WaitForResponseOptions): Promise<WaitForResponseResult> {
+    const {
+      timeout = DEFAULT_TIMEOUT_MS,
+      onChunk,
+      quiet = false,
+      initialMsgCount,
+      initialCopyCount,
+    } = options;
 
     progress('Waiting for response...', quiet);
 
-    // Use caller-provided count (captured before sendMessage) to avoid race conditions,
-    // or fall back to current count if not provided.
-    const { initialCopyCount: callerCopyCount } = options;
-    const [msgCountBefore, copyCountBefore] = await Promise.all([
-      initialMsgCount ?? this.getAssistantMessageCount(),
-      callerCopyCount ?? this.getCopyButtonCount(),
-    ]);
-
     const completed = await this.raceCompletionAndChunks(
-      copyCountBefore,
-      msgCountBefore,
+      initialCopyCount,
+      initialMsgCount,
       timeout,
       quiet,
       onChunk,
@@ -137,7 +131,7 @@ export class ChatGPTDriver {
       );
     }
 
-    const text = await this.getResponseAfter(msgCountBefore);
+    const text = await this.getResponseAfter(initialMsgCount);
     return { text, completed };
   }
 
