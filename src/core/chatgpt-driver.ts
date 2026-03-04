@@ -4,7 +4,7 @@ import { SELECTORS } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
 
 export interface WaitForResponseOptions {

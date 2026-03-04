@@ -4,7 +4,7 @@ import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver } from '../core/chatgpt-driver.js';
 import { json, progress, text } from '../core/output-handler.js';
 
-const DEFAULT_TIMEOUT_SEC = 120;
+const DEFAULT_TIMEOUT_SEC = 2400;
 
 /**
  * `cavendish ask` — send a prompt to ChatGPT and return the response.
@@ -22,7 +22,7 @@ export const askCommand = defineCommand({
     },
     timeout: {
       type: 'string',
-      description: 'Response timeout in seconds (default: 120)',
+      description: 'Response timeout in seconds (default: 2400)',
       default: String(DEFAULT_TIMEOUT_SEC),
     },
     quiet: {
