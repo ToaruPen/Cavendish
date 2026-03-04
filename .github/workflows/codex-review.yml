@@ -1,0 +1,24 @@
+name: Codex Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Codex Review
+        uses: openai/codex-action@v1
+        with:
+          drop-sudo: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

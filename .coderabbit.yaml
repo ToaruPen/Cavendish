@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: ja-JP
+
+early_access: false
+
+reviews:
+  profile: chill
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+
+path_instructions:
+  - path: "src/constants/selectors.ts"
+    instructions: >
+      All ChatGPT DOM selectors MUST live in this file.
+      No inline selectors are allowed elsewhere in the codebase.
+      Review any PR that adds selectors outside this file as a blocking issue.
+
+  - path: "src/core/**/*.ts"
+    instructions: >
+      Every function MUST have an explicit return type.
+      No `as any`, `@ts-ignore`, or `@ts-expect-error`.
+      Fail fast with actionable error messages — no empty catch blocks.
+      Retry logic: max 3 attempts with logging.
+
+  - path: "src/**/*.ts"
+    instructions: >
+      Imports must be grouped and ordered: builtin > external > internal > relative,
+      alphabetized within each group.
+
+  - path: "**/*.test.ts"
+    instructions: >
+      Do NOT create fixture-based mock tests (mock DOM diverges from production too quickly).
+      Never delete or disable existing test code.
+      Bug fixes require a test that fails before and passes after the fix.
