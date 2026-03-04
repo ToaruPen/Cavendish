@@ -26,18 +26,20 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "citty": "^0.2.1"
+    "citty": "^0.2.1",
+    "playwright": "^1.58.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@types/node": "^25.3.3",
     "eslint": "^9.0.0",
     "eslint-import-resolver-typescript": "^4.4.0",
     "eslint-plugin-import-x": "^4.16.0",
     "eslint-plugin-sonarjs": "^4.0.0",
     "jiti": "^2.6.1",
-    "vitest": "^3.1.0",
     "tsup": "^8.4.0",
     "typescript": "^5.9.0",
-    "typescript-eslint": "^8.56.0"
+    "typescript-eslint": "^8.56.0",
+    "vitest": "^3.1.0"
   }
 }
