@@ -16,8 +16,6 @@ export interface WaitForResponseOptions {
   quiet?: boolean;
   /** Assistant message count captured BEFORE sendMessage to avoid race conditions. */
   initialMsgCount: number;
-  /** Copy button count captured BEFORE sendMessage to avoid race conditions. */
-  initialCopyCount: number;
 }
 
 export interface WaitForResponseResult {
@@ -44,6 +42,7 @@ export class ChatGPTDriver {
   async selectModel(model: string, quiet = false): Promise<void> {
     progress(`Selecting model: ${model}`, quiet);
 
+    await this.waitForReady();
     await this.page.locator(SELECTORS.MODEL_SELECTOR_BUTTON).click();
     await this.page.locator(SELECTORS.MODEL_MENU).waitFor({ state: 'visible' });
 
@@ -95,27 +94,17 @@ export class ChatGPTDriver {
     return this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
   }
 
-  /**
-   * Return the current count of copy buttons on the page.
-   * Call this BEFORE sendMessage to capture the baseline for race-free completion detection.
-   */
-  async getCopyButtonCount(): Promise<number> {
-    return this.page.locator(SELECTORS.COPY_BUTTON).count();
-  }
-
   async waitForResponse(options: WaitForResponseOptions): Promise<WaitForResponseResult> {
     const {
       timeout = DEFAULT_TIMEOUT_MS,
       onChunk,
       quiet = false,
       initialMsgCount,
-      initialCopyCount,
     } = options;
 
     progress('Waiting for response...', quiet);
 
-    const completed = await this.raceCompletionAndChunks(
-      initialCopyCount,
+    const completed = await this.waitForCompletionWithChunks(
       initialMsgCount,
       timeout,
       quiet,
@@ -170,45 +159,69 @@ export class ChatGPTDriver {
   }
 
   /**
-   * Wait for a new copy button (completion signal) while optionally
-   * polling the response text for streaming chunks.
+   * Wait for response completion using the stop-button as the primary signal.
+   *
+   * Strategy: the stop button appears while ChatGPT is generating a response
+   * and disappears when generation finishes. This is more reliable than
+   * copy-button counting because user messages also receive copy buttons.
    *
    * Returns `true` if the response completed, `false` on timeout.
    */
-  private async raceCompletionAndChunks(
-    initialCopyCount: number,
+  private async waitForCompletionWithChunks(
     msgCountBefore: number,
     timeout: number,
     quiet: boolean,
     onChunk?: (text: string) => void,
   ): Promise<boolean> {
     let done = false;
+    const stopBtn = this.page.locator(SELECTORS.STOP_BUTTON);
 
-    const completionPromise = this.page
-      .locator(SELECTORS.COPY_BUTTON)
-      .nth(initialCopyCount)
-      .waitFor({ state: 'attached', timeout })
-      .finally((): void => {
-        done = true;
-      });
+    const deadline = Date.now() + timeout;
+
+    const completionPromise = (async (): Promise<boolean> => {
+      // Phase 1: Wait for stop button to appear (generation started).
+      // Uses the full timeout so slow-to-start responses aren't cut short.
+      try {
+        await stopBtn.waitFor({ state: 'attached', timeout });
+      } catch (error: unknown) {
+        if (!isTimeoutError(error)) {
+          throw error;
+        }
+        // Stop button never appeared within the timeout.
+        // For very fast responses the button may appear and disappear
+        // before we observe it; check if a new assistant message arrived.
+        const currentCount = await this.page
+          .locator(SELECTORS.ASSISTANT_MESSAGE)
+          .count();
+        if (currentCount > msgCountBefore) {
+          return true;
+        }
+        progress('Response not detected within timeout', quiet);
+        return false;
+      }
+
+      // Phase 2: Wait for stop button to disappear (generation finished).
+      // Use remaining time so total wait never exceeds the caller's timeout.
+      const remaining = Math.max(deadline - Date.now(), 0);
+      try {
+        await stopBtn.waitFor({ state: 'detached', timeout: remaining });
+        return true;
+      } catch (error: unknown) {
+        if (!isTimeoutError(error)) {
+          throw error;
+        }
+        // Generation still running but we've hit the timeout — partial response.
+        return false;
+      }
+    })().finally((): void => {
+      done = true;
+    });
 
     if (onChunk) {
       await this.pollChunks(() => done, msgCountBefore, quiet, onChunk);
     }
 
-    try {
-      await completionPromise;
-      return true;
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('Timeout')) {
-        progress(`Copy button not detected within ${String(timeout)}ms`, quiet);
-        return false;
-      }
-      throw error instanceof Error
-        ? error
-        : new Error(`Unexpected error waiting for response: ${msg}`);
-    }
+    return completionPromise;
   }
 
   /**
@@ -247,4 +260,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('Timeout');
 }

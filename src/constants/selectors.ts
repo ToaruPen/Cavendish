@@ -42,6 +42,9 @@ export const SELECTORS = {
   /** Copy button that appears when the response is complete */
   COPY_BUTTON: '[data-testid="copy-turn-action-button"]',
 
+  /** Stop button visible while response is streaming */
+  STOP_BUTTON: '[data-testid="stop-button"]',
+
   /** Thinking/reasoning indicator */
   THINKING_INDICATOR: '.agent-turn',
 

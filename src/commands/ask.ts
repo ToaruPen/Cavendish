@@ -68,17 +68,13 @@ export const askCommand = defineCommand({
       }
 
       progress('Sending message...', quiet);
-      const [initialMsgCount, initialCopyCount] = await Promise.all([
-        driver.getAssistantMessageCount(),
-        driver.getCopyButtonCount(),
-      ]);
+      const initialMsgCount = await driver.getAssistantMessageCount();
       await driver.sendMessage(args.prompt);
 
       const result = await driver.waitForResponse({
         timeout: timeoutMs,
         quiet,
         initialMsgCount,
-        initialCopyCount,
       });
 
       if (format === 'text') {
