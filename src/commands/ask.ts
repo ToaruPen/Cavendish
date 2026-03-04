@@ -42,7 +42,13 @@ export const askCommand = defineCommand({
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const timeoutSec = Number(args.timeout);
-    const timeoutMs = (Number.isFinite(timeoutSec) ? timeoutSec : DEFAULT_TIMEOUT_SEC) * 1000;
+
+    if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+      progress(`Error: --timeout must be a positive number, got "${args.timeout}"`, false);
+      process.exitCode = 1;
+      return;
+    }
+    const timeoutMs = timeoutSec * 1000;
 
     if (args.format !== 'json' && args.format !== 'text') {
       progress(`Error: --format must be "json" or "text", got "${args.format}"`, false);
@@ -62,17 +68,23 @@ export const askCommand = defineCommand({
       }
 
       progress('Sending message...', quiet);
+      const [initialMsgCount, initialCopyCount] = await Promise.all([
+        driver.getAssistantMessageCount(),
+        driver.getCopyButtonCount(),
+      ]);
       await driver.sendMessage(args.prompt);
 
       const result = await driver.waitForResponse({
         timeout: timeoutMs,
         quiet,
+        initialMsgCount,
+        initialCopyCount,
       });
 
       if (format === 'text') {
         text(result.text);
       } else {
-        json(result.text, { partial: !result.completed });
+        json(result.text, { partial: !result.completed, model: args.model });
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

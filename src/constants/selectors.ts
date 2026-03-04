@@ -16,13 +16,13 @@ export const SELECTORS = {
 
   // ── Model selection ──────────────────────────────────────
   /** Button that opens the model picker dropdown */
-  MODEL_SELECTOR_BUTTON: 'button:has-text("モデル セレクター")',
+  MODEL_SELECTOR_BUTTON: '[data-testid="model-switcher-dropdown-button"]',
 
   /** Model picker dropdown menu */
-  MODEL_MENU: 'menu',
+  MODEL_MENU: '[role="menu"]',
 
   /** Individual model option inside the menu */
-  MODEL_MENUITEM: 'menuitem',
+  MODEL_MENUITEM: '[role="menuitem"]',
 
   // ── File attachment ──────────────────────────────────────
   /** Hidden file input (no id attribute) */
@@ -40,7 +40,7 @@ export const SELECTORS = {
 
   // ── Response completion ──────────────────────────────────
   /** Copy button that appears when the response is complete */
-  COPY_BUTTON: '[aria-label="コピーする"]',
+  COPY_BUTTON: '[data-testid="copy-turn-action-button"]',
 
   /** Thinking/reasoning indicator */
   THINKING_INDICATOR: '.agent-turn',

@@ -14,6 +14,10 @@ export interface WaitForResponseOptions {
   onChunk?: (text: string) => void;
   /** Suppress stderr progress messages. */
   quiet?: boolean;
+  /** Assistant message count captured BEFORE sendMessage to avoid race conditions. */
+  initialMsgCount?: number;
+  /** Copy button count captured BEFORE sendMessage to avoid race conditions. */
+  initialCopyCount?: number;
 }
 
 export interface WaitForResponseResult {
@@ -87,24 +91,40 @@ export class ChatGPTDriver {
    * Completion is detected by the appearance of a new copy button.
    * On timeout, the partial response is returned.
    */
+  /**
+   * Return the current count of assistant messages on the page.
+   * Call this BEFORE sendMessage to capture the baseline for race-free response reading.
+   */
+  async getAssistantMessageCount(): Promise<number> {
+    return this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
+  }
+
+  /**
+   * Return the current count of copy buttons on the page.
+   * Call this BEFORE sendMessage to capture the baseline for race-free completion detection.
+   */
+  async getCopyButtonCount(): Promise<number> {
+    return this.page.locator(SELECTORS.COPY_BUTTON).count();
+  }
+
   async waitForResponse(options: WaitForResponseOptions = {}): Promise<WaitForResponseResult> {
-    const { timeout = DEFAULT_TIMEOUT_MS, onChunk, quiet = false } = options;
+    const { timeout = DEFAULT_TIMEOUT_MS, onChunk, quiet = false, initialMsgCount } = options;
 
     progress('Waiting for response...', quiet);
 
-    // Snapshot assistant message count before waiting so we only read
-    // the NEW response, not a stale one from a previous conversation.
-    const initialMsgCount = await this.page
-      .locator(SELECTORS.ASSISTANT_MESSAGE)
-      .count();
-
-    const initialCopyCount = await this.page
-      .locator(SELECTORS.COPY_BUTTON)
-      .count();
+    // Use caller-provided count (captured before sendMessage) to avoid race conditions,
+    // or fall back to current count if not provided.
+    const { initialCopyCount: callerCopyCount } = options;
+    const [msgCountBefore, copyCountBefore] = await Promise.all([
+      initialMsgCount ?? this.getAssistantMessageCount(),
+      callerCopyCount ?? this.getCopyButtonCount(),
+    ]);
 
     const completed = await this.raceCompletionAndChunks(
-      initialCopyCount,
+      copyCountBefore,
+      msgCountBefore,
       timeout,
+      quiet,
       onChunk,
     );
 
@@ -117,7 +137,7 @@ export class ChatGPTDriver {
       );
     }
 
-    const text = await this.getResponseAfter(initialMsgCount);
+    const text = await this.getResponseAfter(msgCountBefore);
     return { text, completed };
   }
 
@@ -163,37 +183,38 @@ export class ChatGPTDriver {
    */
   private async raceCompletionAndChunks(
     initialCopyCount: number,
+    msgCountBefore: number,
     timeout: number,
+    quiet: boolean,
     onChunk?: (text: string) => void,
   ): Promise<boolean> {
     let done = false;
-    let completed = false;
 
     const completionPromise = this.page
       .locator(SELECTORS.COPY_BUTTON)
       .nth(initialCopyCount)
       .waitFor({ state: 'attached', timeout })
-      .then((): void => {
-        completed = true;
-      })
-      .catch((error: unknown): void => {
-        const msg = String(error);
-        if (msg.includes('Timeout')) {
-          progress(`Copy button not detected within ${String(timeout)}ms`);
-        } else {
-          progress(`Unexpected error waiting for response: ${msg}`);
-        }
-      })
       .finally((): void => {
         done = true;
       });
 
     if (onChunk) {
-      await this.pollChunks(() => done, onChunk);
+      await this.pollChunks(() => done, msgCountBefore, quiet, onChunk);
     }
 
-    await completionPromise;
-    return completed;
+    try {
+      await completionPromise;
+      return true;
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('Timeout')) {
+        progress(`Copy button not detected within ${String(timeout)}ms`, quiet);
+        return false;
+      }
+      throw error instanceof Error
+        ? error
+        : new Error(`Unexpected error waiting for response: ${msg}`);
+    }
   }
 
   /**
@@ -202,19 +223,21 @@ export class ChatGPTDriver {
    */
   private async pollChunks(
     isDone: () => boolean,
+    msgCountBefore: number,
+    quiet: boolean,
     onChunk: (text: string) => void,
   ): Promise<void> {
     let lastText = '';
 
     while (!isDone()) {
       try {
-        const currentText = await this.getLastResponse();
+        const currentText = await this.getResponseAfter(msgCountBefore);
         if (currentText && currentText !== lastText) {
           lastText = currentText;
           onChunk(currentText);
         }
       } catch (error: unknown) {
-        progress(`Chunk poll error: ${String(error)}`);
+        progress(`Poll error (transient): ${String(error)}`, quiet);
       }
 
       if (!isDone()) {
