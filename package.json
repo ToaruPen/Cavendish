@@ -1,16 +1,43 @@
 {
   "name": "cavendish",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "version": "0.1.0",
+  "description": "A Playwright-based CLI tool that automates ChatGPT's Web UI, enabling coding agents to query ChatGPT Pro models via a single shell command",
+  "main": "dist/index.mjs",
+  "type": "module",
+  "bin": {
+    "cavendish": "./dist/index.mjs"
   },
-  "keywords": [],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "chatgpt",
+    "cli",
+    "playwright",
+    "automation",
+    "ai"
+  ],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "citty": "^0.2.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-import-resolver-typescript": "^4.4.0",
+    "eslint-plugin-import-x": "^4.16.0",
+    "eslint-plugin-sonarjs": "^4.0.0",
+    "jiti": "^2.6.1",
+    "vitest": "^3.1.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.56.0"
   }
 }

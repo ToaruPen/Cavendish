@@ -1,0 +1,57 @@
+name: Feature
+description: New feature or enhancement
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: "## Feature Request"
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line description of the feature
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this needed? What problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: spec
+    attributes:
+      label: Specification
+      description: |
+        Describe the expected behavior. Include:
+        - CLI usage examples
+        - Input/output format
+        - Edge cases
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files to create/modify
+      description: List the files that will be affected
+    validations:
+      required: false
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Phase
+      options:
+        - "Phase 1: MVP"
+        - "Phase 2: File operations"
+        - "Phase 3: Chat/Project management"
+        - "Phase 4: Stabilization"
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How do we know this is done? List verifiable conditions.
+    validations:
+      required: true
