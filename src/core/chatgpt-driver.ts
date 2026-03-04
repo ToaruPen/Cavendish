@@ -158,7 +158,7 @@ export class ChatGPTDriver {
   // ── Private ────────────────────────────────────────────────
 
   /**
-   * Get the text of the first assistant message that appeared after
+   * Get the text of the latest assistant message that appeared after
    * `previousCount` messages. Returns '' if no new message exists.
    */
   private async getResponseAfter(previousCount: number): Promise<string> {
