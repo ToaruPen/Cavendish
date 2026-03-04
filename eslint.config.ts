@@ -66,7 +66,9 @@ export default tseslint.config(
   {
     rules: {
       // ─ Must-have (ESLint core) ─
-      'no-undef': 'error',
+      // no-undef is disabled: TypeScript handles this via type checking.
+      // See: https://typescript-eslint.io/troubleshooting/faqs/eslint/
+      'no-undef': 'off',
       'no-unreachable': 'error',
       'no-debugger': 'error',
       eqeqeq: ['error', 'always'],
