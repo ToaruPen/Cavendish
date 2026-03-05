@@ -19,7 +19,7 @@ function resolveTimeoutSec(
   if (explicitTimeout !== undefined) {
     return Number(explicitTimeout);
   }
-  return model.toLowerCase() === 'pro' ? PRO_TIMEOUT_SEC : DEFAULT_TIMEOUT_SEC;
+  return model.toLowerCase().includes('pro') ? PRO_TIMEOUT_SEC : DEFAULT_TIMEOUT_SEC;
 }
 
 /**
