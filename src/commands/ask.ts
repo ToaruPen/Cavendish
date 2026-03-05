@@ -65,6 +65,7 @@ export function buildPrompt(prompt: string, stdinData: string): string {
 /**
  * Extract --file arguments from process.argv.
  * citty does not support array-type args, so we parse manually.
+ * Supports both --file <path> and --file=<path> forms.
  * Returns resolved absolute paths.
  */
 export function extractFileArgs(argv: string[]): string[] {
