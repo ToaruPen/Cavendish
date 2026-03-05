@@ -7,6 +7,28 @@ import { progress } from './output-handler.js';
 
 type StopButtonResult = 'attached' | 'message' | 'timeout';
 
+export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
+
+const THINKING_EFFORT_LEVELS: readonly ThinkingEffortLevel[] = [
+  'light', 'standard', 'extended', 'deep',
+] as const;
+
+/** Candidate UI labels per effort level (Japanese + English). */
+const EFFORT_LABEL_CANDIDATES: Record<ThinkingEffortLevel, readonly string[]> = {
+  light: ['ライト', 'Light'],
+  standard: ['標準', 'Standard'],
+  extended: ['拡張', 'Extended'],
+  deep: ['深い', 'Deep'],
+};
+
+type ThinkingModelCategory = 'thinking' | 'pro';
+
+/** Valid effort levels per model category. */
+const MODEL_EFFORT_LEVELS: Record<ThinkingModelCategory, readonly ThinkingEffortLevel[]> = {
+  thinking: THINKING_EFFORT_LEVELS,
+  pro: ['standard', 'extended'],
+};
+
 const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
 
@@ -97,6 +119,47 @@ export class ChatGPTDriver {
   }
 
   /**
+   * Set the thinking effort level in the ChatGPT composer.
+   * Clicks the thinking effort pill and selects the desired level from the dropdown.
+   */
+  async setThinkingEffort(
+    level: ThinkingEffortLevel,
+    model: string,
+    quiet = false,
+  ): Promise<void> {
+    const category = resolveModelCategory(model);
+    if (category === undefined) {
+      throw new Error(
+        `Model "${model}" does not support --thinking-effort. Only Thinking and Pro models are supported.`,
+      );
+    }
+
+    const allowedLevels = MODEL_EFFORT_LEVELS[category];
+    if (!allowedLevels.includes(level)) {
+      throw new Error(
+        `Thinking effort "${level}" is not valid for ${category} models. Valid levels: ${allowedLevels.join(', ')}`,
+      );
+    }
+
+    const candidates = EFFORT_LABEL_CANDIDATES[level];
+    progress(`Setting thinking effort: ${level}`, quiet);
+
+    const pill = this.page.locator(SELECTORS.THINKING_EFFORT_PILL);
+    await pill.click();
+
+    // Wait for the effort menu to render before probing labels.
+    await this.page
+      .locator(SELECTORS.THINKING_EFFORT_MENUITEM)
+      .first()
+      .waitFor({ state: 'visible' });
+
+    const menuItem = await this.findMenuItemByLabels(candidates);
+    await menuItem.click();
+
+    progress(`Thinking effort set to: ${level}`, quiet);
+  }
+
+  /**
    * Attach files to the ChatGPT composer using the hidden file input.
    * Uses Playwright's setInputFiles for reliable cross-browser file injection.
    */
@@ -157,6 +220,26 @@ export class ChatGPTDriver {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  /**
+   * Find a visible menuitemradio matching any of the given label candidates.
+   * Tries each candidate in order and returns the first visible match.
+   * Throws if none of the candidates match a visible menu item.
+   */
+  private async findMenuItemByLabels(candidates: readonly string[]): Promise<Locator> {
+    for (const label of candidates) {
+      const item = this.page
+        .locator(SELECTORS.THINKING_EFFORT_MENUITEM)
+        .filter({ hasText: label });
+      const visible = await item.isVisible().catch((): boolean => false);
+      if (visible) {
+        return item;
+      }
+    }
+    throw new Error(
+      `Thinking effort menu item not found. Tried labels: ${candidates.join(', ')}`,
+    );
+  }
 
   /**
    * Get the text of the latest assistant message that appeared after
@@ -348,4 +431,15 @@ function delay(ms: number): Promise<void> {
 
 function isTimeoutError(error: unknown): boolean {
   return error instanceof errors.TimeoutError;
+}
+
+/**
+ * Determine the model category for thinking effort validation.
+ * Returns undefined if the model does not support thinking effort.
+ */
+function resolveModelCategory(model: string): ThinkingModelCategory | undefined {
+  const lower = model.toLowerCase();
+  if (lower.includes('thinking')) {return 'thinking';}
+  if (lower.includes('pro')) {return 'pro';}
+  return undefined;
 }

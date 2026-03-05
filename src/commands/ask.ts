@@ -4,8 +4,26 @@ import { resolve } from 'node:path';
 import { defineCommand } from 'citty';
 
 import { BrowserManager } from '../core/browser-manager.js';
-import { ChatGPTDriver } from '../core/chatgpt-driver.js';
+import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
 import { json, progress, text } from '../core/output-handler.js';
+
+const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
+  'light', 'standard', 'extended', 'deep',
+];
+
+/** Pro models only allow standard and extended effort levels. */
+const PRO_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = ['standard', 'extended'];
+
+/**
+ * Return the allowed thinking effort levels for a model, or undefined
+ * if the model does not support --thinking-effort at all.
+ */
+function allowedThinkingEfforts(model: string): readonly ThinkingEffortLevel[] | undefined {
+  const lower = model.toLowerCase();
+  if (lower.includes('thinking')) {return VALID_THINKING_EFFORTS;}
+  if (lower.includes('pro')) {return PRO_THINKING_EFFORTS;}
+  return undefined;
+}
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -114,7 +132,32 @@ interface ValidatedArgs {
   timeoutSec: number;
   format: 'json' | 'text';
   filePaths: string[];
+  thinkingEffort: ThinkingEffortLevel | undefined;
   prompt: string;
+}
+
+/**
+ * Validate --thinking-effort against the model's allowed levels.
+ * Returns an error message string on failure, or undefined on success.
+ */
+function validateThinkingEffort(
+  thinkingEffort: ThinkingEffortLevel | undefined,
+  model: string,
+): string | undefined {
+  if (thinkingEffort === undefined) {
+    return undefined;
+  }
+  if (!VALID_THINKING_EFFORTS.includes(thinkingEffort)) {
+    return `--thinking-effort must be one of: ${VALID_THINKING_EFFORTS.join(', ')}. Got "${thinkingEffort}"`;
+  }
+  const allowedEfforts = allowedThinkingEfforts(model);
+  if (allowedEfforts === undefined) {
+    return `--thinking-effort is not supported for model "${model}". Use Thinking or Pro models.`;
+  }
+  if (!allowedEfforts.includes(thinkingEffort)) {
+    return `--thinking-effort "${thinkingEffort}" is not valid for model "${model}". Allowed: ${allowedEfforts.join(', ')}`;
+  }
+  return undefined;
 }
 
 /**
@@ -163,6 +206,14 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
+  const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
+  const effortError = validateThinkingEffort(thinkingEffort, model);
+  if (effortError !== undefined) {
+    progress(`Error: ${effortError}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
   let stdinData: string;
   try {
     stdinData = readStdin();
@@ -181,6 +232,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     timeoutSec,
     format: args.format,
     filePaths,
+    thinkingEffort,
     prompt,
   };
 }
@@ -221,6 +273,10 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
     },
+    thinkingEffort: {
+      type: 'string',
+      description: 'Thinking effort level: light, standard, extended, deep',
+    },
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
@@ -228,7 +284,7 @@ export const askCommand = defineCommand({
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,
-      filePaths, prompt,
+      filePaths, thinkingEffort, prompt,
     } = validated;
 
     const browser = new BrowserManager();
@@ -238,6 +294,10 @@ export const askCommand = defineCommand({
       const driver = new ChatGPTDriver(page);
 
       await driver.selectModel(model, quiet);
+
+      if (thinkingEffort !== undefined) {
+        await driver.setThinkingEffort(thinkingEffort, model, quiet);
+      }
 
       if (filePaths.length > 0) {
         await driver.attachFiles(filePaths, quiet);

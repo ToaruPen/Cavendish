@@ -48,6 +48,16 @@ export const SELECTORS = {
   /** Thinking/reasoning indicator */
   THINKING_INDICATOR: '.agent-turn',
 
+  // ── Thinking effort ────────────────────────────────────────
+  /** Container for composer footer action pills (model features) */
+  COMPOSER_FOOTER_ACTIONS: '[data-testid="composer-footer-actions"]',
+
+  /** Thinking effort pill button in the composer footer */
+  THINKING_EFFORT_PILL: '[data-testid="composer-footer-actions"] button[aria-haspopup="menu"]',
+
+  /** Menu items inside the thinking effort dropdown */
+  THINKING_EFFORT_MENUITEM: '[role="menuitemradio"]',
+
   // ── Chat management ──────────────────────────────────────
   /** Links to existing conversations in the sidebar */
   CONVERSATION_LINK: 'a[href^="/c/"]',
