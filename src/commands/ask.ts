@@ -101,8 +101,11 @@ export function findMissingFile(filePaths: string[]): string | undefined {
     if (!existsSync(p)) {return true;}
     try {
       return !statSync(p).isFile();
-    } catch {
-      return true;
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {return true;}
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to stat "${p}": ${detail}`);
     }
   });
 }
@@ -187,7 +190,15 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
-  const missingFile = findMissingFile(filePaths);
+  let missingFile: string | undefined;
+  try {
+    missingFile = findMissingFile(filePaths);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Error: ${detail}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
   if (missingFile !== undefined) {
     progress(`Error: file not found or not a regular file: ${missingFile}`, false);
     process.exitCode = 1;
