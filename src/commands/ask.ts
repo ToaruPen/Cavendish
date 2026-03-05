@@ -80,7 +80,14 @@ export function extractFileArgs(argv: string[]): string[] {
  * Returns the first invalid path, or undefined if all are valid.
  */
 export function findMissingFile(filePaths: string[]): string | undefined {
-  return filePaths.find((p) => !existsSync(p) || !statSync(p).isFile());
+  return filePaths.find((p) => {
+    if (!existsSync(p)) {return true;}
+    try {
+      return !statSync(p).isFile();
+    } catch {
+      return true;
+    }
+  });
 }
 
 /**
