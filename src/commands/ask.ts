@@ -22,8 +22,9 @@ export function readStdin(): string {
     return readFileSync(0, 'utf-8').trim();
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    progress(`Warning: failed to read stdin: ${detail}`, false);
-    return '';
+    throw new Error(
+      `Failed to read piped stdin: ${detail}. Re-run without pipe or fix stdin source.`,
+    );
   }
 }
 
@@ -104,7 +105,15 @@ export const askCommand = defineCommand({
     }
     const format = args.format;
 
-    const stdinData = readStdin();
+    let stdinData: string;
+    try {
+      stdinData = readStdin();
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      progress(`Error: ${detail}`, false);
+      process.exitCode = 1;
+      return;
+    }
     const prompt = buildPrompt(args.prompt, stdinData);
 
     const browser = new BrowserManager();
