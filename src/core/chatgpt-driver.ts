@@ -218,7 +218,11 @@ export class ChatGPTDriver {
 
       // Phase 2: Stop button is attached — wait for it to disappear (generation finished).
       // Use remaining time so total wait never exceeds the caller's timeout.
-      const remaining = Math.max(deadline - Date.now(), 0);
+      // Guard against 0: Playwright treats timeout=0 as "no timeout" (infinite).
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return false;
+      }
       try {
         await stopBtn.waitFor({ state: 'detached', timeout: remaining });
         return true;
@@ -282,9 +286,11 @@ export class ChatGPTDriver {
       return 'timeout';
     })();
 
-    const result = await Promise.race([stopPromise, messagePromise]);
-    race.settled = true;
-    return result;
+    try {
+      return await Promise.race([stopPromise, messagePromise]);
+    } finally {
+      race.settled = true;
+    }
   }
 
   /**

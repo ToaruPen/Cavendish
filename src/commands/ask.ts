@@ -38,7 +38,7 @@ export const askCommand = defineCommand({
     },
     timeout: {
       type: 'string',
-      description: 'Response timeout in seconds (default: 120, Pro: 2400)',
+      description: 'Response timeout in seconds (model-dependent; default: 120, Pro: 2400)',
     },
     quiet: {
       type: 'boolean',
