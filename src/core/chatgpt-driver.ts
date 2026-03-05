@@ -9,6 +9,8 @@ type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
+/** Grace period to wait for stop-button after assistant message appears. */
+const STOP_BUTTON_GRACE_MS = 5_000;
 
 export interface WaitForResponseOptions {
   /** Timeout in milliseconds (default: 2_400_000). */
@@ -191,16 +193,33 @@ export class ChatGPTDriver {
         timeout,
       );
 
-      if (stopButtonAppeared === 'message') {
-        // Assistant message arrived without ever seeing the stop button.
-        return true;
-      }
       if (stopButtonAppeared === 'timeout') {
         progress(`Response not detected within ${String(timeout)}ms`, quiet);
         return false;
       }
 
-      // Phase 2: Stop button appeared — wait for it to disappear (generation finished).
+      if (stopButtonAppeared === 'message') {
+        // Assistant message node appeared before the stop button was observed.
+        // In ChatGPT, this node is created at the START of streaming, so the
+        // response is likely still being generated. Give the stop button a
+        // grace period to appear; if it does, fall through to Phase 2.
+        const grace = Math.min(
+          STOP_BUTTON_GRACE_MS,
+          Math.max(deadline - Date.now(), 0),
+        );
+        try {
+          await stopBtn.waitFor({ state: 'attached', timeout: grace });
+          // Stop button appeared — fall through to Phase 2.
+        } catch (error: unknown) {
+          if (!isTimeoutError(error)) {
+            throw error;
+          }
+          // Stop button never appeared — genuinely fast/cached response.
+          return true;
+        }
+      }
+
+      // Phase 2: Stop button is attached — wait for it to disappear (generation finished).
       // Use remaining time so total wait never exceeds the caller's timeout.
       const remaining = Math.max(deadline - Date.now(), 0);
       try {
@@ -229,7 +248,7 @@ export class ChatGPTDriver {
    *
    * Returns:
    * - `'attached'`  — stop button appeared (proceed to Phase 2)
-   * - `'message'`   — assistant message arrived first (response already done)
+   * - `'message'`   — assistant message node appeared first (streaming may still be in progress)
    * - `'timeout'`   — neither appeared within the timeout
    */
   private async raceStopButtonAndMessage(
