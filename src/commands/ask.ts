@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 
@@ -36,6 +37,35 @@ export function buildPrompt(prompt: string, stdinData: string): string {
     return prompt;
   }
   return `${stdinData}\n\n${prompt}`;
+}
+
+/**
+ * Extract --file arguments from process.argv.
+ * citty does not support array-type args, so we parse manually.
+ * Returns resolved absolute paths.
+ */
+export function extractFileArgs(argv: string[]): string[] {
+  const files: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--') {break;} // respect end-of-options
+    if (argv[i] === '--file' && i + 1 < argv.length) {
+      const value = argv[i + 1];
+      if (value.startsWith('-')) {
+        throw new Error(`--file requires a file path, got "${value}"`);
+      }
+      files.push(resolve(value));
+      i++; // skip the value
+    }
+  }
+  return files;
+}
+
+/**
+ * Validate that all file paths exist. Returns the first missing path,
+ * or undefined if all exist.
+ */
+export function findMissingFile(filePaths: string[]): string | undefined {
+  return filePaths.find((p) => !existsSync(p));
 }
 
 /**
@@ -84,6 +114,10 @@ export const askCommand = defineCommand({
       description: 'ChatGPT model to use (default: Pro)',
       default: DEFAULT_MODEL,
     },
+    file: {
+      type: 'string',
+      description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
+    },
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
@@ -104,6 +138,22 @@ export const askCommand = defineCommand({
     }
     const format = args.format;
 
+    let filePaths: string[];
+    try {
+      filePaths = extractFileArgs(process.argv);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      progress(`Error: ${detail}`, false);
+      process.exitCode = 1;
+      return;
+    }
+    const missingFile = findMissingFile(filePaths);
+    if (missingFile !== undefined) {
+      progress(`Error: file not found: ${missingFile}`, false);
+      process.exitCode = 1;
+      return;
+    }
+
     const stdinData = readStdin();
     const prompt = buildPrompt(args.prompt, stdinData);
 
@@ -114,6 +164,10 @@ export const askCommand = defineCommand({
       const driver = new ChatGPTDriver(page);
 
       await driver.selectModel(model, quiet);
+
+      if (filePaths.length > 0) {
+        await driver.attachFiles(filePaths, quiet);
+      }
 
       progress('Sending message...', quiet);
       const initialMsgCount = await driver.getAssistantMessageCount();

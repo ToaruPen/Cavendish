@@ -96,6 +96,22 @@ export class ChatGPTDriver {
     return this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
   }
 
+  /**
+   * Attach files to the ChatGPT composer using the hidden file input.
+   * Uses Playwright's setInputFiles for reliable cross-browser file injection.
+   */
+  async attachFiles(filePaths: string[], quiet = false): Promise<void> {
+    progress(`Attaching ${String(filePaths.length)} file(s)...`, quiet);
+
+    const fileInput = this.page.locator(SELECTORS.FILE_INPUT_GENERIC);
+    await fileInput.setInputFiles(filePaths);
+
+    // Fixed delay while ChatGPT processes the attachment.
+    // Replace with event-based wait when a suitable selector is identified.
+    await this.page.waitForTimeout(2000);
+    progress('Files attached', quiet);
+  }
+
   async waitForResponse(options: WaitForResponseOptions): Promise<WaitForResponseResult> {
     const {
       timeout = DEFAULT_TIMEOUT_MS,
