@@ -9,8 +9,6 @@ type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
-/** Grace period to wait for stop-button after assistant message appears. */
-const STOP_BUTTON_GRACE_MS = 5_000;
 
 export interface WaitForResponseOptions {
   /** Timeout in milliseconds (default: 2_400_000). */
@@ -185,8 +183,8 @@ export class ChatGPTDriver {
 
     const completionPromise = (async (): Promise<boolean> => {
       // Phase 1: Race stop-button appearance against a new assistant message.
-      // Fast/non-streamed responses may never show the stop button, so we
-      // poll for assistant messages in parallel to avoid blocking until timeout.
+      // We poll for assistant messages in parallel as a safeguard against
+      // a stale stop-button selector blocking until timeout.
       const stopButtonAppeared = await this.raceStopButtonAndMessage(
         stopBtn,
         msgCountBefore,
@@ -199,27 +197,15 @@ export class ChatGPTDriver {
       }
 
       if (stopButtonAppeared === 'message') {
-        // Assistant message node appeared before the stop button was observed.
-        // In ChatGPT, this node is created at the START of streaming, so the
-        // response is likely still being generated. Give the stop button a
-        // grace period to appear; if it does, fall through to Phase 2.
-        const remainingBeforeGrace = deadline - Date.now();
-        if (remainingBeforeGrace <= 0) {
-          // Overall deadline already exceeded — partial response.
-          return false;
-        }
-        const grace = Math.min(STOP_BUTTON_GRACE_MS, remainingBeforeGrace);
-        try {
-          await stopBtn.waitFor({ state: 'attached', timeout: grace });
-          // Stop button appeared — fall through to Phase 2.
-        } catch (error: unknown) {
-          if (!isTimeoutError(error)) {
-            throw error;
-          }
-          // Stop button never appeared within grace period.
-          // If deadline passed, this is a timeout; otherwise a fast/cached response.
-          return Date.now() < deadline;
-        }
+        // In live ChatGPT, the stop button always appears at the same time as
+        // or before the assistant message node. If we reach this branch, the
+        // stop button selector is likely stale or the UI has changed.
+        // Fail fast — treat as partial so the caller does not trust truncated text.
+        progress(
+          'Assistant message appeared without stop button — treating as partial (selector may be stale)',
+          quiet,
+        );
+        return false;
       }
 
       // Phase 2: Stop button is attached — wait for it to disappear (generation finished).
@@ -249,9 +235,12 @@ export class ChatGPTDriver {
   /**
    * Race the stop-button appearance against a new assistant message.
    *
+   * In live ChatGPT the stop button always appears first or simultaneously,
+   * so `'message'` is an unexpected path that indicates a stale selector.
+   *
    * Returns:
    * - `'attached'`  — stop button appeared (proceed to Phase 2)
-   * - `'message'`   — assistant message node appeared first (streaming may still be in progress)
+   * - `'message'`   — assistant message appeared without stop button (unexpected)
    * - `'timeout'`   — neither appeared within the timeout
    */
   private async raceStopButtonAndMessage(
