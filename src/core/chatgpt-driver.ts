@@ -1,14 +1,17 @@
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
+import { errors } from 'playwright';
 
 import { SELECTORS } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+type StopButtonResult = 'attached' | 'message' | 'timeout';
+
+const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
 
 export interface WaitForResponseOptions {
-  /** Timeout in milliseconds (default: 120_000). */
+  /** Timeout in milliseconds (default: 2_400_000). */
   timeout?: number;
   /** Called with cumulative response text as it streams in. */
   onChunk?: (text: string) => void;
@@ -16,8 +19,6 @@ export interface WaitForResponseOptions {
   quiet?: boolean;
   /** Assistant message count captured BEFORE sendMessage to avoid race conditions. */
   initialMsgCount: number;
-  /** Copy button count captured BEFORE sendMessage to avoid race conditions. */
-  initialCopyCount: number;
 }
 
 export interface WaitForResponseResult {
@@ -39,11 +40,11 @@ export class ChatGPTDriver {
 
   /**
    * Open the model picker and select the given model by name.
-   * No-op if `model` is undefined.
    */
   async selectModel(model: string, quiet = false): Promise<void> {
     progress(`Selecting model: ${model}`, quiet);
 
+    await this.waitForReady();
     await this.page.locator(SELECTORS.MODEL_SELECTOR_BUTTON).click();
     await this.page.locator(SELECTORS.MODEL_MENU).waitFor({ state: 'visible' });
 
@@ -95,27 +96,17 @@ export class ChatGPTDriver {
     return this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
   }
 
-  /**
-   * Return the current count of copy buttons on the page.
-   * Call this BEFORE sendMessage to capture the baseline for race-free completion detection.
-   */
-  async getCopyButtonCount(): Promise<number> {
-    return this.page.locator(SELECTORS.COPY_BUTTON).count();
-  }
-
   async waitForResponse(options: WaitForResponseOptions): Promise<WaitForResponseResult> {
     const {
       timeout = DEFAULT_TIMEOUT_MS,
       onChunk,
       quiet = false,
       initialMsgCount,
-      initialCopyCount,
     } = options;
 
     progress('Waiting for response...', quiet);
 
-    const completed = await this.raceCompletionAndChunks(
-      initialCopyCount,
+    const completed = await this.waitForCompletionWithChunks(
       initialMsgCount,
       timeout,
       quiet,
@@ -170,44 +161,134 @@ export class ChatGPTDriver {
   }
 
   /**
-   * Wait for a new copy button (completion signal) while optionally
-   * polling the response text for streaming chunks.
+   * Wait for response completion using the stop-button as the primary signal.
+   *
+   * Strategy: the stop button appears while ChatGPT is generating a response
+   * and disappears when generation finishes. This is more reliable than
+   * copy-button counting because user messages also receive copy buttons.
    *
    * Returns `true` if the response completed, `false` on timeout.
    */
-  private async raceCompletionAndChunks(
-    initialCopyCount: number,
+  private async waitForCompletionWithChunks(
     msgCountBefore: number,
     timeout: number,
     quiet: boolean,
     onChunk?: (text: string) => void,
   ): Promise<boolean> {
     let done = false;
+    const stopBtn = this.page.locator(SELECTORS.STOP_BUTTON);
 
-    const completionPromise = this.page
-      .locator(SELECTORS.COPY_BUTTON)
-      .nth(initialCopyCount)
-      .waitFor({ state: 'attached', timeout })
-      .finally((): void => {
-        done = true;
-      });
+    const deadline = Date.now() + timeout;
+
+    const completionPromise = (async (): Promise<boolean> => {
+      // Phase 1: Race stop-button appearance against a new assistant message.
+      // Standard models show the stop button first; Pro (thinking) models may
+      // show the assistant message node first during the thinking phase.
+      const stopButtonAppeared = await this.raceStopButtonAndMessage(
+        stopBtn,
+        msgCountBefore,
+        timeout,
+      );
+
+      if (stopButtonAppeared === 'timeout') {
+        progress(`Response not detected within ${String(timeout)}ms`, quiet);
+        return false;
+      }
+
+      if (stopButtonAppeared === 'message') {
+        // Assistant message appeared before stop button — common with Pro
+        // (thinking phase creates the message node before streaming begins).
+        // Use the full remaining timeout so long-running thinking phases
+        // are not incorrectly cut short.
+        const remainingForAttach = Math.max(deadline - Date.now(), 0);
+        if (remainingForAttach <= 0) {
+          return false;
+        }
+        try {
+          await stopBtn.waitFor({ state: 'attached', timeout: remainingForAttach });
+        } catch (error: unknown) {
+          if (!isTimeoutError(error)) {
+            throw error;
+          }
+          // Stop button never appeared within the overall timeout — partial.
+          return false;
+        }
+      }
+
+      // Phase 2: Stop button is attached — wait for it to disappear (generation finished).
+      // Use remaining time so total wait never exceeds the caller's timeout.
+      // Guard against 0: Playwright treats timeout=0 as "no timeout" (infinite).
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        return false;
+      }
+      try {
+        await stopBtn.waitFor({ state: 'detached', timeout: remaining });
+        return true;
+      } catch (error: unknown) {
+        if (!isTimeoutError(error)) {
+          throw error;
+        }
+        // Generation still running but we've hit the timeout — partial response.
+        return false;
+      }
+    })().finally((): void => {
+      done = true;
+    });
 
     if (onChunk) {
       await this.pollChunks(() => done, msgCountBefore, quiet, onChunk);
     }
 
-    try {
-      await completionPromise;
-      return true;
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      if (msg.includes('Timeout')) {
-        progress(`Copy button not detected within ${String(timeout)}ms`, quiet);
-        return false;
+    return completionPromise;
+  }
+
+  /**
+   * Race the stop-button appearance against a new assistant message.
+   *
+   * Returns:
+   * - `'attached'`  — stop button appeared first (proceed to Phase 2)
+   * - `'message'`   — assistant message appeared first (e.g. Pro thinking phase)
+   * - `'timeout'`   — neither appeared within the timeout
+   */
+  private async raceStopButtonAndMessage(
+    stopBtn: Locator,
+    msgCountBefore: number,
+    timeout: number,
+  ): Promise<StopButtonResult> {
+    const deadline = Date.now() + timeout;
+    const race = { settled: false };
+
+    // Start listening for the stop button (non-blocking)
+    const stopPromise = stopBtn
+      .waitFor({ state: 'attached', timeout })
+      .then((): StopButtonResult => 'attached')
+      .catch((error: unknown): StopButtonResult => {
+        if (isTimeoutError(error)) {
+          return 'timeout';
+        }
+        throw error;
+      });
+
+    // Poll for a new assistant message in parallel.
+    // Checks `race.settled` so it stops promptly when the other promise wins.
+    const messagePromise = (async (): Promise<StopButtonResult> => {
+      while (!race.settled && Date.now() < deadline) {
+        const count = await this.page
+          .locator(SELECTORS.ASSISTANT_MESSAGE)
+          .count();
+        if (count > msgCountBefore) {
+          return 'message';
+        }
+        await delay(POLL_INTERVAL_MS);
       }
-      throw error instanceof Error
-        ? error
-        : new Error(`Unexpected error waiting for response: ${msg}`);
+      return 'timeout';
+    })();
+
+    try {
+      return await Promise.race([stopPromise, messagePromise]);
+    } finally {
+      race.settled = true;
     }
   }
 
@@ -247,4 +328,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof errors.TimeoutError;
 }

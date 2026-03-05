@@ -44,6 +44,10 @@ npm run test:watch  # Watch mode
 - Bug fixes require a failing test before and passing test after
 - Never delete or disable existing tests
 
+### Live Chrome Test (mandatory per feature)
+
+Every feature addition MUST include a live test against real Chrome + ChatGPT (`npm run build` first). Test the new/changed functionality end-to-end and confirm it works before marking the verify step complete.
+
 ## Agent Behavior
 
 - **Sub-agents**: Aggressively use sub-agents for exploration — codebase search, doc lookup, web research, dependency investigation. Spawn them in parallel whenever multiple lookups are needed. Do not read files one-by-one when a sub-agent can search broadly.
@@ -59,7 +63,7 @@ Every feature/fix follows this sequence:
 3. **Activate workflow gate** — run `/workflow-start` to enable commit/push gating
 4. **Implement** — follow the issue scope, no drive-by fixes
 5. **Verify**
-   - DOM-dependent code (ChatGPTDriver, BrowserManager): live test against ChatGPT
+   - DOM-dependent code (ChatGPTDriver, BrowserManager): run the **Live Chrome Test** checklist (see Testing section)
    - DOM-independent code (OutputHandler, ConfigManager, utils): write and run vitest unit tests
 6. **Simplify** — run `/simplify` to clean up code, then mark complete:
    ```bash
