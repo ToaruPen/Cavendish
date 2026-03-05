@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { fstatSync, readFileSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
 
@@ -19,6 +19,10 @@ export function readStdin(): string {
     return '';
   }
   try {
+    const stat = fstatSync(0);
+    if (!stat.isFIFO() && !stat.isFile()) {
+      return '';
+    }
     return readFileSync(0, 'utf-8');
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
