@@ -40,7 +40,6 @@ export class ChatGPTDriver {
 
   /**
    * Open the model picker and select the given model by name.
-   * No-op if `model` is undefined.
    */
   async selectModel(model: string, quiet = false): Promise<void> {
     progress(`Selecting model: ${model}`, quiet);
