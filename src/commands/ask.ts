@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, fstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
@@ -11,12 +11,18 @@ const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
 ];
 
+/** Pro models only allow standard and extended effort levels. */
+const PRO_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = ['standard', 'extended'];
+
 /**
- * Check whether a model name supports the --thinking-effort option.
+ * Return the allowed thinking effort levels for a model, or undefined
+ * if the model does not support --thinking-effort at all.
  */
-function supportsThinkingEffort(model: string): boolean {
+function allowedThinkingEfforts(model: string): readonly ThinkingEffortLevel[] | undefined {
   const lower = model.toLowerCase();
-  return lower.includes('thinking') || lower.includes('pro');
+  if (lower.includes('thinking')) {return VALID_THINKING_EFFORTS;}
+  if (lower.includes('pro')) {return PRO_THINKING_EFFORTS;}
+  return undefined;
 }
 
 const DEFAULT_MODEL = 'Pro';
@@ -32,6 +38,10 @@ export function readStdin(): string {
     return '';
   }
   try {
+    const stat = fstatSync(0);
+    if (!stat.isFIFO() && !stat.isFile()) {
+      return '';
+    }
     return readFileSync(0, 'utf-8');
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -116,6 +126,30 @@ interface ValidatedArgs {
 }
 
 /**
+ * Validate --thinking-effort against the model's allowed levels.
+ * Returns an error message string on failure, or undefined on success.
+ */
+function validateThinkingEffort(
+  thinkingEffort: ThinkingEffortLevel | undefined,
+  model: string,
+): string | undefined {
+  if (thinkingEffort === undefined) {
+    return undefined;
+  }
+  if (!VALID_THINKING_EFFORTS.includes(thinkingEffort)) {
+    return `--thinking-effort must be one of: ${VALID_THINKING_EFFORTS.join(', ')}. Got "${thinkingEffort}"`;
+  }
+  const allowedEfforts = allowedThinkingEfforts(model);
+  if (allowedEfforts === undefined) {
+    return `--thinking-effort is not supported for model "${model}". Use Thinking or Pro models.`;
+  }
+  if (!allowedEfforts.includes(thinkingEffort)) {
+    return `--thinking-effort "${thinkingEffort}" is not valid for model "${model}". Allowed: ${allowedEfforts.join(', ')}`;
+  }
+  return undefined;
+}
+
+/**
  * Parse and validate all CLI arguments. Returns undefined on validation failure
  * (exitCode is set and error is logged).
  */
@@ -154,20 +188,9 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   }
 
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
-  if (thinkingEffort !== undefined && !VALID_THINKING_EFFORTS.includes(thinkingEffort)) {
-    progress(
-      `Error: --thinking-effort must be one of: ${VALID_THINKING_EFFORTS.join(', ')}. Got "${thinkingEffort}"`,
-      false,
-    );
-    process.exitCode = 1;
-    return undefined;
-  }
-
-  if (thinkingEffort !== undefined && !supportsThinkingEffort(model)) {
-    progress(
-      `Error: --thinking-effort is not supported for model "${model}". Use Thinking or Pro models.`,
-      false,
-    );
+  const effortError = validateThinkingEffort(thinkingEffort, model);
+  if (effortError !== undefined) {
+    progress(`Error: ${effortError}`, false);
     process.exitCode = 1;
     return undefined;
   }
