@@ -95,7 +95,7 @@ export const askCommand = defineCommand({
       if (format === 'text') {
         text(result.text);
       } else {
-        json(result.text, { partial: !result.completed, model });
+        json(result.text, { partial: !result.completed, model, timeoutSec });
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
