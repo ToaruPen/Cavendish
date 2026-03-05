@@ -1,3 +1,6 @@
+import { isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import { extractFileArgs, findMissingFile } from '../src/commands/ask.js';
@@ -25,9 +28,10 @@ describe('extractFileArgs()', () => {
     expect(result[1]).toBe('/home/user/b.ts');
   });
 
-  it('ignores --file at end of argv (no value)', () => {
-    const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file']);
-    expect(result).toEqual([]);
+  it('throws when --file is at end of argv (no value)', () => {
+    expect(() =>
+      extractFileArgs(['node', 'index.mjs', 'ask', '--file']),
+    ).toThrow('--file requires a file path');
   });
 
   it('stops parsing at -- (end-of-options)', () => {
@@ -44,18 +48,30 @@ describe('extractFileArgs()', () => {
     ).toThrow('--file requires a file path');
   });
 
+  it('extracts --file= (equals) form', () => {
+    const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file=/home/user/a.ts', 'hello']);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe('/home/user/a.ts');
+  });
+
+  it('throws when --file= has empty value', () => {
+    expect(() =>
+      extractFileArgs(['node', 'index.mjs', 'ask', '--file=']),
+    ).toThrow('--file requires a file path');
+  });
+
   it('resolves relative paths to absolute', () => {
     const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file', './src/index.ts']);
     expect(result).toHaveLength(1);
-    // Should be an absolute path
-    expect(result[0]).toMatch(/^\//);
+    expect(isAbsolute(result[0])).toBe(true);
     expect(result[0]).toContain('src/index.ts');
   });
 });
 
 describe('findMissingFile()', () => {
   it('returns undefined when all files exist', () => {
-    expect(findMissingFile([__filename])).toBeUndefined();
+    const thisFile = fileURLToPath(import.meta.url);
+    expect(findMissingFile([thisFile])).toBeUndefined();
   });
 
   it('returns the first missing file path', () => {
