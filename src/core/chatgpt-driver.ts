@@ -9,8 +9,6 @@ type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
-/** Max time to wait for stop-button after assistant message appears. */
-const STOP_BUTTON_ATTACH_CAP_MS = 30_000;
 
 export interface WaitForResponseOptions {
   /** Timeout in milliseconds (default: 2_400_000). */
@@ -201,26 +199,19 @@ export class ChatGPTDriver {
       if (stopButtonAppeared === 'message') {
         // Assistant message appeared before stop button — common with Pro
         // (thinking phase creates the message node before streaming begins).
-        // Cap the wait so a missing stop button (UI variant, selector drift)
-        // doesn't block for the full timeout (up to 40 min).
-        const attachCap = Math.min(
-          STOP_BUTTON_ATTACH_CAP_MS,
-          Math.max(deadline - Date.now(), 0),
-        );
-        if (attachCap <= 0) {
+        // Use the full remaining timeout so long-running thinking phases
+        // are not incorrectly cut short.
+        const remainingForAttach = Math.max(deadline - Date.now(), 0);
+        if (remainingForAttach <= 0) {
           return false;
         }
         try {
-          await stopBtn.waitFor({ state: 'attached', timeout: attachCap });
+          await stopBtn.waitFor({ state: 'attached', timeout: remainingForAttach });
         } catch (error: unknown) {
           if (!isTimeoutError(error)) {
             throw error;
           }
-          // Stop button did not appear within cap — partial.
-          progress(
-            `Stop button not detected within ${String(STOP_BUTTON_ATTACH_CAP_MS)}ms after assistant message`,
-            quiet,
-          );
+          // Stop button never appeared within the overall timeout — partial.
           return false;
         }
       }
