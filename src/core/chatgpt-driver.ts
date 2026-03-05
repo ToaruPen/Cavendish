@@ -254,6 +254,7 @@ export class ChatGPTDriver {
     timeout: number,
   ): Promise<StopButtonResult> {
     const deadline = Date.now() + timeout;
+    const race = { settled: false };
 
     // Start listening for the stop button (non-blocking)
     const stopPromise = stopBtn
@@ -266,9 +267,10 @@ export class ChatGPTDriver {
         throw error;
       });
 
-    // Poll for a new assistant message in parallel
+    // Poll for a new assistant message in parallel.
+    // Checks `race.settled` so it stops promptly when the other promise wins.
     const messagePromise = (async (): Promise<StopButtonResult> => {
-      while (Date.now() < deadline) {
+      while (!race.settled && Date.now() < deadline) {
         const count = await this.page
           .locator(SELECTORS.ASSISTANT_MESSAGE)
           .count();
@@ -280,7 +282,9 @@ export class ChatGPTDriver {
       return 'timeout';
     })();
 
-    return Promise.race([stopPromise, messagePromise]);
+    const result = await Promise.race([stopPromise, messagePromise]);
+    race.settled = true;
+    return result;
   }
 
   /**
