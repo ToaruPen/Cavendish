@@ -1,4 +1,4 @@
-import { existsSync, fstatSync, readFileSync } from 'node:fs';
+import { existsSync, fstatSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
@@ -93,11 +93,11 @@ export function extractFileArgs(argv: string[]): string[] {
 }
 
 /**
- * Validate that all file paths exist. Returns the first missing path,
- * or undefined if all exist.
+ * Validate that all file paths exist and are regular files.
+ * Returns the first invalid path, or undefined if all are valid.
  */
 export function findMissingFile(filePaths: string[]): string | undefined {
-  return filePaths.find((p) => !existsSync(p));
+  return filePaths.find((p) => !existsSync(p) || !statSync(p).isFile());
 }
 
 /**
@@ -182,7 +182,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const missingFile = findMissingFile(filePaths);
   if (missingFile !== undefined) {
-    progress(`Error: file not found: ${missingFile}`, false);
+    progress(`Error: file not found or not a regular file: ${missingFile}`, false);
     process.exitCode = 1;
     return undefined;
   }

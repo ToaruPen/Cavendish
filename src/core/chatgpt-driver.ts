@@ -147,6 +147,12 @@ export class ChatGPTDriver {
     const pill = this.page.locator(SELECTORS.THINKING_EFFORT_PILL);
     await pill.click();
 
+    // Wait for the effort menu to render before probing labels.
+    await this.page
+      .locator(SELECTORS.THINKING_EFFORT_MENUITEM)
+      .first()
+      .waitFor({ state: 'visible' });
+
     const menuItem = await this.findMenuItemByLabels(candidates);
     await menuItem.click();
 
