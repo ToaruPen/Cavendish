@@ -7,6 +7,28 @@ import { progress } from './output-handler.js';
 
 type StopButtonResult = 'attached' | 'message' | 'timeout';
 
+export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
+
+const THINKING_EFFORT_LEVELS: readonly ThinkingEffortLevel[] = [
+  'light', 'standard', 'extended', 'deep',
+] as const;
+
+/** Map English level names to Japanese UI labels used by ChatGPT. */
+const EFFORT_LABEL_MAP: Record<ThinkingEffortLevel, string> = {
+  light: 'ライト',
+  standard: '標準',
+  extended: '拡張',
+  deep: '深い',
+};
+
+type ThinkingModelCategory = 'thinking' | 'pro';
+
+/** Valid effort levels per model category. */
+const MODEL_EFFORT_LEVELS: Record<ThinkingModelCategory, readonly ThinkingEffortLevel[]> = {
+  thinking: THINKING_EFFORT_LEVELS,
+  pro: ['standard', 'extended'],
+};
+
 const DEFAULT_TIMEOUT_MS = 2_400_000;
 const POLL_INTERVAL_MS = 200;
 
@@ -94,6 +116,45 @@ export class ChatGPTDriver {
    */
   async getAssistantMessageCount(): Promise<number> {
     return this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
+  }
+
+  /**
+   * Set the thinking effort level in the ChatGPT composer.
+   * Clicks the thinking effort pill and selects the desired level from the dropdown.
+   */
+  async setThinkingEffort(
+    level: ThinkingEffortLevel,
+    model: string,
+    quiet = false,
+  ): Promise<void> {
+    const category = resolveModelCategory(model);
+    if (category === undefined) {
+      throw new Error(
+        `Model "${model}" does not support --thinking-effort. Only Thinking and Pro models are supported.`,
+      );
+    }
+
+    const allowedLevels = MODEL_EFFORT_LEVELS[category];
+    if (!allowedLevels.includes(level)) {
+      throw new Error(
+        `Thinking effort "${level}" is not valid for ${category} models. Valid levels: ${allowedLevels.join(', ')}`,
+      );
+    }
+
+    const label = EFFORT_LABEL_MAP[level];
+    progress(`Setting thinking effort: ${level} (${label})`, quiet);
+
+    const pill = this.page.locator(SELECTORS.THINKING_EFFORT_PILL);
+    await pill.click();
+
+    const menuItem = this.page
+      .locator(SELECTORS.THINKING_EFFORT_MENUITEM)
+      .filter({ hasText: label });
+
+    await menuItem.waitFor({ state: 'visible', timeout: 5000 });
+    await menuItem.click();
+
+    progress(`Thinking effort set to: ${level}`, quiet);
   }
 
   /**
@@ -348,4 +409,15 @@ function delay(ms: number): Promise<void> {
 
 function isTimeoutError(error: unknown): boolean {
   return error instanceof errors.TimeoutError;
+}
+
+/**
+ * Determine the model category for thinking effort validation.
+ * Returns undefined if the model does not support thinking effort.
+ */
+function resolveModelCategory(model: string): ThinkingModelCategory | undefined {
+  const lower = model.toLowerCase();
+  if (lower.includes('thinking')) {return 'thinking';}
+  if (lower.includes('pro')) {return 'pro';}
+  return undefined;
 }

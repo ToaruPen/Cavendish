@@ -4,8 +4,12 @@ import { resolve } from 'node:path';
 import { defineCommand } from 'citty';
 
 import { BrowserManager } from '../core/browser-manager.js';
-import { ChatGPTDriver } from '../core/chatgpt-driver.js';
+import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
 import { json, progress, text } from '../core/output-handler.js';
+
+const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
+  'light', 'standard', 'extended', 'deep',
+];
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -82,6 +86,80 @@ function resolveTimeoutSec(
   return model.toLowerCase().includes('pro') ? PRO_TIMEOUT_SEC : DEFAULT_TIMEOUT_SEC;
 }
 
+interface ValidatedArgs {
+  quiet: boolean;
+  model: string;
+  timeoutMs: number;
+  timeoutSec: number;
+  format: 'json' | 'text';
+  filePaths: string[];
+  thinkingEffort: ThinkingEffortLevel | undefined;
+  prompt: string;
+}
+
+/**
+ * Parse and validate all CLI arguments. Returns undefined on validation failure
+ * (exitCode is set and error is logged).
+ */
+function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
+  const quiet = args.quiet === true;
+  const model = args.model as string;
+  const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
+
+  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+    progress(`Error: --timeout must be a positive number, got "${String(args.timeout)}"`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  if (args.format !== 'json' && args.format !== 'text') {
+    progress(`Error: --format must be "json" or "text", got "${String(args.format)}"`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  let filePaths: string[];
+  try {
+    filePaths = extractFileArgs(process.argv);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Error: ${detail}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  const missingFile = findMissingFile(filePaths);
+  if (missingFile !== undefined) {
+    progress(`Error: file not found: ${missingFile}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
+  if (thinkingEffort !== undefined && !VALID_THINKING_EFFORTS.includes(thinkingEffort)) {
+    progress(
+      `Error: --thinking-effort must be one of: ${VALID_THINKING_EFFORTS.join(', ')}. Got "${thinkingEffort}"`,
+      false,
+    );
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  const stdinData = readStdin();
+  const prompt = buildPrompt(args.prompt as string, stdinData);
+
+  return {
+    quiet,
+    model,
+    timeoutMs: timeoutSec * 1000,
+    timeoutSec,
+    format: args.format,
+    filePaths,
+    thinkingEffort,
+    prompt,
+  };
+}
+
 /**
  * `cavendish ask` — send a prompt to ChatGPT and return the response.
  */
@@ -118,44 +196,19 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
     },
+    thinkingEffort: {
+      type: 'string',
+      description: 'Thinking effort level: light, standard, extended, deep',
+    },
   },
   async run({ args }): Promise<void> {
-    const quiet = args.quiet === true;
-    const model = args.model;
-    const timeoutSec = resolveTimeoutSec(args.timeout, model);
+    const validated = validateArgs(args);
+    if (validated === undefined) {return;}
 
-    if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-      progress(`Error: --timeout must be a positive number, got "${String(args.timeout)}"`, false);
-      process.exitCode = 1;
-      return;
-    }
-    const timeoutMs = timeoutSec * 1000;
-
-    if (args.format !== 'json' && args.format !== 'text') {
-      progress(`Error: --format must be "json" or "text", got "${args.format}"`, false);
-      process.exitCode = 1;
-      return;
-    }
-    const format = args.format;
-
-    let filePaths: string[];
-    try {
-      filePaths = extractFileArgs(process.argv);
-    } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
-      progress(`Error: ${detail}`, false);
-      process.exitCode = 1;
-      return;
-    }
-    const missingFile = findMissingFile(filePaths);
-    if (missingFile !== undefined) {
-      progress(`Error: file not found: ${missingFile}`, false);
-      process.exitCode = 1;
-      return;
-    }
-
-    const stdinData = readStdin();
-    const prompt = buildPrompt(args.prompt, stdinData);
+    const {
+      quiet, model, timeoutMs, timeoutSec, format,
+      filePaths, thinkingEffort, prompt,
+    } = validated;
 
     const browser = new BrowserManager();
 
@@ -164,6 +217,10 @@ export const askCommand = defineCommand({
       const driver = new ChatGPTDriver(page);
 
       await driver.selectModel(model, quiet);
+
+      if (thinkingEffort !== undefined) {
+        await driver.setThinkingEffort(thinkingEffort, model, quiet);
+      }
 
       if (filePaths.length > 0) {
         await driver.attachFiles(filePaths, quiet);
