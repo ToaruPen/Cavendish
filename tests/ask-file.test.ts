@@ -81,4 +81,9 @@ describe('findMissingFile()', () => {
   it('returns undefined for empty array', () => {
     expect(findMissingFile([])).toBeUndefined();
   });
+
+  it('rejects directories', () => {
+    const dir = fileURLToPath(new URL('.', import.meta.url));
+    expect(findMissingFile([dir])).toBe(dir);
+  });
 });
