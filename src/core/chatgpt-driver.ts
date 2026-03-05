@@ -13,12 +13,12 @@ const THINKING_EFFORT_LEVELS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
 ] as const;
 
-/** Map English level names to Japanese UI labels used by ChatGPT. */
-const EFFORT_LABEL_MAP: Record<ThinkingEffortLevel, string> = {
-  light: 'ライト',
-  standard: '標準',
-  extended: '拡張',
-  deep: '深い',
+/** Candidate UI labels per effort level (Japanese + English). */
+const EFFORT_LABEL_CANDIDATES: Record<ThinkingEffortLevel, readonly string[]> = {
+  light: ['ライト', 'Light'],
+  standard: ['標準', 'Standard'],
+  extended: ['拡張', 'Extended'],
+  deep: ['深い', 'Deep'],
 };
 
 type ThinkingModelCategory = 'thinking' | 'pro';
@@ -141,17 +141,13 @@ export class ChatGPTDriver {
       );
     }
 
-    const label = EFFORT_LABEL_MAP[level];
-    progress(`Setting thinking effort: ${level} (${label})`, quiet);
+    const candidates = EFFORT_LABEL_CANDIDATES[level];
+    progress(`Setting thinking effort: ${level}`, quiet);
 
     const pill = this.page.locator(SELECTORS.THINKING_EFFORT_PILL);
     await pill.click();
 
-    const menuItem = this.page
-      .locator(SELECTORS.THINKING_EFFORT_MENUITEM)
-      .filter({ hasText: label });
-
-    await menuItem.waitFor({ state: 'visible', timeout: 5000 });
+    const menuItem = await this.findMenuItemByLabels(candidates);
     await menuItem.click();
 
     progress(`Thinking effort set to: ${level}`, quiet);
@@ -218,6 +214,26 @@ export class ChatGPTDriver {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  /**
+   * Find a visible menuitemradio matching any of the given label candidates.
+   * Tries each candidate in order and returns the first visible match.
+   * Throws if none of the candidates match a visible menu item.
+   */
+  private async findMenuItemByLabels(candidates: readonly string[]): Promise<Locator> {
+    for (const label of candidates) {
+      const item = this.page
+        .locator(SELECTORS.THINKING_EFFORT_MENUITEM)
+        .filter({ hasText: label });
+      const visible = await item.isVisible().catch((): boolean => false);
+      if (visible) {
+        return item;
+      }
+    }
+    throw new Error(
+      `Thinking effort menu item not found. Tried labels: ${candidates.join(', ')}`,
+    );
+  }
 
   /**
    * Get the text of the latest assistant message that appeared after
