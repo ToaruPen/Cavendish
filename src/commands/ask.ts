@@ -11,6 +11,14 @@ const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
 ];
 
+/**
+ * Check whether a model name supports the --thinking-effort option.
+ */
+function supportsThinkingEffort(model: string): boolean {
+  const lower = model.toLowerCase();
+  return lower.includes('thinking') || lower.includes('pro');
+}
+
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
 const PRO_TIMEOUT_SEC = 2400;
@@ -27,8 +35,9 @@ export function readStdin(): string {
     return readFileSync(0, 'utf-8').trim();
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    progress(`Warning: failed to read stdin: ${detail}`, false);
-    return '';
+    throw new Error(
+      `Failed to read piped stdin: ${detail}. Re-run without pipe or fix stdin source.`,
+    );
   }
 }
 
@@ -52,7 +61,16 @@ export function extractFileArgs(argv: string[]): string[] {
   const files: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--') {break;} // respect end-of-options
-    if (argv[i] === '--file' && i + 1 < argv.length) {
+    if (argv[i].startsWith('--file=')) {
+      const value = argv[i].slice('--file='.length);
+      if (value === '') {
+        throw new Error('--file requires a file path');
+      }
+      files.push(resolve(value));
+    } else if (argv[i] === '--file') {
+      if (i + 1 >= argv.length) {
+        throw new Error('--file requires a file path');
+      }
       const value = argv[i + 1];
       if (value.startsWith('-')) {
         throw new Error(`--file requires a file path, got "${value}"`);
@@ -145,7 +163,24 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
-  const stdinData = readStdin();
+  if (thinkingEffort !== undefined && !supportsThinkingEffort(model)) {
+    progress(
+      `Error: --thinking-effort is not supported for model "${model}". Use Thinking or Pro models.`,
+      false,
+    );
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  let stdinData: string;
+  try {
+    stdinData = readStdin();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Error: ${detail}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
   const prompt = buildPrompt(args.prompt as string, stdinData);
 
   return {
