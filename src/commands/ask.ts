@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { defineCommand } from 'citty';
 
 import { BrowserManager } from '../core/browser-manager.js';
@@ -7,6 +9,34 @@ import { json, progress, text } from '../core/output-handler.js';
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
 const PRO_TIMEOUT_SEC = 2400;
+
+/**
+ * Read piped stdin when running in a non-TTY context.
+ * Returns the trimmed input, or an empty string when stdin is a TTY.
+ */
+export function readStdin(): string {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+  try {
+    return readFileSync(0, 'utf-8').trim();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Warning: failed to read stdin: ${detail}`, false);
+    return '';
+  }
+}
+
+/**
+ * Combine optional stdin data with the user-supplied prompt.
+ * When stdin data is present, it is prepended with a blank-line separator.
+ */
+export function buildPrompt(prompt: string, stdinData: string): string {
+  if (stdinData === '') {
+    return prompt;
+  }
+  return `${stdinData}\n\n${prompt}`;
+}
 
 /**
  * Resolve the effective timeout: use explicit --timeout if provided,
@@ -74,6 +104,9 @@ export const askCommand = defineCommand({
     }
     const format = args.format;
 
+    const stdinData = readStdin();
+    const prompt = buildPrompt(args.prompt, stdinData);
+
     const browser = new BrowserManager();
 
     try {
@@ -84,7 +117,7 @@ export const askCommand = defineCommand({
 
       progress('Sending message...', quiet);
       const initialMsgCount = await driver.getAssistantMessageCount();
-      await driver.sendMessage(args.prompt);
+      await driver.sendMessage(prompt);
 
       const result = await driver.waitForResponse({
         timeout: timeoutMs,
