@@ -1,4 +1,5 @@
-import { fstatSync, readFileSync } from 'node:fs';
+import { existsSync, fstatSync, readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 
@@ -44,6 +45,55 @@ export function buildPrompt(prompt: string, stdinData: string): string {
 }
 
 /**
+ * Extract --file arguments from process.argv.
+ * citty does not support array-type args, so we parse manually.
+ * Supports both --file <path> and --file=<path> forms.
+ * Returns resolved absolute paths.
+ */
+export function extractFileArgs(argv: string[]): string[] {
+  const files: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--') {break;} // respect end-of-options
+    if (argv[i].startsWith('--file=')) {
+      const value = argv[i].slice('--file='.length);
+      if (value === '') {
+        throw new Error('--file requires a file path');
+      }
+      files.push(resolve(value));
+    } else if (argv[i] === '--file') {
+      if (i + 1 >= argv.length) {
+        throw new Error('--file requires a file path');
+      }
+      const value = argv[i + 1];
+      if (value.startsWith('-')) {
+        throw new Error(`--file requires a file path, got "${value}"`);
+      }
+      files.push(resolve(value));
+      i++; // skip the value
+    }
+  }
+  return files;
+}
+
+/**
+ * Validate that all file paths exist and are regular files.
+ * Returns the first invalid path, or undefined if all are valid.
+ */
+export function findMissingFile(filePaths: string[]): string | undefined {
+  return filePaths.find((p) => {
+    if (!existsSync(p)) {return true;}
+    try {
+      return !statSync(p).isFile();
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {return true;}
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to stat "${p}": ${detail}`);
+    }
+  });
+}
+
+/**
  * Resolve the effective timeout: use explicit --timeout if provided,
  * otherwise pick a model-appropriate default.
  */
@@ -55,6 +105,84 @@ function resolveTimeoutSec(
     return Number(explicitTimeout);
   }
   return model.toLowerCase().includes('pro') ? PRO_TIMEOUT_SEC : DEFAULT_TIMEOUT_SEC;
+}
+
+interface ValidatedArgs {
+  quiet: boolean;
+  model: string;
+  timeoutMs: number;
+  timeoutSec: number;
+  format: 'json' | 'text';
+  filePaths: string[];
+  prompt: string;
+}
+
+/**
+ * Parse and validate all CLI arguments. Returns undefined on validation failure
+ * (exitCode is set and error is logged).
+ */
+function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
+  const quiet = args.quiet === true;
+  const model = args.model as string;
+  const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
+
+  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+    progress(`Error: --timeout must be a positive number, got "${String(args.timeout)}"`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  if (args.format !== 'json' && args.format !== 'text') {
+    progress(`Error: --format must be "json" or "text", got "${String(args.format)}"`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  let filePaths: string[];
+  try {
+    filePaths = extractFileArgs(process.argv);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Error: ${detail}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  let missingFile: string | undefined;
+  try {
+    missingFile = findMissingFile(filePaths);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Error: ${detail}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+  if (missingFile !== undefined) {
+    progress(`Error: file not found or not a regular file: ${missingFile}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  let stdinData: string;
+  try {
+    stdinData = readStdin();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    progress(`Error: ${detail}`, false);
+    process.exitCode = 1;
+    return undefined;
+  }
+  const prompt = buildPrompt(args.prompt as string, stdinData);
+
+  return {
+    quiet,
+    model,
+    timeoutMs: timeoutSec * 1000,
+    timeoutSec,
+    format: args.format,
+    filePaths,
+    prompt,
+  };
 }
 
 /**
@@ -89,36 +217,19 @@ export const askCommand = defineCommand({
       description: 'ChatGPT model to use (default: Pro)',
       default: DEFAULT_MODEL,
     },
+    file: {
+      type: 'string',
+      description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
+    },
   },
   async run({ args }): Promise<void> {
-    const quiet = args.quiet === true;
-    const model = args.model;
-    const timeoutSec = resolveTimeoutSec(args.timeout, model);
+    const validated = validateArgs(args);
+    if (validated === undefined) {return;}
 
-    if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-      progress(`Error: --timeout must be a positive number, got "${String(args.timeout)}"`, false);
-      process.exitCode = 1;
-      return;
-    }
-    const timeoutMs = timeoutSec * 1000;
-
-    if (args.format !== 'json' && args.format !== 'text') {
-      progress(`Error: --format must be "json" or "text", got "${args.format}"`, false);
-      process.exitCode = 1;
-      return;
-    }
-    const format = args.format;
-
-    let stdinData: string;
-    try {
-      stdinData = readStdin();
-    } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
-      progress(`Error: ${detail}`, false);
-      process.exitCode = 1;
-      return;
-    }
-    const prompt = buildPrompt(args.prompt, stdinData);
+    const {
+      quiet, model, timeoutMs, timeoutSec, format,
+      filePaths, prompt,
+    } = validated;
 
     const browser = new BrowserManager();
 
@@ -127,6 +238,10 @@ export const askCommand = defineCommand({
       const driver = new ChatGPTDriver(page);
 
       await driver.selectModel(model, quiet);
+
+      if (filePaths.length > 0) {
+        await driver.attachFiles(filePaths, quiet);
+      }
 
       progress('Sending message...', quiet);
       const initialMsgCount = await driver.getAssistantMessageCount();
