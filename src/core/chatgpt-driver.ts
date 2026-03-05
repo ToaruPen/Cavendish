@@ -203,10 +203,12 @@ export class ChatGPTDriver {
         // In ChatGPT, this node is created at the START of streaming, so the
         // response is likely still being generated. Give the stop button a
         // grace period to appear; if it does, fall through to Phase 2.
-        const grace = Math.min(
-          STOP_BUTTON_GRACE_MS,
-          Math.max(deadline - Date.now(), 0),
-        );
+        const remainingBeforeGrace = deadline - Date.now();
+        if (remainingBeforeGrace <= 0) {
+          // Overall deadline already exceeded — partial response.
+          return false;
+        }
+        const grace = Math.min(STOP_BUTTON_GRACE_MS, remainingBeforeGrace);
         try {
           await stopBtn.waitFor({ state: 'attached', timeout: grace });
           // Stop button appeared — fall through to Phase 2.
@@ -214,8 +216,9 @@ export class ChatGPTDriver {
           if (!isTimeoutError(error)) {
             throw error;
           }
-          // Stop button never appeared — genuinely fast/cached response.
-          return true;
+          // Stop button never appeared within grace period.
+          // If deadline passed, this is a timeout; otherwise a fast/cached response.
+          return Date.now() < deadline;
         }
       }
 
