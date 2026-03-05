@@ -12,14 +12,14 @@ const PRO_TIMEOUT_SEC = 2400;
 
 /**
  * Read piped stdin when running in a non-TTY context.
- * Returns the trimmed input, or an empty string when stdin is a TTY.
+ * Returns the raw input, or an empty string when stdin is a TTY.
  */
 export function readStdin(): string {
   if (process.stdin.isTTY) {
     return '';
   }
   try {
-    return readFileSync(0, 'utf-8').trim();
+    return readFileSync(0, 'utf-8');
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
@@ -33,7 +33,7 @@ export function readStdin(): string {
  * When stdin data is present, it is prepended with a blank-line separator.
  */
 export function buildPrompt(prompt: string, stdinData: string): string {
-  if (stdinData === '') {
+  if (stdinData.length === 0) {
     return prompt;
   }
   return `${stdinData}\n\n${prompt}`;
