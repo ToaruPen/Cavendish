@@ -46,7 +46,7 @@ npm run test:watch  # Watch mode
 
 ### Live Chrome Test (mandatory per feature)
 
-Every feature addition MUST include a live test against real Chrome + ChatGPT (`npm run build` first). Test the new/changed functionality end-to-end and confirm it works before marking the verify step complete.
+Every feature addition MUST include a live test against real Chrome + ChatGPT (`npm run build` first). Test the new/changed functionality end-to-end and confirm it works before marking the verify step complete. See @docs/live-test.md for setup steps.
 
 ## Agent Behavior
 
@@ -84,4 +84,5 @@ Do NOT skip steps or reorder. Codex review happens after lint/typecheck/test pas
 ## References
 
 - Architecture & module design: @docs/plan.md
+- Live Chrome test setup: @docs/live-test.md
 - Review checklist: @.github/copilot-instructions.md
