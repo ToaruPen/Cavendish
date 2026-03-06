@@ -79,6 +79,11 @@ export class ChatGPTDriver {
    * Navigate to a specific chat by its ID.
    */
   async navigateToChat(chatId: string, quiet = false): Promise<void> {
+    if (!/^[\w-]+$/.test(chatId)) {
+      throw new Error(
+        `Invalid chatId: "${chatId}". Must be non-empty and contain only alphanumeric characters, hyphens, or underscores.`,
+      );
+    }
     progress(`Navigating to chat: ${chatId}`, quiet);
     await this.page.goto(`${CHATGPT_BASE_URL}/c/${chatId}`, {
       waitUntil: 'domcontentloaded',

@@ -325,8 +325,8 @@ export const askCommand = defineCommand({
         await driver.navigateToChat(chatId, quiet);
       } else if (continueChat) {
         // --continue without --chat: verify the current page is a chat
-        const url = page.url();
-        if (!url.includes('/c/')) {
+        const { pathname } = new URL(page.url());
+        if (!pathname.startsWith('/c/')) {
           throw new Error(
             'Current page is not a chat. Use --chat <id> to specify which chat to continue.',
           );
