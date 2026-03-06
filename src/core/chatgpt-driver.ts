@@ -202,16 +202,21 @@ export class ChatGPTDriver {
    * On a project page, ChatGPT's sidebar shows only that project's chats,
    * so we can safely delegate to getConversationList().
    */
-  async getProjectConversationList(): Promise<ConversationItem[]> {
+  async getProjectConversationList(quiet = false): Promise<ConversationItem[]> {
     // Wait for sidebar conversation links to load after project page navigation.
-    // TimeoutError is expected when the project has no chats.
+    // TimeoutError is expected when the project has no chats, but could also
+    // indicate a slow sidebar render — warn so automation can distinguish.
     try {
       await this.page.locator(SELECTORS.CONVERSATION_LINK).first().waitFor({
         state: 'attached',
-        timeout: 5000,
+        timeout: 10_000,
       });
     } catch (error: unknown) {
       if (isTimeoutError(error)) {
+        progress(
+          'No conversation links found in sidebar (timeout). The project may have no chats, or the sidebar may be slow to load.',
+          quiet,
+        );
         return [];
       }
       throw error;

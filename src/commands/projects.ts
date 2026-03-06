@@ -46,7 +46,7 @@ export const projectsCommand = defineCommand({
       if (projectName !== undefined && showChats) {
         await driver.navigateToProject(projectName, quiet);
         progress('Fetching project conversations...', quiet);
-        const conversations = await driver.getProjectConversationList();
+        const conversations = await driver.getProjectConversationList(quiet);
         progress(`Found ${String(conversations.length)} conversation(s)`, quiet);
         outputList(conversations, format);
       } else {
