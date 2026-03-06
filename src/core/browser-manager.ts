@@ -174,9 +174,7 @@ export class BrowserManager {
           quiet,
         );
       }
-      if (attempt < CDP_MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, CDP_RETRY_INTERVAL_MS));
-      }
+      await new Promise((r) => setTimeout(r, CDP_RETRY_INTERVAL_MS));
     }
     const portHint =
       process.platform === 'win32'
