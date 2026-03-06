@@ -193,6 +193,14 @@ function validateChatOptions(
   const chatId = args.chat as string | undefined;
   const project = args.project as string | undefined;
 
+  if (chatId !== undefined && chatId === '') {
+    fail('--chat cannot be empty. Use: --chat <id>');
+    return undefined;
+  }
+  if (project !== undefined && project === '') {
+    fail('--project cannot be empty. Use: --project <name>');
+    return undefined;
+  }
   if (chatId !== undefined && !continueChat) {
     fail('--chat requires --continue. Use: cavendish ask --continue --chat <id> "prompt"');
     return undefined;
