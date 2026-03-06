@@ -28,11 +28,15 @@ if [ -n "$SKIP_REASON" ]; then
 fi
 
 # Check each step
+LIVE_TEST=$(jq -r '.steps.live_test_done // false' "$WORKFLOW_STATE")
 SIMPLIFY=$(jq -r '.steps.simplify_done' "$WORKFLOW_STATE")
 QUALITY=$(jq -r '.steps.quality_gate_done' "$WORKFLOW_STATE")
 CODEX=$(jq -r '.steps.codex_review_done' "$WORKFLOW_STATE")
 
 MISSING=()
+if [ "$LIVE_TEST" != "true" ]; then
+  MISSING+=("live test (run live Chrome test, then: jq '.steps.live_test_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state)")
+fi
 if [ "$SIMPLIFY" != "true" ]; then
   MISSING+=("simplify (run /simplify, then: jq '.steps.simplify_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state)")
 fi

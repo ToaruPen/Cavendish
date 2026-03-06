@@ -4,7 +4,7 @@ Execute the following command to create the workflow state file:
 
 ```bash
 cat > .claude/.workflow-state << 'EOF'
-{"version":1,"started_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","steps":{"simplify_done":false,"quality_gate_done":false,"codex_review_done":false},"skip_reason":null}
+{"version":1,"started_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","steps":{"live_test_done":false,"simplify_done":false,"quality_gate_done":false,"codex_review_done":false},"skip_reason":null}
 EOF
 ```
 
@@ -15,8 +15,9 @@ jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.started_at = $ts' .claude/.workfl
 ```
 
 Confirm to the user that the workflow gate is now active. Commits and pushes will be blocked until:
-1. `/simplify` is run (then manually mark `simplify_done`)
-2. `npm run lint && npm run typecheck && npm test` passes (auto-tracked)
-3. `/codex-review` is run (then manually mark `codex_review_done`)
+1. Live Chrome test passes (then manually mark `live_test_done`)
+2. `/simplify` is run (then manually mark `simplify_done`)
+3. `npm run lint && npm run typecheck && npm test` passes (auto-tracked)
+4. `/codex-review` is run (then manually mark `codex_review_done`)
 
 The user can bypass with `/workflow-skip` if needed.

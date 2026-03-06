@@ -62,9 +62,14 @@ Every feature/fix follows this sequence:
 2. **Create worktree** — isolate work from main
 3. **Activate workflow gate** — run `/workflow-start` to enable commit/push gating
 4. **Implement** — follow the issue scope, no drive-by fixes
-5. **Verify**
+5. **Verify (live test first)** — ALWAYS run live tests before reasoning about correctness
    - DOM-dependent code (ChatGPTDriver, BrowserManager): run the **Live Chrome Test** checklist (see Testing section)
    - DOM-independent code (OutputHandler, ConfigManager, utils): write and run vitest unit tests
+   - When responding to review comments: verify with live test BEFORE deciding to fix or skip
+   - Mark complete after verification:
+   ```bash
+   jq '.steps.live_test_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state
+   ```
 6. **Simplify** — run `/simplify` to clean up code, then mark complete:
    ```bash
    jq '.steps.simplify_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state
@@ -79,7 +84,7 @@ Every feature/fix follows this sequence:
 
 Do NOT skip steps or reorder. Codex review happens after lint/typecheck/test pass.
 
-**Workflow gate**: Steps 6-8 are enforced by a PreToolUse hook that blocks `git commit`/`git push` when `.claude/.workflow-state` exists and steps are incomplete. Use `/workflow-skip` to bypass with a reason. If `.workflow-state` does not exist, commits pass through freely (quick fix mode).
+**Workflow gate**: Steps 5-8 are enforced by a PreToolUse hook that blocks `git commit`/`git push` when `.claude/.workflow-state` exists and steps are incomplete. Use `/workflow-skip` to bypass with a reason. If `.workflow-state` does not exist, commits pass through freely (quick fix mode).
 
 ## References
 
