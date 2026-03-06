@@ -31,6 +31,10 @@ export const SELECTORS = {
   /** Plus button that opens the file attachment menu */
   FILE_ADD_BUTTON: '[data-testid="composer-plus-btn"]',
 
+  /** File tile that appears in the composer after a file is attached.
+   *  Uses the Tailwind group name which is specific to file tiles. */
+  FILE_ATTACHMENT_TILE: '.group\\/file-tile',
+
   // ── Messages ─────────────────────────────────────────────
   /** All assistant response messages */
   ASSISTANT_MESSAGE: '[data-message-author-role="assistant"]',
