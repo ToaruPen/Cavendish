@@ -204,12 +204,19 @@ export class BrowserManager {
           '/usr/bin/chromium',
         );
         break;
-      case 'win32':
+      case 'win32': {
         candidates.push(
           'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
           'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
         );
+        const localAppData = process.env.LOCALAPPDATA;
+        if (localAppData) {
+          candidates.push(
+            join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          );
+        }
         break;
+      }
       default:
         throw new Error(`Unsupported platform: ${process.platform}`);
     }
