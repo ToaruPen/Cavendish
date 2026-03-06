@@ -90,6 +90,39 @@ export const SELECTORS = {
   // ── Projects ─────────────────────────────────────────────
   /** Links to projects in the sidebar */
   PROJECT_LINK: 'a[href*="/project"]',
+
+  /** Conversation links in the project main content area (href: /g/.../c/{id}) */
+  PROJECT_CONVERSATION_LINK: 'main a[href*="/c/"]',
+
+  /** Three-dot menu button on a project conversation item (in main content) */
+  PROJECT_CONVERSATION_MENU_BUTTON: '[data-testid="project-conversation-overflow-menu"] button',
+
+  /** "Move to project" option in the conversation context menu */
+  CONVERSATION_MOVE_TO_PROJECT_OPTION:
+    '[role="menuitem"]:has-text("プロジェクトに移動する"), [role="menuitem"]:has-text("Move to project")',
+
+  /** Project picker item in the move-to-project submenu.
+   *  Broad selector — always use with .filter({ hasText }) to scope to the target project.
+   *  The submenu has no unique container data-testid to scope against. */
+  PROJECT_PICKER_ITEM: '[role="menuitem"]',
+
+  /** Sidebar section toggle for projects (expands/collapses the project list) */
+  PROJECT_SECTION_TOGGLE:
+    'button:has-text("プロジェクト"), button:has-text("Projects")',
+
+  /** New project button in the sidebar (visible after expanding project section) */
+  NEW_PROJECT_BUTTON:
+    'button:has-text("プロジェクトを新規作成"), button:has-text("Create new project"), button:has-text("New project")',
+
+  /** Project creation modal container */
+  PROJECT_CREATE_MODAL: '[data-testid="modal-new-project-enhanced"]',
+
+  /** Project name input field in the create-project modal (scoped to modal) */
+  PROJECT_NAME_INPUT: '[data-testid="modal-new-project-enhanced"] input[type="text"]',
+
+  /** Create project confirm button in the modal (scoped to modal) */
+  PROJECT_CREATE_CONFIRM:
+    '[data-testid="modal-new-project-enhanced"] button:has-text("プロジェクトを作成する"), [data-testid="modal-new-project-enhanced"] button:has-text("Create project")',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
@@ -97,12 +130,38 @@ export type SelectorKey = keyof typeof SELECTORS;
 export const CHATGPT_BASE_URL = 'https://chatgpt.com';
 
 /**
- * Build a selector for a specific conversation link by ID.
- * Validates ID format to prevent CSS selector injection.
+ * Validate a conversation/chat ID to prevent CSS selector injection.
+ * Throws if the ID contains invalid characters.
+ */
+export function assertValidChatId(id: string): void {
+  if (!/^[\w-]+$/.test(id)) {
+    throw new Error(
+      `Invalid conversation ID format: "${id}". Only alphanumeric characters, hyphens, and underscores are allowed.`,
+    );
+  }
+}
+
+/**
+ * Build a selector for a specific conversation link by ID (sidebar, exact match).
  */
 export function conversationLinkById(id: string): string {
-  if (!/^[\w-]+$/.test(id)) {
-    throw new Error(`Invalid conversation ID format: "${id}". Only alphanumeric characters, hyphens, and underscores are allowed.`);
-  }
+  assertValidChatId(id);
   return `#history a[href="/c/${id}"]`;
+}
+
+/**
+ * Build a selector for a conversation link by ID using ends-with match.
+ * Works for both regular (/c/{id}) and project (/g/.../c/{id}) chat URLs in sidebar.
+ */
+export function conversationLinkByIdBroad(id: string): string {
+  assertValidChatId(id);
+  return `#history a[href$="/c/${id}"]`;
+}
+
+/**
+ * Build a selector for a project conversation link by ID in main content area.
+ */
+export function projectConversationLinkById(id: string): string {
+  assertValidChatId(id);
+  return `main a[href$="/c/${id}"]`;
 }

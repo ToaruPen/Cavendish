@@ -4,6 +4,7 @@ import { archiveCommand } from './commands/archive.js';
 import { askCommand } from './commands/ask.js';
 import { deleteCommand } from './commands/delete.js';
 import { listCommand } from './commands/list.js';
+import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
 import { readCommand } from './commands/read.js';
 
@@ -19,6 +20,7 @@ const main = defineCommand({
     ask: askCommand,
     delete: deleteCommand,
     list: listCommand,
+    move: moveCommand,
     projects: projectsCommand,
     read: readCommand,
   },

@@ -4,21 +4,25 @@ import { fail, outputList, progress, validateFormat } from '../core/output-handl
 import { withDriver } from '../core/with-driver.js';
 
 /**
- * `cavendish projects` — list projects or project chats.
+ * `cavendish projects` — list projects, project chats, or create a project.
  */
 export const projectsCommand = defineCommand({
   meta: {
     name: 'projects',
-    description: 'List ChatGPT projects or chats within a project',
+    description: 'List ChatGPT projects, chats within a project, or create a project',
   },
   args: {
     name: {
       type: 'string',
-      description: 'Project name to filter or navigate to',
+      description: 'Project name to filter, navigate to, or create',
     },
     chats: {
       type: 'boolean',
       description: 'List chats within the specified project (requires --name)',
+    },
+    create: {
+      type: 'boolean',
+      description: 'Create a new project (requires --name)',
     },
     quiet: {
       type: 'boolean',
@@ -36,14 +40,22 @@ export const projectsCommand = defineCommand({
     if (format === undefined) {return;}
     const projectName = args.name;
     const showChats = args.chats === true;
+    const createProject = args.create === true;
 
     if (showChats && projectName === undefined) {
       fail('--chats requires --name. Use: cavendish projects --name "Project" --chats');
       return;
     }
 
+    if (createProject && projectName === undefined) {
+      fail('--create requires --name. Use: cavendish projects --create --name "Project"');
+      return;
+    }
+
     await withDriver(quiet, async (driver) => {
-      if (projectName !== undefined && showChats) {
+      if (createProject && projectName !== undefined) {
+        await driver.createProject(projectName, quiet);
+      } else if (projectName !== undefined && showChats) {
         await driver.navigateToProject(projectName, quiet);
         progress('Fetching project conversations...', quiet);
         const conversations = await driver.getProjectConversationList(quiet);
