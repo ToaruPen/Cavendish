@@ -15,7 +15,6 @@ export async function withDriver(
   try {
     const page = await browser.getPage(quiet);
     const driver = new ChatGPTDriver(page);
-    await driver.waitForReady();
     await action(driver);
   } catch (error: unknown) {
     fail(errorMessage(error));

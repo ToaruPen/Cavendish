@@ -62,8 +62,8 @@ export const SELECTORS = {
   /** Sidebar history container (present once the sidebar has rendered) */
   SIDEBAR_HISTORY: '#history',
 
-  /** Links to existing conversations in the sidebar */
-  CONVERSATION_LINK: 'a[href^="/c/"]',
+  /** Links to existing conversations in the sidebar (scoped to #history) */
+  CONVERSATION_LINK: '#history a[href^="/c/"]',
 
   /** New chat button */
   NEW_CHAT_LINK: 'a[href="/"]',
@@ -100,5 +100,5 @@ export function conversationLinkById(id: string): string {
   if (!/^[\w-]+$/.test(id)) {
     throw new Error(`Invalid conversation ID format: "${id}". Only alphanumeric characters, hyphens, and underscores are allowed.`);
   }
-  return `a[href="/c/${id}"]`;
+  return `#history a[href="/c/${id}"]`;
 }
