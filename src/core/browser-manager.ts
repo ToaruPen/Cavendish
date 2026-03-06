@@ -1,3 +1,4 @@
+import { type ChildProcess, spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +15,9 @@ const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
 const CDP_PORT = 9222;
 const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
 
+const CDP_POLL_INTERVAL_MS = 500;
+const CDP_POLL_TIMEOUT_MS = 15_000;
+
 interface CdpEndpointData {
   port: number;
   savedAt: string;
@@ -29,14 +33,13 @@ interface CdpEndpointData {
  */
 export class BrowserManager {
   private browser: Browser | null = null;
-  private persistentContext: BrowserContext | null = null;
 
   /**
    * Get a Page navigated to chatgpt.com.
    * Connects to an existing Chrome or launches a new one.
    */
   async getPage(quiet = false): Promise<Page> {
-    if (!this.browser && !this.persistentContext) {
+    if (!this.browser) {
       await this.ensureConnected(quiet);
     }
 
@@ -59,7 +62,8 @@ export class BrowserManager {
   }
 
   /**
-   * Launch system Chrome with a persistent profile.
+   * Launch system Chrome as a detached process and connect via CDP.
+   * Chrome persists after cavendish exits so sessions survive.
    * Login sessions are stored in `~/.cavendish/chrome-profile`.
    */
   async launch(quiet = false): Promise<void> {
@@ -67,19 +71,24 @@ export class BrowserManager {
 
     mkdirSync(CHROME_PROFILE_DIR, { recursive: true });
 
-    const context = await chromium.launchPersistentContext(CHROME_PROFILE_DIR, {
-      channel: 'chrome',
-      headless: false,
-      args: [
-        `--remote-debugging-port=${String(CDP_PORT)}`,
-        '--remote-debugging-address=127.0.0.1',
-        // Suppress automation detection flags to avoid Cloudflare blocks
-        '--disable-blink-features=AutomationControlled',
-      ],
-      ignoreDefaultArgs: ['--enable-automation'],
-    });
+    const chromePath = this.findChromePath();
+    const args = [
+      `--remote-debugging-port=${String(CDP_PORT)}`,
+      '--remote-debugging-address=127.0.0.1',
+      `--user-data-dir=${CHROME_PROFILE_DIR}`,
+      '--disable-blink-features=AutomationControlled',
+      '--no-first-run',
+      CHATGPT_BASE_URL,
+    ];
 
-    this.persistentContext = context;
+    const child: ChildProcess = spawn(chromePath, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+
+    await this.waitForCdp();
+    await this.connect(quiet);
     this.saveCdpEndpoint();
     progress('Chrome launched', quiet);
   }
@@ -99,14 +108,10 @@ export class BrowserManager {
   }
 
   /**
-   * Close the Playwright connection (does NOT kill a CDP-connected Chrome).
-   * For launched Chrome, the process is terminated but the profile persists.
+   * Close the Playwright connection (does NOT kill Chrome).
+   * Chrome continues running as a detached process for future CDP reconnection.
    */
   async close(): Promise<void> {
-    if (this.persistentContext) {
-      await this.persistentContext.close();
-      this.persistentContext = null;
-    }
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
@@ -126,17 +131,49 @@ export class BrowserManager {
   }
 
   /**
-   * Get a usable BrowserContext from either connection type.
+   * Get a usable BrowserContext from the CDP connection.
    */
   private getContext(): BrowserContext | null {
-    if (this.persistentContext) {
-      return this.persistentContext;
-    }
     if (this.browser) {
       const contexts = this.browser.contexts();
       return contexts[0] ?? null;
     }
     return null;
+  }
+
+  /**
+   * Poll the CDP endpoint until Chrome is ready to accept connections.
+   */
+  private async waitForCdp(): Promise<void> {
+    const deadline = Date.now() + CDP_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      try {
+        const res = await fetch(`${CDP_BASE_URL}/json/version`);
+        if (res.ok) {return;}
+      } catch {
+        // Chrome not ready yet
+      }
+      await new Promise((r) => setTimeout(r, CDP_POLL_INTERVAL_MS));
+    }
+    throw new Error(
+      `Chrome did not start within ${String(CDP_POLL_TIMEOUT_MS / 1000)}s. Check that port ${String(CDP_PORT)} is free.`,
+    );
+  }
+
+  /**
+   * Find the system Chrome executable path.
+   */
+  private findChromePath(): string {
+    switch (process.platform) {
+      case 'darwin':
+        return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      case 'linux':
+        return 'google-chrome';
+      case 'win32':
+        return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+      default:
+        throw new Error(`Unsupported platform: ${process.platform}`);
+    }
   }
 
   /**
