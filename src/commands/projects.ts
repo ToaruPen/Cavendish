@@ -51,7 +51,7 @@ export const projectsCommand = defineCommand({
         outputList(conversations, format);
       } else {
         progress('Fetching project list...', quiet);
-        let projects = await driver.getProjectList();
+        let projects = await driver.getProjectList(quiet);
         if (projectName !== undefined) {
           const lower = projectName.toLowerCase();
           projects = projects.filter((p) => p.name.toLowerCase().includes(lower));

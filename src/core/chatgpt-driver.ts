@@ -109,7 +109,7 @@ export class ChatGPTDriver {
   async navigateToProject(name: string, quiet = false): Promise<void> {
     progress(`Navigating to project: ${name}`, quiet);
 
-    const projects = await this.getProjectList();
+    const projects = await this.getProjectList(quiet);
     const match = projects.find(
       (p) => p.name.toLowerCase() === name.toLowerCase(),
     );
@@ -182,7 +182,8 @@ export class ChatGPTDriver {
    * Get the list of projects from the sidebar.
    * Uses evaluateAll for a single CDP round-trip.
    */
-  async getProjectList(): Promise<ProjectItem[]> {
+  async getProjectList(quiet = false): Promise<ProjectItem[]> {
+    await this.waitForSidebarLinks(SELECTORS.PROJECT_LINK, quiet);
     return this.page.locator(SELECTORS.PROJECT_LINK).evaluateAll((els) =>
       els.reduce<{ id: string; name: string; href: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
@@ -204,23 +205,8 @@ export class ChatGPTDriver {
    */
   async getProjectConversationList(quiet = false): Promise<ConversationItem[]> {
     // Wait for sidebar conversation links to load after project page navigation.
-    // TimeoutError is expected when the project has no chats, but could also
-    // indicate a slow sidebar render — warn so automation can distinguish.
-    try {
-      await this.page.locator(SELECTORS.CONVERSATION_LINK).first().waitFor({
-        state: 'attached',
-        timeout: 10_000,
-      });
-    } catch (error: unknown) {
-      if (isTimeoutError(error)) {
-        progress(
-          'No conversation links found in sidebar (timeout). The project may have no chats, or the sidebar may be slow to load.',
-          quiet,
-        );
-        return [];
-      }
-      throw error;
-    }
+    // Throws on timeout so automation gets an actionable error instead of silent [].
+    await this.waitForSidebarLinks(SELECTORS.CONVERSATION_LINK, quiet);
     return this.getConversationList();
   }
 
@@ -386,6 +372,28 @@ export class ChatGPTDriver {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  /**
+   * Wait for at least one sidebar link matching `selector` to appear.
+   * Throws an actionable error on timeout so callers never silently
+   * receive empty results due to slow sidebar rendering.
+   */
+  private async waitForSidebarLinks(selector: string, quiet: boolean): Promise<void> {
+    try {
+      await this.page.locator(selector).first().waitFor({
+        state: 'attached',
+        timeout: 10_000,
+      });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Sidebar links not found within 10s (selector: ${selector}). The sidebar may be slow to load — try again.`,
+        );
+      }
+      throw error;
+    }
+    progress('Sidebar loaded', quiet);
+  }
 
   /**
    * Locate a conversation link in the sidebar, hover to reveal the
