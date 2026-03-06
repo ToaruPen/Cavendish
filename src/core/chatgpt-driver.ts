@@ -281,9 +281,13 @@ export class ChatGPTDriver {
     // Click the confirm button (becomes enabled after name is filled)
     const confirmBtn = this.page.locator(SELECTORS.PROJECT_CREATE_CONFIRM);
     await confirmBtn.waitFor({ state: 'visible', timeout: 5000 });
+    const urlBeforeCreate = this.page.url();
     await confirmBtn.click();
 
-    await this.page.waitForURL(/\/g\/.*\/project/, { timeout: 10_000 });
+    await this.page.waitForURL(
+      (url) => url.toString() !== urlBeforeCreate && /\/g\/.*\/project/.test(url.toString()),
+      { timeout: 10_000 },
+    );
 
     progress(`Project created: ${name}`, quiet);
   }
@@ -318,13 +322,20 @@ export class ChatGPTDriver {
       .locator(SELECTORS.PROJECT_PICKER_ITEM)
       .filter({ hasText: projectName });
 
-    const count = await projectItem.count();
-    if (count === 0) {
-      await this.page.keyboard.press('Escape');
-      throw new Error(
-        `Project "${projectName}" not found in project picker.`,
-      );
+    // Wait for the project picker submenu to render before checking matches
+    try {
+      await projectItem.first().waitFor({ state: 'visible', timeout: 5000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        await this.page.keyboard.press('Escape');
+        throw new Error(
+          `Project "${projectName}" not found in project picker.`,
+        );
+      }
+      throw error;
     }
+
+    const count = await projectItem.count();
     if (count > 1) {
       // Multiple partial matches — find exact match by text content
       for (let i = 0; i < count; i++) {
