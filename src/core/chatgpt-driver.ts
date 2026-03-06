@@ -138,8 +138,13 @@ export class ChatGPTDriver {
       els.reduce<{ id: string; title: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
         if (href) {
+          // Expected href pattern: /c/{chat-id}
+          const match = /^\/c\/([^/?#]+)$/.exec(href);
+          if (!match) {
+            throw new Error(`Unexpected conversation href format: "${href}"`);
+          }
           acc.push({
-            id: href.replace('/c/', ''),
+            id: match[1],
             title: (el.textContent || '').trim(),
           });
         }
