@@ -134,14 +134,16 @@ export class ChatGPTDriver {
    */
   async getConversationList(quiet = false): Promise<ConversationItem[]> {
     await this.waitForSidebarContainer(quiet);
-    return this.page.locator(SELECTORS.CONVERSATION_LINK).evaluateAll((els) =>
+    return this.page.locator(SELECTORS.CONVERSATION_LINK).evaluateAll((els, selector) =>
       els.reduce<{ id: string; title: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
         if (href) {
           // Expected href pattern: /c/{chat-id}
           const match = /^\/c\/([^/?#]+)$/.exec(href);
           if (!match) {
-            throw new Error(`Unexpected conversation href format: "${href}"`);
+            throw new Error(
+              `Unexpected conversation href format: "${href}" (selector: ${selector})`,
+            );
           }
           acc.push({
             id: match[1],
@@ -150,7 +152,7 @@ export class ChatGPTDriver {
         }
         return acc;
       }, []),
-    );
+    SELECTORS.CONVERSATION_LINK);
   }
 
   /**
