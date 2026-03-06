@@ -551,61 +551,18 @@ export class ChatGPTDriver {
   ): Promise<boolean> {
     let done = false;
     const stopBtn = this.page.locator(SELECTORS.STOP_BUTTON);
-
     const deadline = Date.now() + timeout;
 
     const completionPromise = (async (): Promise<boolean> => {
-      // Phase 1: Race stop-button appearance against a new assistant message.
-      // Standard models show the stop button first; Pro (thinking) models may
-      // show the assistant message node first during the thinking phase.
-      const stopButtonAppeared = await this.raceStopButtonAndMessage(
-        stopBtn,
-        msgCountBefore,
-        timeout,
+      const phase1Ok = await this.waitForStopButtonAttach(
+        stopBtn, msgCountBefore, timeout, deadline, quiet,
       );
-
-      if (stopButtonAppeared === 'timeout') {
-        progress(`Response not detected within ${String(timeout)}ms`, quiet);
+      if (!phase1Ok) {
         return false;
       }
-
-      if (stopButtonAppeared === 'message') {
-        // Assistant message appeared before stop button — common with Pro
-        // (thinking phase creates the message node before streaming begins).
-        // Use the full remaining timeout so long-running thinking phases
-        // are not incorrectly cut short.
-        const remainingForAttach = Math.max(deadline - Date.now(), 0);
-        if (remainingForAttach <= 0) {
-          return false;
-        }
-        try {
-          await stopBtn.waitFor({ state: 'attached', timeout: remainingForAttach });
-        } catch (error: unknown) {
-          if (!isTimeoutError(error)) {
-            throw error;
-          }
-          // Stop button never appeared within the overall timeout — partial.
-          return false;
-        }
-      }
-
-      // Phase 2: Stop button is attached — wait for it to disappear (generation finished).
-      // Use remaining time so total wait never exceeds the caller's timeout.
-      // Guard against 0: Playwright treats timeout=0 as "no timeout" (infinite).
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) {
-        return false;
-      }
-      try {
-        await stopBtn.waitFor({ state: 'detached', timeout: remaining });
-        return true;
-      } catch (error: unknown) {
-        if (!isTimeoutError(error)) {
-          throw error;
-        }
-        // Generation still running but we've hit the timeout — partial response.
-        return false;
-      }
+      return this.waitForStopButtonCycle(
+        stopBtn, msgCountBefore, deadline, quiet,
+      );
     })().finally((): void => {
       done = true;
     });
@@ -615,6 +572,92 @@ export class ChatGPTDriver {
     }
 
     return completionPromise;
+  }
+
+  /**
+   * Phase 1: Wait for the stop button to become attached.
+   * Races stop-button appearance against a new assistant message.
+   * Returns true when the stop button is attached, false on timeout.
+   */
+  private async waitForStopButtonAttach(
+    stopBtn: Locator,
+    msgCountBefore: number,
+    timeout: number,
+    deadline: number,
+    quiet: boolean,
+  ): Promise<boolean> {
+    const result = await this.raceStopButtonAndMessage(
+      stopBtn, msgCountBefore, timeout,
+    );
+
+    if (result === 'timeout') {
+      progress(`Response not detected within ${String(timeout)}ms`, quiet);
+      return false;
+    }
+
+    if (result === 'attached') {
+      return true;
+    }
+
+    // 'message' — assistant message appeared before stop button (Pro thinking).
+    const remaining = Math.max(deadline - Date.now(), 0);
+    if (remaining <= 0) {
+      return false;
+    }
+    try {
+      await stopBtn.waitFor({ state: 'attached', timeout: remaining });
+      return true;
+    } catch (error: unknown) {
+      if (!isTimeoutError(error)) {
+        throw error;
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Phase 2: Wait for the stop button to disappear AND a non-empty response.
+   * Pro models may cycle the stop button (thinking gap → response streaming),
+   * so we loop until both conditions are met.
+   */
+  private async waitForStopButtonCycle(
+    stopBtn: Locator,
+    msgCountBefore: number,
+    deadline: number,
+    quiet: boolean,
+  ): Promise<boolean> {
+    while (Date.now() < deadline) {
+      const remaining = Math.max(deadline - Date.now(), 0);
+      try {
+        await stopBtn.waitFor({ state: 'detached', timeout: remaining });
+      } catch (error: unknown) {
+        if (!isTimeoutError(error)) {
+          throw error;
+        }
+        return false;
+      }
+
+      // Stop button gone — check if we actually have a response.
+      const responseText = await this.getResponseAfter(msgCountBefore);
+      if (responseText.length > 0) {
+        return true;
+      }
+
+      // No response yet (Pro thinking phase gap). Wait for stop button
+      // to reappear or an assistant message to arrive, whichever comes first.
+      progress('Waiting for response to render...', quiet);
+      const nextSignal = await this.waitForStopButtonOrResponse(
+        stopBtn, msgCountBefore, deadline,
+      );
+      if (nextSignal === 'timeout') {
+        return false;
+      }
+      if (nextSignal === 'response') {
+        return true;
+      }
+      // nextSignal === 'stop-button' — loop back
+    }
+    return false;
   }
 
   /**
@@ -661,6 +704,56 @@ export class ChatGPTDriver {
 
     try {
       return await Promise.race([stopPromise, messagePromise]);
+    } finally {
+      race.settled = true;
+    }
+  }
+
+  /**
+   * Wait for either the stop button to reappear or a non-empty assistant
+   * response, whichever comes first. Used during the Pro model gap between
+   * thinking completion and response streaming.
+   *
+   * Returns:
+   * - `'stop-button'` — stop button reappeared (loop back to Phase 2)
+   * - `'response'`    — non-empty assistant message arrived
+   * - `'timeout'`     — deadline reached
+   */
+  private async waitForStopButtonOrResponse(
+    stopBtn: Locator,
+    msgCountBefore: number,
+    deadline: number,
+  ): Promise<'stop-button' | 'response' | 'timeout'> {
+    const race = { settled: false };
+
+    const remaining = Math.max(deadline - Date.now(), 0);
+    if (remaining <= 0) {
+      return 'timeout';
+    }
+
+    const stopPromise = stopBtn
+      .waitFor({ state: 'attached', timeout: remaining })
+      .then((): 'stop-button' => 'stop-button')
+      .catch((error: unknown): 'timeout' => {
+        if (isTimeoutError(error)) {
+          return 'timeout';
+        }
+        throw error;
+      });
+
+    const responsePromise = (async (): Promise<'response' | 'timeout'> => {
+      while (!race.settled && Date.now() < deadline) {
+        const text = await this.getResponseAfter(msgCountBefore);
+        if (text.length > 0) {
+          return 'response';
+        }
+        await delay(POLL_INTERVAL_MS);
+      }
+      return 'timeout';
+    })();
+
+    try {
+      return await Promise.race([stopPromise, responsePromise]);
     } finally {
       race.settled = true;
     }
