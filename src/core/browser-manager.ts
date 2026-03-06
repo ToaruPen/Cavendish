@@ -4,12 +4,13 @@ import { join } from 'node:path';
 
 import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
 
+import { CHATGPT_BASE_URL } from '../constants/selectors.js';
+
 import { progress } from './output-handler.js';
 
 const CAVENDISH_DIR = join(homedir(), '.cavendish');
 const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
 const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
-const CHATGPT_URL = 'https://chatgpt.com';
 const CDP_PORT = 9222;
 const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
 
@@ -46,14 +47,14 @@ export class BrowserManager {
 
     // Reuse existing chatgpt.com tab
     for (const page of context.pages()) {
-      if (page.url().startsWith(CHATGPT_URL)) {
+      if (page.url().startsWith(CHATGPT_BASE_URL)) {
         return page;
       }
     }
 
     // No chatgpt.com tab found — open one
     const page = await context.newPage();
-    await page.goto(CHATGPT_URL, { waitUntil: 'domcontentloaded' });
+    await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
     return page;
   }
 

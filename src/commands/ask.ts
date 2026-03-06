@@ -1,11 +1,11 @@
-import { existsSync, fstatSync, readFileSync, statSync } from 'node:fs';
+import { fstatSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
-import { json, progress, text } from '../core/output-handler.js';
+import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 
 const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
@@ -44,9 +44,8 @@ export function readStdin(): string {
     }
     return readFileSync(0, 'utf-8');
   } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Failed to read piped stdin: ${detail}. Re-run without pipe or fix stdin source.`,
+      `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,
     );
   }
 }
@@ -99,14 +98,12 @@ export function extractFileArgs(argv: string[]): string[] {
  */
 export function findMissingFile(filePaths: string[]): string | undefined {
   return filePaths.find((p) => {
-    if (!existsSync(p)) {return true;}
     try {
       return !statSync(p).isFile();
     } catch (error: unknown) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') {return true;}
-      const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to stat "${p}": ${detail}`);
+      throw new Error(`Failed to stat "${p}": ${errorMessage(error)}`);
     }
   });
 }
@@ -134,6 +131,9 @@ interface ValidatedArgs {
   filePaths: string[];
   thinkingEffort: ThinkingEffortLevel | undefined;
   prompt: string;
+  continueChat: boolean;
+  chatId: string | undefined;
+  project: string | undefined;
 }
 
 /**
@@ -160,6 +160,58 @@ function validateThinkingEffort(
   return undefined;
 }
 
+/** Validate file-related args (--file). Returns file paths or undefined on error. */
+function validateFileArgs(): string[] | undefined {
+  let filePaths: string[];
+  try {
+    filePaths = extractFileArgs(process.argv);
+  } catch (error: unknown) {
+    fail(errorMessage(error));
+    return undefined;
+  }
+
+  let missingFile: string | undefined;
+  try {
+    missingFile = findMissingFile(filePaths);
+  } catch (error: unknown) {
+    fail(errorMessage(error));
+    return undefined;
+  }
+  if (missingFile !== undefined) {
+    fail(`file not found or not a regular file: ${missingFile}`);
+    return undefined;
+  }
+
+  return filePaths;
+}
+
+/** Validate --continue / --chat / --project mutual-exclusion rules. */
+function validateChatOptions(
+  args: Record<string, unknown>,
+): { continueChat: boolean; chatId: string | undefined; project: string | undefined } | undefined {
+  const continueChat = args.continue === true;
+  const chatId = args.chat as string | undefined;
+  const project = args.project as string | undefined;
+
+  if (chatId !== undefined && chatId === '') {
+    fail('--chat cannot be empty. Use: --chat <id>');
+    return undefined;
+  }
+  if (project !== undefined && project === '') {
+    fail('--project cannot be empty. Use: --project <name>');
+    return undefined;
+  }
+  if (chatId !== undefined && !continueChat) {
+    fail('--chat requires --continue. Use: cavendish ask --continue --chat <id> "prompt"');
+    return undefined;
+  }
+  if (continueChat && project !== undefined) {
+    fail('--continue and --project cannot be used together.');
+    return undefined;
+  }
+  return { continueChat, chatId, project };
+}
+
 /**
  * Parse and validate all CLI arguments. Returns undefined on validation failure
  * (exitCode is set and error is logged).
@@ -170,58 +222,30 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
 
   if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-    progress(`Error: --timeout must be a positive number, got "${String(args.timeout)}"`, false);
-    process.exitCode = 1;
-    return undefined;
+    fail(`--timeout must be a positive number, got "${String(args.timeout)}"`); return;
   }
 
-  if (args.format !== 'json' && args.format !== 'text') {
-    progress(`Error: --format must be "json" or "text", got "${String(args.format)}"`, false);
-    process.exitCode = 1;
-    return undefined;
-  }
+  const format = validateFormat(args.format as string);
+  if (format === undefined) {return undefined;}
 
-  let filePaths: string[];
-  try {
-    filePaths = extractFileArgs(process.argv);
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    progress(`Error: ${detail}`, false);
-    process.exitCode = 1;
-    return undefined;
-  }
+  const filePaths = validateFileArgs();
+  if (filePaths === undefined) {return undefined;}
 
-  let missingFile: string | undefined;
-  try {
-    missingFile = findMissingFile(filePaths);
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    progress(`Error: ${detail}`, false);
-    process.exitCode = 1;
-    return undefined;
-  }
-  if (missingFile !== undefined) {
-    progress(`Error: file not found or not a regular file: ${missingFile}`, false);
-    process.exitCode = 1;
-    return undefined;
-  }
+  const chatOptions = validateChatOptions(args);
+  if (chatOptions === undefined) {return undefined;}
 
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
-  const effortError = validateThinkingEffort(thinkingEffort, model);
-  if (effortError !== undefined) {
-    progress(`Error: ${effortError}`, false);
-    process.exitCode = 1;
-    return undefined;
+  if (thinkingEffort !== undefined && chatOptions.continueChat) {
+    fail('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.'); return;
   }
+  const effortError = validateThinkingEffort(thinkingEffort, model);
+  if (effortError !== undefined) {fail(effortError); return;}
 
   let stdinData: string;
   try {
     stdinData = readStdin();
   } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    progress(`Error: ${detail}`, false);
-    process.exitCode = 1;
-    return undefined;
+    fail(errorMessage(error)); return;
   }
   const prompt = buildPrompt(args.prompt as string, stdinData);
 
@@ -230,11 +254,41 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     model,
     timeoutMs: timeoutSec * 1000,
     timeoutSec,
-    format: args.format,
+    format,
     filePaths,
     thinkingEffort,
     prompt,
+    ...chatOptions,
   };
+}
+
+/**
+ * Handle navigation based on --continue, --chat, and --project flags.
+ */
+async function navigate(
+  driver: ChatGPTDriver,
+  page: import('playwright').Page,
+  validated: ValidatedArgs,
+): Promise<void> {
+  const { continueChat, chatId, project, quiet } = validated;
+
+  if (continueChat && chatId !== undefined) {
+    await driver.navigateToChat(chatId, quiet);
+  } else if (continueChat) {
+    // Note: with CDP, getPage() returns the first ChatGPT tab, which may
+    // not be the user's active tab when multiple ChatGPT tabs are open.
+    // Use --chat <id> for deterministic behaviour in multi-tab setups.
+    const { pathname } = new URL(page.url());
+    if (!pathname.startsWith('/c/')) {
+      throw new Error(
+        'Current page is not a chat. Use --chat <id> to specify which chat to continue.',
+      );
+    }
+  } else if (project !== undefined) {
+    await driver.navigateToProject(project, quiet);
+  } else {
+    await driver.navigateToNewChat(quiet);
+  }
 }
 
 /**
@@ -277,6 +331,18 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'Thinking effort level: light, standard, extended, deep',
     },
+    continue: {
+      type: 'boolean',
+      description: 'Continue in the current chat instead of starting a new one',
+    },
+    chat: {
+      type: 'string',
+      description: 'Chat ID to continue in (requires --continue)',
+    },
+    project: {
+      type: 'string',
+      description: 'Project name to ask within',
+    },
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
@@ -284,7 +350,7 @@ export const askCommand = defineCommand({
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,
-      filePaths, thinkingEffort, prompt,
+      filePaths, thinkingEffort, prompt, continueChat,
     } = validated;
 
     const browser = new BrowserManager();
@@ -293,7 +359,12 @@ export const askCommand = defineCommand({
       const page = await browser.getPage(quiet);
       const driver = new ChatGPTDriver(page);
 
-      await driver.selectModel(model, quiet);
+      await navigate(driver, page, validated);
+
+      // Skip model selection when continuing an existing chat
+      if (!continueChat) {
+        await driver.selectModel(model, quiet);
+      }
 
       if (thinkingEffort !== undefined) {
         await driver.setThinkingEffort(thinkingEffort, model, quiet);
@@ -316,12 +387,14 @@ export const askCommand = defineCommand({
       if (format === 'text') {
         text(result.text);
       } else {
-        json(result.text, { partial: !result.completed, model, timeoutSec });
+        json(result.text, {
+          partial: !result.completed,
+          model: continueChat ? undefined : model,
+          timeoutSec,
+        });
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      progress(`Error: ${message}`, false);
-      process.exitCode = 1;
+      fail(errorMessage(error));
     } finally {
       await browser.close();
     }

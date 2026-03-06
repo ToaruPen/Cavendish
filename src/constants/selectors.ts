@@ -59,11 +59,29 @@ export const SELECTORS = {
   THINKING_EFFORT_MENUITEM: '[role="menuitemradio"]',
 
   // ── Chat management ──────────────────────────────────────
-  /** Links to existing conversations in the sidebar */
-  CONVERSATION_LINK: 'a[href^="/c/"]',
+  /** Sidebar history container (present once the sidebar has rendered) */
+  SIDEBAR_HISTORY: '#history',
+
+  /** Links to existing conversations in the sidebar (scoped to #history) */
+  CONVERSATION_LINK: '#history a[href^="/c/"]',
 
   /** New chat button */
   NEW_CHAT_LINK: 'a[href="/"]',
+
+  /** Three-dot menu button on a conversation item (visible on hover) */
+  CONVERSATION_MENU_BUTTON: '[data-testid$="-options"]',
+
+  /** Delete option inside the conversation context menu */
+  CONVERSATION_DELETE_OPTION: '[data-testid="delete-chat-menu-item"]',
+
+  /** Archive option inside the conversation context menu (no data-testid).
+   *  Uses Playwright :has-text() pseudo-selector with locale fallback.
+   *  Other locales tracked in #29. */
+  CONVERSATION_ARCHIVE_OPTION:
+    '[role="menuitem"]:has-text("アーカイブ"), [role="menuitem"]:has-text("Archive")',
+
+  /** Confirm button in the delete-conversation dialog */
+  CONVERSATION_DELETE_CONFIRM: '[data-testid="delete-conversation-confirm-button"]',
 
   // ── Projects ─────────────────────────────────────────────
   /** Links to projects in the sidebar */
@@ -71,3 +89,16 @@ export const SELECTORS = {
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
+
+export const CHATGPT_BASE_URL = 'https://chatgpt.com';
+
+/**
+ * Build a selector for a specific conversation link by ID.
+ * Validates ID format to prevent CSS selector injection.
+ */
+export function conversationLinkById(id: string): string {
+  if (!/^[\w-]+$/.test(id)) {
+    throw new Error(`Invalid conversation ID format: "${id}". Only alphanumeric characters, hyphens, and underscores are allowed.`);
+  }
+  return `#history a[href="/c/${id}"]`;
+}
