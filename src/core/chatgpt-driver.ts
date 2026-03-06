@@ -12,6 +12,8 @@ export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
 export interface ConversationItem {
   id: string;
   title: string;
+  /** ISO timestamp if available from the DOM; empty string otherwise. */
+  timestamp: string;
 }
 
 export interface ProjectItem {
@@ -127,10 +129,15 @@ export class ChatGPTDriver {
    */
   async getConversationList(): Promise<ConversationItem[]> {
     return this.page.locator(SELECTORS.CONVERSATION_LINK).evaluateAll((els) =>
-      els.reduce<{ id: string; title: string }[]>((acc, el) => {
+      els.reduce<{ id: string; title: string; timestamp: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
         if (href) {
-          acc.push({ id: href.replace('/c/', ''), title: (el.textContent || '').trim() });
+          const timeEl = el.querySelector('time');
+          acc.push({
+            id: href.replace('/c/', ''),
+            title: (el.textContent || '').trim(),
+            timestamp: timeEl?.getAttribute('datetime') ?? '',
+          });
         }
         return acc;
       }, []),

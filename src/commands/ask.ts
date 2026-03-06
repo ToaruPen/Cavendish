@@ -333,6 +333,8 @@ export const askCommand = defineCommand({
         }
       } else if (project !== undefined) {
         await driver.navigateToProject(project, quiet);
+      } else {
+        await driver.navigateToNewChat(quiet);
       }
 
       // Skip model selection when continuing an existing chat

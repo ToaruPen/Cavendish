@@ -72,8 +72,9 @@ export const SELECTORS = {
   CONVERSATION_DELETE_OPTION: '[data-testid="delete-chat-menu-item"]',
 
   /** Archive option inside the conversation context menu (no data-testid).
-   *  Uses Playwright :has-text() pseudo-selector — locale-dependent (Japanese UI). */
-  CONVERSATION_ARCHIVE_OPTION: '[role="menuitem"]:has-text("アーカイブ")',
+   *  Uses Playwright :has-text() pseudo-selector with locale fallback. */
+  CONVERSATION_ARCHIVE_OPTION:
+    '[role="menuitem"]:has-text("アーカイブ"), [role="menuitem"]:has-text("Archive")',
 
   /** Confirm button in the delete-conversation dialog */
   CONVERSATION_DELETE_CONFIRM: '[data-testid="delete-conversation-confirm-button"]',
@@ -93,7 +94,7 @@ export const CHATGPT_BASE_URL = 'https://chatgpt.com';
  */
 export function conversationLinkById(id: string): string {
   if (!/^[\w-]+$/.test(id)) {
-    throw new Error(`Invalid conversation ID format: "${id}". Expected UUID-like string.`);
+    throw new Error(`Invalid conversation ID format: "${id}". Only alphanumeric characters, hyphens, and underscores are allowed.`);
   }
   return `a[href="/c/${id}"]`;
 }
