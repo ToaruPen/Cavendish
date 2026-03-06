@@ -327,9 +327,11 @@ export class ChatGPTDriver {
     const fileInput = this.page.locator(SELECTORS.FILE_INPUT_GENERIC);
     await fileInput.setInputFiles(filePaths);
 
-    // Fixed delay while ChatGPT processes the attachment.
-    // Replace with event-based wait when a suitable selector is identified.
-    await this.page.waitForTimeout(2000);
+    // Wait for all file tiles to appear in the composer.
+    await this.page
+      .locator(SELECTORS.FILE_ATTACHMENT_TILE)
+      .nth(filePaths.length - 1)
+      .waitFor({ state: 'visible', timeout: 10_000 });
     progress('Files attached', quiet);
   }
 
