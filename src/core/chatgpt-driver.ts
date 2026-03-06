@@ -1,13 +1,24 @@
 import type { Locator, Page } from 'playwright';
 import { errors } from 'playwright';
 
-import { SELECTORS } from '../constants/selectors.js';
+import { CHATGPT_BASE_URL, conversationLinkById, SELECTORS } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
 
 type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
+
+export interface ConversationItem {
+  id: string;
+  title: string;
+}
+
+export interface ProjectItem {
+  id: string;
+  name: string;
+  href: string;
+}
 
 const THINKING_EFFORT_LEVELS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
@@ -59,6 +70,144 @@ export class ChatGPTDriver {
   constructor(page: Page) {
     this.page = page;
   }
+
+  // ── Navigation ────────────────────────────────────────────
+
+  /**
+   * Navigate to a specific chat by its ID.
+   */
+  async navigateToChat(chatId: string, quiet = false): Promise<void> {
+    progress(`Navigating to chat: ${chatId}`, quiet);
+    await this.page.goto(`${CHATGPT_BASE_URL}/c/${chatId}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await this.waitForReady();
+  }
+
+  /**
+   * Navigate to the ChatGPT home page (starts a new chat context).
+   */
+  async navigateToNewChat(quiet = false): Promise<void> {
+    progress('Opening new chat...', quiet);
+    await this.page.goto(CHATGPT_BASE_URL, {
+      waitUntil: 'domcontentloaded',
+    });
+    await this.waitForReady();
+  }
+
+  /**
+   * Navigate to a project page by project name.
+   * Finds the matching project link in the sidebar and navigates to it.
+   */
+  async navigateToProject(name: string, quiet = false): Promise<void> {
+    progress(`Navigating to project: ${name}`, quiet);
+
+    const projects = await this.getProjectList();
+    const match = projects.find(
+      (p) => p.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (!match) {
+      const available = projects.map((p) => p.name).join(', ');
+      throw new Error(
+        `Project "${name}" not found. Available projects: ${available || '(none)'}`,
+      );
+    }
+
+    await this.page.goto(`${CHATGPT_BASE_URL}${match.href}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await this.waitForReady();
+  }
+
+  // ── Chat management ────────────────────────────────────────
+
+  /**
+   * Get the list of conversations from the sidebar.
+   * Uses evaluateAll for a single CDP round-trip.
+   */
+  async getConversationList(): Promise<ConversationItem[]> {
+    return this.page.locator(SELECTORS.CONVERSATION_LINK).evaluateAll((els) =>
+      els.reduce<{ id: string; title: string }[]>((acc, el) => {
+        const href = el.getAttribute('href');
+        if (href) {
+          acc.push({ id: href.replace('/c/', ''), title: (el.textContent || '').trim() });
+        }
+        return acc;
+      }, []),
+    );
+  }
+
+  /**
+   * Delete a conversation by ID via the sidebar context menu.
+   */
+  async deleteConversation(id: string, quiet = false): Promise<void> {
+    progress(`Deleting conversation: ${id}`, quiet);
+    const link = await this.openConversationMenu(id);
+
+    await this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION).click();
+    await this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM).click();
+
+    await link.waitFor({ state: 'detached', timeout: 10_000 });
+    progress('Conversation deleted', quiet);
+  }
+
+  /**
+   * Archive a conversation by ID via the sidebar context menu.
+   */
+  async archiveConversation(id: string, quiet = false): Promise<void> {
+    progress(`Archiving conversation: ${id}`, quiet);
+    const link = await this.openConversationMenu(id);
+
+    await this.page.locator(SELECTORS.CONVERSATION_ARCHIVE_OPTION).click();
+
+    await link.waitFor({ state: 'detached', timeout: 10_000 });
+    progress('Conversation archived', quiet);
+  }
+
+  // ── Project management ─────────────────────────────────────
+
+  /**
+   * Get the list of projects from the sidebar.
+   * Uses evaluateAll for a single CDP round-trip.
+   */
+  async getProjectList(): Promise<ProjectItem[]> {
+    return this.page.locator(SELECTORS.PROJECT_LINK).evaluateAll((els) =>
+      els.reduce<{ id: string; name: string; href: string }[]>((acc, el) => {
+        const href = el.getAttribute('href');
+        if (href) {
+          // href pattern: /g/{project-id}/project
+          const segments = href.split('/').filter(Boolean);
+          const id = segments.length >= 2 ? segments[1] : '';
+          acc.push({ id, name: el.textContent.trim(), href });
+        }
+        return acc;
+      }, []),
+    );
+  }
+
+  /**
+   * Get conversations within the currently open project page.
+   * On a project page, ChatGPT's sidebar shows only that project's chats,
+   * so we can safely delegate to getConversationList().
+   */
+  async getProjectConversationList(): Promise<ConversationItem[]> {
+    // Wait for sidebar conversation links to load after project page navigation.
+    // TimeoutError is expected when the project has no chats.
+    try {
+      await this.page.locator(SELECTORS.CONVERSATION_LINK).first().waitFor({
+        state: 'attached',
+        timeout: 5000,
+      });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        return [];
+      }
+      throw error;
+    }
+    return this.getConversationList();
+  }
+
+  // ── Model & messaging ──────────────────────────────────────
 
   /**
    * Open the model picker and select the given model by name.
@@ -220,6 +369,26 @@ export class ChatGPTDriver {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  /**
+   * Locate a conversation link in the sidebar, hover to reveal the
+   * three-dot menu, and click it. Returns the link locator for further use.
+   */
+  private async openConversationMenu(id: string): Promise<Locator> {
+    const link = this.page.locator(conversationLinkById(id));
+    if ((await link.count()) === 0) {
+      throw new Error(
+        `Conversation "${id}" not found in sidebar. Run "cavendish list" to see available chats.`,
+      );
+    }
+
+    await link.hover();
+    const menuButton = link.locator(SELECTORS.CONVERSATION_MENU_BUTTON);
+    await menuButton.waitFor({ state: 'visible', timeout: 5000 });
+    await menuButton.click();
+
+    return link;
+  }
 
   /**
    * Find a visible menuitemradio matching any of the given label candidates.

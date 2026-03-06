@@ -1,6 +1,10 @@
 import { defineCommand, runMain } from 'citty';
 
+import { archiveCommand } from './commands/archive.js';
 import { askCommand } from './commands/ask.js';
+import { deleteCommand } from './commands/delete.js';
+import { listCommand } from './commands/list.js';
+import { projectsCommand } from './commands/projects.js';
 
 const main = defineCommand({
   meta: {
@@ -10,7 +14,11 @@ const main = defineCommand({
       'Playwright-based CLI that automates ChatGPT Web UI for coding agents',
   },
   subCommands: {
+    archive: archiveCommand,
     ask: askCommand,
+    delete: deleteCommand,
+    list: listCommand,
+    projects: projectsCommand,
   },
 });
 

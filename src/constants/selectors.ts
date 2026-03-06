@@ -65,9 +65,35 @@ export const SELECTORS = {
   /** New chat button */
   NEW_CHAT_LINK: 'a[href="/"]',
 
+  /** Three-dot menu button on a conversation item (visible on hover) */
+  CONVERSATION_MENU_BUTTON: '[data-testid$="-options"]',
+
+  /** Delete option inside the conversation context menu */
+  CONVERSATION_DELETE_OPTION: '[data-testid="delete-chat-menu-item"]',
+
+  /** Archive option inside the conversation context menu (no data-testid).
+   *  Uses Playwright :has-text() pseudo-selector — locale-dependent (Japanese UI). */
+  CONVERSATION_ARCHIVE_OPTION: '[role="menuitem"]:has-text("アーカイブ")',
+
+  /** Confirm button in the delete-conversation dialog */
+  CONVERSATION_DELETE_CONFIRM: '[data-testid="delete-conversation-confirm-button"]',
+
   // ── Projects ─────────────────────────────────────────────
   /** Links to projects in the sidebar */
   PROJECT_LINK: 'a[href*="/project"]',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
+
+export const CHATGPT_BASE_URL = 'https://chatgpt.com';
+
+/**
+ * Build a selector for a specific conversation link by ID.
+ * Validates ID format to prevent CSS selector injection.
+ */
+export function conversationLinkById(id: string): string {
+  if (!/^[\w-]+$/.test(id)) {
+    throw new Error(`Invalid conversation ID format: "${id}". Expected UUID-like string.`);
+  }
+  return `a[href="/c/${id}"]`;
+}
