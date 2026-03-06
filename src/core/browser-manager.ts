@@ -15,8 +15,8 @@ const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
 const CDP_PORT = 9222;
 const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
 
-const CDP_POLL_INTERVAL_MS = 500;
-const CDP_POLL_TIMEOUT_MS = 15_000;
+const CDP_MAX_RETRIES = 3;
+const CDP_RETRY_INTERVAL_MS = 5_000;
 
 interface CdpEndpointData {
   port: number;
@@ -99,7 +99,7 @@ export class BrowserManager {
     child.unref();
 
     // Race: either CDP becomes available or spawn fails
-    await Promise.race([this.waitForCdp(), spawnError]);
+    await Promise.race([this.waitForCdp(quiet), spawnError]);
     await this.connect(quiet);
     this.saveCdpEndpoint();
     progress('Chrome launched', quiet);
@@ -155,20 +155,31 @@ export class BrowserManager {
 
   /**
    * Poll the CDP endpoint until Chrome is ready to accept connections.
+   * Max 3 attempts with logging per project guidelines.
    */
-  private async waitForCdp(): Promise<void> {
-    const deadline = Date.now() + CDP_POLL_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+  private async waitForCdp(quiet: boolean): Promise<void> {
+    for (let attempt = 1; attempt <= CDP_MAX_RETRIES; attempt += 1) {
       try {
         const res = await fetch(`${CDP_BASE_URL}/json/version`);
-        if (res.ok) {return;}
-      } catch {
-        // Chrome not ready yet
+        if (res.ok) {
+          return;
+        }
+        progress(
+          `CDP not ready (attempt ${String(attempt)}/${String(CDP_MAX_RETRIES)}): HTTP ${String(res.status)}`,
+          quiet,
+        );
+      } catch (error: unknown) {
+        progress(
+          `CDP not ready (attempt ${String(attempt)}/${String(CDP_MAX_RETRIES)}): ${error instanceof Error ? error.message : String(error)}`,
+          quiet,
+        );
       }
-      await new Promise((r) => setTimeout(r, CDP_POLL_INTERVAL_MS));
+      if (attempt < CDP_MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, CDP_RETRY_INTERVAL_MS));
+      }
     }
     throw new Error(
-      `Chrome did not start within ${String(CDP_POLL_TIMEOUT_MS / 1000)}s. Check that port ${String(CDP_PORT)} is free.`,
+      `Chrome did not respond on port ${String(CDP_PORT)} after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and port ${String(CDP_PORT)} is free (lsof -ti :${String(CDP_PORT)} | xargs kill).`,
     );
   }
 
@@ -206,7 +217,7 @@ export class BrowserManager {
     const found = candidates.find((p) => existsSync(p));
     if (!found) {
       throw new Error(
-        `Chrome not found. Searched: ${candidates.join(', ')}`,
+        `Chrome not found. Searched: ${candidates.join(', ')}. Install Google Chrome and retry.`,
       );
     }
     return found;
