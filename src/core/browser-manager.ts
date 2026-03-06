@@ -178,8 +178,12 @@ export class BrowserManager {
         await new Promise((r) => setTimeout(r, CDP_RETRY_INTERVAL_MS));
       }
     }
+    const portHint =
+      process.platform === 'win32'
+        ? `netstat -ano | findstr :${String(CDP_PORT)} then taskkill /PID <pid> /F`
+        : `lsof -ti :${String(CDP_PORT)} | xargs kill`;
     throw new Error(
-      `Chrome did not respond on port ${String(CDP_PORT)} after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and port ${String(CDP_PORT)} is free (lsof -ti :${String(CDP_PORT)} | xargs kill).`,
+      `Chrome did not respond on port ${String(CDP_PORT)} after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and the port is free (${portHint}).`,
     );
   }
 
