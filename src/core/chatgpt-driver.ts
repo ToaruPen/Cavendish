@@ -298,10 +298,13 @@ export class ChatGPTDriver {
     const link = this.page.locator(conversationLinkByIdBroad(chatId));
     try {
       await link.waitFor({ state: 'attached', timeout: 5000 });
-    } catch {
-      throw new Error(
-        `Conversation "${chatId}" not found in sidebar. Run "cavendish list" to see available chats.`,
-      );
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Conversation "${chatId}" not found in sidebar. Run "cavendish list" to see available chats.`,
+        );
+      }
+      throw error;
     }
 
     await link.hover();
@@ -332,6 +335,10 @@ export class ChatGPTDriver {
           return;
         }
       }
+      await this.page.keyboard.press('Escape');
+      throw new Error(
+        `Multiple projects partially match "${projectName}" but none is an exact match. Please use the full project name.`,
+      );
     }
     await projectItem.first().click();
 
@@ -633,10 +640,13 @@ export class ChatGPTDriver {
     const link = this.page.locator(projectConversationLinkById(id));
     try {
       await link.waitFor({ state: 'attached', timeout: 5000 });
-    } catch {
-      throw new Error(
-        `Project conversation "${id}" not found. Run "cavendish projects --name <project> --chats" to see available chats.`,
-      );
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Project conversation "${id}" not found. Run "cavendish projects --name <project> --chats" to see available chats.`,
+        );
+      }
+      throw error;
     }
 
     await link.hover();
