@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +14,9 @@ const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
 const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
 const CDP_PORT = 9222;
 const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
+
+const CDP_MAX_RETRIES = 3;
+const CDP_RETRY_INTERVAL_MS = 5_000;
 
 interface CdpEndpointData {
   port: number;
@@ -29,14 +33,13 @@ interface CdpEndpointData {
  */
 export class BrowserManager {
   private browser: Browser | null = null;
-  private persistentContext: BrowserContext | null = null;
 
   /**
    * Get a Page navigated to chatgpt.com.
    * Connects to an existing Chrome or launches a new one.
    */
   async getPage(quiet = false): Promise<Page> {
-    if (!this.browser && !this.persistentContext) {
+    if (!this.browser) {
       await this.ensureConnected(quiet);
     }
 
@@ -59,7 +62,8 @@ export class BrowserManager {
   }
 
   /**
-   * Launch system Chrome with a persistent profile.
+   * Launch system Chrome as a detached process and connect via CDP.
+   * Chrome persists after cavendish exits so sessions survive.
    * Login sessions are stored in `~/.cavendish/chrome-profile`.
    */
   async launch(quiet = false): Promise<void> {
@@ -67,19 +71,38 @@ export class BrowserManager {
 
     mkdirSync(CHROME_PROFILE_DIR, { recursive: true });
 
-    const context = await chromium.launchPersistentContext(CHROME_PROFILE_DIR, {
-      channel: 'chrome',
-      headless: false,
-      args: [
-        `--remote-debugging-port=${String(CDP_PORT)}`,
-        '--remote-debugging-address=127.0.0.1',
-        // Suppress automation detection flags to avoid Cloudflare blocks
-        '--disable-blink-features=AutomationControlled',
-      ],
-      ignoreDefaultArgs: ['--enable-automation'],
+    const chromePath = this.findChromePath();
+    const args = [
+      `--remote-debugging-port=${String(CDP_PORT)}`,
+      '--remote-debugging-address=127.0.0.1',
+      `--user-data-dir=${CHROME_PROFILE_DIR}`,
+      '--disable-blink-features=AutomationControlled',
+      '--no-first-run',
+      CHATGPT_BASE_URL,
+    ];
+
+    const child: ChildProcess = spawn(chromePath, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+
+    // Wait for the process to actually start before polling CDP.
+    // 'spawn' fires once the OS has successfully created the process;
+    // 'error' fires if the binary is missing, not executable, etc.
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', () => {
+        resolve();
+      });
+      child.once('error', (err: Error) => {
+        reject(
+          new Error(`Failed to launch Chrome at "${chromePath}": ${err.message}`),
+        );
+      });
     });
 
-    this.persistentContext = context;
+    await this.waitForCdp(quiet);
+    await this.connect(quiet);
     this.saveCdpEndpoint();
     progress('Chrome launched', quiet);
   }
@@ -99,14 +122,10 @@ export class BrowserManager {
   }
 
   /**
-   * Close the Playwright connection (does NOT kill a CDP-connected Chrome).
-   * For launched Chrome, the process is terminated but the profile persists.
+   * Close the Playwright connection (does NOT kill Chrome).
+   * Chrome continues running as a detached process for future CDP reconnection.
    */
   async close(): Promise<void> {
-    if (this.persistentContext) {
-      await this.persistentContext.close();
-      this.persistentContext = null;
-    }
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
@@ -126,15 +145,129 @@ export class BrowserManager {
   }
 
   /**
-   * Get a usable BrowserContext from either connection type.
+   * Get a usable BrowserContext from the CDP connection.
    */
   private getContext(): BrowserContext | null {
-    if (this.persistentContext) {
-      return this.persistentContext;
-    }
     if (this.browser) {
       const contexts = this.browser.contexts();
       return contexts[0] ?? null;
+    }
+    return null;
+  }
+
+  /**
+   * Poll the CDP endpoint until Chrome is ready to accept connections.
+   * Max 3 attempts with logging per project guidelines.
+   */
+  private async waitForCdp(quiet: boolean): Promise<void> {
+    for (let attempt = 1; attempt <= CDP_MAX_RETRIES; attempt += 1) {
+      try {
+        const res = await fetch(`${CDP_BASE_URL}/json/version`);
+        if (res.ok) {
+          return;
+        }
+        progress(
+          `CDP not ready (attempt ${String(attempt)}/${String(CDP_MAX_RETRIES)}): HTTP ${String(res.status)}`,
+          quiet,
+        );
+      } catch (error: unknown) {
+        progress(
+          `CDP not ready (attempt ${String(attempt)}/${String(CDP_MAX_RETRIES)}): ${error instanceof Error ? error.message : String(error)}`,
+          quiet,
+        );
+      }
+      await new Promise((r) => setTimeout(r, CDP_RETRY_INTERVAL_MS));
+    }
+    const portHint =
+      process.platform === 'win32'
+        ? `netstat -ano | findstr :${String(CDP_PORT)} then taskkill /PID <pid> /F`
+        : `lsof -ti :${String(CDP_PORT)} | xargs kill`;
+    throw new Error(
+      `Chrome did not respond on port ${String(CDP_PORT)} after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and the port is free (${portHint}).`,
+    );
+  }
+
+  /**
+   * Find the system Chrome executable path.
+   * Checks multiple candidate paths per platform for compatibility.
+   */
+  private findChromePath(): string {
+    const candidates: string[] = [];
+    switch (process.platform) {
+      case 'darwin':
+        candidates.push(
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          `${homedir()}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+        );
+        break;
+      case 'linux':
+        candidates.push(
+          '/usr/bin/google-chrome',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+        );
+        break;
+      case 'win32': {
+        candidates.push(
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        );
+        const localAppData = process.env.LOCALAPPDATA;
+        if (localAppData) {
+          candidates.push(
+            join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+          );
+        }
+        break;
+      }
+      default:
+        throw new Error(`Unsupported platform: ${process.platform}`);
+    }
+
+    const found = candidates.find((p) => existsSync(p));
+    if (found) {
+      return found;
+    }
+
+    // Fallback: probe PATH via which/where for non-standard install locations
+    // (e.g. Snap, Homebrew, or other package managers)
+    const pathProbe = this.findChromeOnPath();
+    if (pathProbe) {
+      return pathProbe;
+    }
+
+    throw new Error(
+      `Chrome not found. Searched: ${candidates.join(', ')} and PATH. Install Google Chrome and retry.`,
+    );
+  }
+
+  /**
+   * Probe PATH for common Chrome/Chromium executable names.
+   * Returns the resolved absolute path or null.
+   */
+  private findChromeOnPath(): string | null {
+    const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
+    const names =
+      process.platform === 'win32'
+        ? ['chrome.exe']
+        : ['google-chrome', 'google-chrome-stable', 'chromium-browser', 'chromium'];
+
+    for (const name of names) {
+      try {
+        const result = execFileSync(cmd, [name], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 5_000,
+        }).trim();
+        // `where` on Windows may return multiple lines; take the first
+        const firstLine = result.split('\n')[0]?.trim();
+        if (firstLine && existsSync(firstLine)) {
+          return firstLine;
+        }
+      } catch {
+        // Not found on PATH, try next name
+      }
     }
     return null;
   }
