@@ -324,7 +324,10 @@ export const askCommand = defineCommand({
       if (continueChat && chatId !== undefined) {
         await driver.navigateToChat(chatId, quiet);
       } else if (continueChat) {
-        // --continue without --chat: verify the current page is a chat
+        // --continue without --chat: verify the current page is a chat.
+        // Note: with CDP, getPage() returns the first ChatGPT tab, which may
+        // not be the user's active tab when multiple ChatGPT tabs are open.
+        // Use --chat <id> for deterministic behaviour in multi-tab setups.
         const { pathname } = new URL(page.url());
         if (!pathname.startsWith('/c/')) {
           throw new Error(
