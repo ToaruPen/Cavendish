@@ -186,7 +186,7 @@ export class ChatGPTDriver {
    * Uses evaluateAll for a single CDP round-trip.
    */
   async getProjectList(quiet = false): Promise<ProjectItem[]> {
-    await this.waitForSidebarLinks(SELECTORS.PROJECT_LINK, quiet);
+    await this.waitForSidebarContainer(quiet);
     return this.page.locator(SELECTORS.PROJECT_LINK).evaluateAll((els) =>
       els.reduce<{ id: string; name: string; href: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
@@ -209,9 +209,8 @@ export class ChatGPTDriver {
    * so we can safely delegate to getConversationList().
    */
   async getProjectConversationList(quiet = false): Promise<ConversationItem[]> {
-    // Wait for sidebar conversation links to load after project page navigation.
-    // Throws on timeout so automation gets an actionable error instead of silent [].
-    await this.waitForSidebarLinks(SELECTORS.CONVERSATION_LINK, quiet);
+    // Wait for sidebar to be ready. An empty list is valid (project with no chats).
+    await this.waitForSidebarContainer(quiet);
     return this.getConversationList(quiet);
   }
 
@@ -391,33 +390,13 @@ export class ChatGPTDriver {
       });
     } catch (error: unknown) {
       if (isTimeoutError(error)) {
-        progress('Sidebar container not found within 10s — results may be incomplete', quiet);
-        return;
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Wait for at least one sidebar link matching `selector` to appear.
-   * Throws an actionable error on timeout so callers never silently
-   * receive empty results due to slow sidebar rendering.
-   */
-  private async waitForSidebarLinks(selector: string, quiet: boolean): Promise<void> {
-    try {
-      await this.page.locator(selector).first().waitFor({
-        state: 'attached',
-        timeout: 10_000,
-      });
-    } catch (error: unknown) {
-      if (isTimeoutError(error)) {
         throw new Error(
-          `Sidebar links not found within 10s (selector: ${selector}). The sidebar may be slow to load — try again.`,
+          `Sidebar container (${SELECTORS.SIDEBAR_HISTORY}) not found within 10s. The page may not have loaded correctly.`,
         );
       }
       throw error;
     }
-    progress('Sidebar loaded', quiet);
+    progress('Sidebar ready', quiet);
   }
 
   /**
