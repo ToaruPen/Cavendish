@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -85,9 +85,21 @@ export class BrowserManager {
       detached: true,
       stdio: 'ignore',
     });
+
+    // Capture spawn errors (e.g. Chrome not found, permission denied) so they
+    // surface as an actionable message instead of an unhandled exception.
+    const spawnError = new Promise<Error>((_, reject) => {
+      child.on('error', (err: Error) => {
+        reject(
+          new Error(`Failed to launch Chrome at "${chromePath}": ${err.message}`),
+        );
+      });
+    });
+
     child.unref();
 
-    await this.waitForCdp();
+    // Race: either CDP becomes available or spawn fails
+    await Promise.race([this.waitForCdp(), spawnError]);
     await this.connect(quiet);
     this.saveCdpEndpoint();
     progress('Chrome launched', quiet);
@@ -162,18 +174,42 @@ export class BrowserManager {
 
   /**
    * Find the system Chrome executable path.
+   * Checks multiple candidate paths per platform for compatibility.
    */
   private findChromePath(): string {
+    const candidates: string[] = [];
     switch (process.platform) {
       case 'darwin':
-        return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+        candidates.push(
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          `${homedir()}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+        );
+        break;
       case 'linux':
-        return 'google-chrome';
+        candidates.push(
+          '/usr/bin/google-chrome',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+        );
+        break;
       case 'win32':
-        return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+        candidates.push(
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        );
+        break;
       default:
         throw new Error(`Unsupported platform: ${process.platform}`);
     }
+
+    const found = candidates.find((p) => existsSync(p));
+    if (!found) {
+      throw new Error(
+        `Chrome not found. Searched: ${candidates.join(', ')}`,
+      );
+    }
+    return found;
   }
 
   /**
