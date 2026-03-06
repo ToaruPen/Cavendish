@@ -16,17 +16,17 @@ Playwright-based CLI tool that automates ChatGPT's Web UI, enabling coding agent
 npm install -g cavendish
 ```
 
+## Initial Setup
+
+Cavendish uses a **dedicated Chrome profile** stored in `~/.cavendish/chrome-profile`. Your regular Chrome profile is not affected.
+
+1. Run any command (e.g. `cavendish ask "hello"`) — Chrome launches automatically
+2. ChatGPT opens in the new Chrome window — **log in to your ChatGPT account**
+3. Done. The login session persists across CLI invocations (no re-login needed)
+
+> **Note**: The dedicated Chrome profile avoids conflicts with your browser extensions and protects your main profile from corruption. Chrome stays running as a background process between commands for fast reconnection via CDP (port 9222).
+
 ## Commands
-
-### Setup
-
-```bash
-# Initial setup: create Chrome profile and guide manual login
-cavendish init
-
-# Check login status
-cavendish status
-```
 
 ### Ask (core feature)
 
@@ -56,11 +56,20 @@ cavendish ask --continue "Explain further"
 # List chats
 cavendish list
 
+# Read a chat
+cavendish read <chat-id>
+
 # Delete a chat
 cavendish delete <chat-id>
 
-# Create new chat (without sending a message)
-cavendish new --model pro
+# Delete a project chat
+cavendish delete <chat-id> --project "Project Name"
+
+# Archive a chat
+cavendish archive <chat-id>
+
+# Move a chat to a project
+cavendish move <chat-id> --project "Project Name"
 ```
 
 ### Projects
@@ -71,6 +80,9 @@ cavendish projects
 
 # List chats in a project
 cavendish projects --name "For-Agents" --chats
+
+# Create a new project
+cavendish projects --create --name "New Project"
 ```
 
 ### Common Options
