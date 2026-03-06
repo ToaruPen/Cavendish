@@ -29,7 +29,7 @@ export const listCommand = defineCommand({
 
     await withDriver(quiet, async (driver) => {
       progress('Fetching conversation list...', quiet);
-      const conversations = await driver.getConversationList();
+      const conversations = await driver.getConversationList(quiet);
       progress(`Found ${String(conversations.length)} conversation(s)`, quiet);
       outputList(conversations, format);
     });

@@ -59,6 +59,9 @@ export const SELECTORS = {
   THINKING_EFFORT_MENUITEM: '[role="menuitemradio"]',
 
   // ── Chat management ──────────────────────────────────────
+  /** Sidebar history container (present once the sidebar has rendered) */
+  SIDEBAR_HISTORY: '#history',
+
   /** Links to existing conversations in the sidebar */
   CONVERSATION_LINK: 'a[href^="/c/"]',
 

@@ -130,9 +130,12 @@ export class ChatGPTDriver {
 
   /**
    * Get the list of conversations from the sidebar.
+   * Waits for the sidebar container before reading links so that an empty
+   * result reflects a genuinely empty sidebar, not a loading delay.
    * Uses evaluateAll for a single CDP round-trip.
    */
-  async getConversationList(): Promise<ConversationItem[]> {
+  async getConversationList(quiet = false): Promise<ConversationItem[]> {
+    await this.waitForSidebarContainer(quiet);
     return this.page.locator(SELECTORS.CONVERSATION_LINK).evaluateAll((els) =>
       els.reduce<{ id: string; title: string; timestamp: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
@@ -188,10 +191,12 @@ export class ChatGPTDriver {
       els.reduce<{ id: string; name: string; href: string }[]>((acc, el) => {
         const href = el.getAttribute('href');
         if (href) {
-          // href pattern: /g/{project-id}/project
+          // Expected href pattern: /g/{project-id}/project
           const segments = href.split('/').filter(Boolean);
-          const id = segments.length >= 2 ? segments[1] : '';
-          acc.push({ id, name: el.textContent.trim(), href });
+          if (segments[0] !== 'g' || segments.length < 3 || segments[2] !== 'project') {
+            return acc; // skip links with unexpected format
+          }
+          acc.push({ id: segments[1], name: el.textContent.trim(), href });
         }
         return acc;
       }, []),
@@ -207,7 +212,7 @@ export class ChatGPTDriver {
     // Wait for sidebar conversation links to load after project page navigation.
     // Throws on timeout so automation gets an actionable error instead of silent [].
     await this.waitForSidebarLinks(SELECTORS.CONVERSATION_LINK, quiet);
-    return this.getConversationList();
+    return this.getConversationList(quiet);
   }
 
   // ── Model & messaging ──────────────────────────────────────
@@ -372,6 +377,26 @@ export class ChatGPTDriver {
   }
 
   // ── Private ────────────────────────────────────────────────
+
+  /**
+   * Wait for the sidebar history container to be present in the DOM.
+   * Unlike waitForSidebarLinks, this does NOT require links to exist —
+   * an empty sidebar (0 conversations) is a valid state.
+   */
+  private async waitForSidebarContainer(quiet: boolean): Promise<void> {
+    try {
+      await this.page.locator(SELECTORS.SIDEBAR_HISTORY).waitFor({
+        state: 'attached',
+        timeout: 10_000,
+      });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        progress('Sidebar container not found within 10s — results may be incomplete', quiet);
+        return;
+      }
+      throw error;
+    }
+  }
 
   /**
    * Wait for at least one sidebar link matching `selector` to appear.
