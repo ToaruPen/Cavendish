@@ -195,7 +195,7 @@ export class ChatGPTDriver {
           // Expected href pattern: /g/{project-id}/project
           const segments = href.split('/').filter(Boolean);
           if (segments[0] !== 'g' || segments.length < 3 || segments[2] !== 'project') {
-            throw new Error(`Unexpected project href format: "${href}"`);
+            return acc; // skip non-project links (selector is broad: href*="/project")
           }
           acc.push({ id: segments[1], name: el.textContent.trim(), href });
         }

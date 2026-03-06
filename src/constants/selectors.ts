@@ -75,7 +75,8 @@ export const SELECTORS = {
   CONVERSATION_DELETE_OPTION: '[data-testid="delete-chat-menu-item"]',
 
   /** Archive option inside the conversation context menu (no data-testid).
-   *  Uses Playwright :has-text() pseudo-selector with locale fallback. */
+   *  Uses Playwright :has-text() pseudo-selector with locale fallback.
+   *  Other locales tracked in #29. */
   CONVERSATION_ARCHIVE_OPTION:
     '[role="menuitem"]:has-text("アーカイブ"), [role="menuitem"]:has-text("Archive")',
 
