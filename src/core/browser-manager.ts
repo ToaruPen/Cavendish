@@ -85,21 +85,23 @@ export class BrowserManager {
       detached: true,
       stdio: 'ignore',
     });
+    child.unref();
 
-    // Capture spawn errors (e.g. Chrome not found, permission denied) so they
-    // surface as an actionable message instead of an unhandled exception.
-    const spawnError = new Promise<Error>((_, reject) => {
-      child.on('error', (err: Error) => {
+    // Wait for the process to actually start before polling CDP.
+    // 'spawn' fires once the OS has successfully created the process;
+    // 'error' fires if the binary is missing, not executable, etc.
+    await new Promise<void>((resolve, reject) => {
+      child.once('spawn', () => {
+        resolve();
+      });
+      child.once('error', (err: Error) => {
         reject(
           new Error(`Failed to launch Chrome at "${chromePath}": ${err.message}`),
         );
       });
     });
 
-    child.unref();
-
-    // Race: either CDP becomes available or spawn fails
-    await Promise.race([this.waitForCdp(quiet), spawnError]);
+    await this.waitForCdp(quiet);
     await this.connect(quiet);
     this.saveCdpEndpoint();
     progress('Chrome launched', quiet);
