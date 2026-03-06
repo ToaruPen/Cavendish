@@ -332,11 +332,13 @@ export class ChatGPTDriver {
     const fileInput = this.page.locator(SELECTORS.FILE_INPUT_GENERIC);
     await fileInput.setInputFiles(filePaths);
 
-    // Wait for all file tiles to appear in the composer.
-    await this.page
-      .locator(SELECTORS.FILE_ATTACHMENT_TILE)
-      .nth(filePaths.length - 1)
-      .waitFor({ state: 'visible', timeout: 10_000 });
+    // Wait for the exact number of file tiles to appear in the composer.
+    await this.page.waitForFunction(
+      ({ selector, expected }: { selector: string; expected: number }) =>
+        document.querySelectorAll(selector).length >= expected,
+      { selector: SELECTORS.FILE_ATTACHMENT_TILE, expected: filePaths.length },
+      { timeout: 10_000 },
+    );
     progress('Files attached', quiet);
   }
 
@@ -407,15 +409,19 @@ export class ChatGPTDriver {
 
     const rawMessages = await this.page.evaluate(
       ({ userSel, assistantSel }: { userSel: string; assistantSel: string }) => {
+        const allowedRoles = new Set(['user', 'assistant']);
         const allElements = document.querySelectorAll(
           `${userSel}, ${assistantSel}`,
         );
         const result: { role: 'user' | 'assistant'; content: string }[] = [];
         for (const el of allElements) {
-          const role = el.getAttribute('data-message-author-role') as
-            | 'user'
-            | 'assistant';
-          result.push({ role, content: (el.textContent || '').trim() });
+          const role = el.getAttribute('data-message-author-role');
+          if (!role || !allowedRoles.has(role)) {
+            throw new Error(
+              `Unexpected data-message-author-role: "${String(role)}". Expected "user" or "assistant".`,
+            );
+          }
+          result.push({ role: role as 'user' | 'assistant', content: (el.textContent || '').trim() });
         }
         return result;
       },
