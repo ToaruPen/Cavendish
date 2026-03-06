@@ -223,12 +223,15 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const filePaths = validateFileArgs();
   if (filePaths === undefined) {return undefined;}
 
-  const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
-  const effortError = validateThinkingEffort(thinkingEffort, model);
-  if (effortError !== undefined) {fail(effortError); return;}
-
   const chatOptions = validateChatOptions(args);
   if (chatOptions === undefined) {return undefined;}
+
+  const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
+  if (thinkingEffort !== undefined && chatOptions.continueChat) {
+    fail('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.'); return;
+  }
+  const effortError = validateThinkingEffort(thinkingEffort, model);
+  if (effortError !== undefined) {fail(effortError); return;}
 
   let stdinData: string;
   try {
@@ -249,6 +252,35 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     prompt,
     ...chatOptions,
   };
+}
+
+/**
+ * Handle navigation based on --continue, --chat, and --project flags.
+ */
+async function navigate(
+  driver: ChatGPTDriver,
+  page: import('playwright').Page,
+  validated: ValidatedArgs,
+): Promise<void> {
+  const { continueChat, chatId, project, quiet } = validated;
+
+  if (continueChat && chatId !== undefined) {
+    await driver.navigateToChat(chatId, quiet);
+  } else if (continueChat) {
+    // Note: with CDP, getPage() returns the first ChatGPT tab, which may
+    // not be the user's active tab when multiple ChatGPT tabs are open.
+    // Use --chat <id> for deterministic behaviour in multi-tab setups.
+    const { pathname } = new URL(page.url());
+    if (!pathname.startsWith('/c/')) {
+      throw new Error(
+        'Current page is not a chat. Use --chat <id> to specify which chat to continue.',
+      );
+    }
+  } else if (project !== undefined) {
+    await driver.navigateToProject(project, quiet);
+  } else {
+    await driver.navigateToNewChat(quiet);
+  }
 }
 
 /**
@@ -310,8 +342,7 @@ export const askCommand = defineCommand({
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,
-      filePaths, thinkingEffort, prompt,
-      continueChat, chatId, project,
+      filePaths, thinkingEffort, prompt, continueChat,
     } = validated;
 
     const browser = new BrowserManager();
@@ -320,25 +351,7 @@ export const askCommand = defineCommand({
       const page = await browser.getPage(quiet);
       const driver = new ChatGPTDriver(page);
 
-      // Navigation: --continue, --chat, or --project
-      if (continueChat && chatId !== undefined) {
-        await driver.navigateToChat(chatId, quiet);
-      } else if (continueChat) {
-        // --continue without --chat: verify the current page is a chat.
-        // Note: with CDP, getPage() returns the first ChatGPT tab, which may
-        // not be the user's active tab when multiple ChatGPT tabs are open.
-        // Use --chat <id> for deterministic behaviour in multi-tab setups.
-        const { pathname } = new URL(page.url());
-        if (!pathname.startsWith('/c/')) {
-          throw new Error(
-            'Current page is not a chat. Use --chat <id> to specify which chat to continue.',
-          );
-        }
-      } else if (project !== undefined) {
-        await driver.navigateToProject(project, quiet);
-      } else {
-        await driver.navigateToNewChat(quiet);
-      }
+      await navigate(driver, page, validated);
 
       // Skip model selection when continuing an existing chat
       if (!continueChat) {
@@ -366,7 +379,11 @@ export const askCommand = defineCommand({
       if (format === 'text') {
         text(result.text);
       } else {
-        json(result.text, { partial: !result.completed, model, timeoutSec });
+        json(result.text, {
+          partial: !result.completed,
+          model: continueChat ? undefined : model,
+          timeoutSec,
+        });
       }
     } catch (error: unknown) {
       fail(errorMessage(error));

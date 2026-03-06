@@ -153,7 +153,7 @@ export class ChatGPTDriver {
    */
   async deleteConversation(id: string, quiet = false): Promise<void> {
     progress(`Deleting conversation: ${id}`, quiet);
-    const link = await this.openConversationMenu(id);
+    const link = await this.openConversationMenu(id, quiet);
 
     await this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION).click();
     await this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM).click();
@@ -167,7 +167,7 @@ export class ChatGPTDriver {
    */
   async archiveConversation(id: string, quiet = false): Promise<void> {
     progress(`Archiving conversation: ${id}`, quiet);
-    const link = await this.openConversationMenu(id);
+    const link = await this.openConversationMenu(id, quiet);
 
     await this.page.locator(SELECTORS.CONVERSATION_ARCHIVE_OPTION).click();
 
@@ -190,7 +190,7 @@ export class ChatGPTDriver {
           // Expected href pattern: /g/{project-id}/project
           const segments = href.split('/').filter(Boolean);
           if (segments[0] !== 'g' || segments.length < 3 || segments[2] !== 'project') {
-            return acc; // skip links with unexpected format
+            throw new Error(`Unexpected project href format: "${href}"`);
           }
           acc.push({ id: segments[1], name: el.textContent.trim(), href });
         }
@@ -205,8 +205,7 @@ export class ChatGPTDriver {
    * so we can safely delegate to getConversationList().
    */
   async getProjectConversationList(quiet = false): Promise<ConversationItem[]> {
-    // Wait for sidebar to be ready. An empty list is valid (project with no chats).
-    await this.waitForSidebarContainer(quiet);
+    // Delegates to getConversationList which handles sidebar wait internally.
     return this.getConversationList(quiet);
   }
 
@@ -399,7 +398,8 @@ export class ChatGPTDriver {
    * Locate a conversation link in the sidebar, hover to reveal the
    * three-dot menu, and click it. Returns the link locator for further use.
    */
-  private async openConversationMenu(id: string): Promise<Locator> {
+  private async openConversationMenu(id: string, quiet = false): Promise<Locator> {
+    await this.waitForSidebarContainer(quiet);
     const link = this.page.locator(conversationLinkById(id));
     if ((await link.count()) === 0) {
       throw new Error(
