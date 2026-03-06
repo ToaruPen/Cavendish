@@ -52,9 +52,45 @@ node dist/index.mjs ask "explain X" --model Pro --thinking-effort standard --for
 
 cavendish connects via CDP automatically — no need to relaunch Chrome between runs.
 
+## Chrome Profile & Session Management
+
+### How sessions work
+
+Cavendish uses a dedicated Chrome profile at `~/.cavendish/chrome-profile`. Once you log in to ChatGPT, the session (cookies, local storage) is saved to this directory and persists across restarts — **you should only need to log in once.**
+
+### Important: always quit Chrome gracefully
+
+Chrome writes session data to disk on **graceful shutdown only**. If Chrome is force-killed (`pkill`, `kill -9`, crash), the session may not be saved and you will need to log in again.
+
+```bash
+# ✅ Correct — session is saved
+osascript -e 'tell application "Google Chrome" to quit'
+
+# ❌ Wrong — session may be lost
+pkill -f "Google Chrome"
+kill -9 <pid>
+```
+
+### Why `--user-data-dir` is required
+
+Chrome's remote debugging (`--remote-debugging-port`) **only works with a non-default data directory**. Using your regular Chrome profile without `--user-data-dir` will silently ignore the debugging port — CDP will not be available and cavendish cannot connect.
+
+The cavendish profile at `~/.cavendish/chrome-profile` is separate from your regular Chrome profile. This means:
+- Your regular Chrome bookmarks, extensions, and history are not affected
+- You need to log in to ChatGPT once in the cavendish profile
+- The cavendish profile is lightweight (only ChatGPT session data)
+
+### Troubleshooting login issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Must log in every time | Chrome was force-killed | Always use `osascript` to quit |
+| CDP not connecting | Default profile used (no `--user-data-dir`) | Use `~/.cavendish/chrome-profile` |
+| "Browser window not found" on launch | Another Chrome instance is running | Quit all Chrome instances first |
+| Session expired after long idle | ChatGPT's own session timeout | Re-login (normal, infrequent) |
+
 ## Notes
 
 - **Timeout**: Pro model needs 60–120s+. Default is 2400s for Pro.
-- **Session expiry**: Re-login only when ChatGPT's session expires (rare with persistent profile).
 - **Port conflict**: If port 9222 is in use, kill the old process first: `lsof -ti :9222 | xargs kill`.
-- **Cleanup**: Chrome stays running after cavendish exits (by design). Kill manually when done.
+- **Cleanup**: Chrome stays running after cavendish exits (by design). Quit gracefully when done.
