@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -222,12 +222,50 @@ export class BrowserManager {
     }
 
     const found = candidates.find((p) => existsSync(p));
-    if (!found) {
-      throw new Error(
-        `Chrome not found. Searched: ${candidates.join(', ')}. Install Google Chrome and retry.`,
-      );
+    if (found) {
+      return found;
     }
-    return found;
+
+    // Fallback: probe PATH via which/where for non-standard install locations
+    // (e.g. Snap, Homebrew, or other package managers)
+    const pathProbe = this.findChromeOnPath();
+    if (pathProbe) {
+      return pathProbe;
+    }
+
+    throw new Error(
+      `Chrome not found. Searched: ${candidates.join(', ')} and PATH. Install Google Chrome and retry.`,
+    );
+  }
+
+  /**
+   * Probe PATH for common Chrome/Chromium executable names.
+   * Returns the resolved absolute path or null.
+   */
+  private findChromeOnPath(): string | null {
+    const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
+    const names =
+      process.platform === 'win32'
+        ? ['chrome.exe']
+        : ['google-chrome', 'google-chrome-stable', 'chromium-browser', 'chromium'];
+
+    for (const name of names) {
+      try {
+        const result = execFileSync(cmd, [name], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: 5_000,
+        }).trim();
+        // `where` on Windows may return multiple lines; take the first
+        const firstLine = result.split('\n')[0]?.trim();
+        if (firstLine && existsSync(firstLine)) {
+          return firstLine;
+        }
+      } catch {
+        // Not found on PATH, try next name
+      }
+    }
+    return null;
   }
 
   /**
