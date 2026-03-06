@@ -5,6 +5,7 @@ import { askCommand } from './commands/ask.js';
 import { deleteCommand } from './commands/delete.js';
 import { listCommand } from './commands/list.js';
 import { projectsCommand } from './commands/projects.js';
+import { readCommand } from './commands/read.js';
 
 const main = defineCommand({
   meta: {
@@ -19,6 +20,7 @@ const main = defineCommand({
     delete: deleteCommand,
     list: listCommand,
     projects: projectsCommand,
+    read: readCommand,
   },
 });
 

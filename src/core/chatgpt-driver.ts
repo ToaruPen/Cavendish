@@ -20,6 +20,11 @@ export interface ProjectItem {
   href: string;
 }
 
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 const THINKING_EFFORT_LEVELS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
 ] as const;
@@ -377,6 +382,67 @@ export class ChatGPTDriver {
       const last = messages[messages.length - 1];
       return last.textContent.trim();
     }, SELECTORS.ASSISTANT_MESSAGE);
+  }
+
+  // ── Reading ───────────────────────────────────────────────
+
+  /**
+   * Read all messages from a conversation.
+   *
+   * Navigates to the chat and extracts user/assistant messages in DOM order.
+   * Consecutive assistant messages (e.g. thinking steps from reasoning models)
+   * are grouped into a single turn; only the last message in each group is kept.
+   */
+  async readConversation(chatId: string, quiet = false): Promise<ConversationMessage[]> {
+    await this.navigateToChat(chatId, quiet);
+
+    // Wait for at least one message to render after navigation.
+    const messageSelector = `${SELECTORS.USER_MESSAGE}, ${SELECTORS.ASSISTANT_MESSAGE}`;
+    await this.page.locator(messageSelector).first().waitFor({
+      state: 'visible',
+      timeout: 10_000,
+    });
+
+    progress('Reading conversation messages...', quiet);
+
+    const rawMessages = await this.page.evaluate(
+      ({ userSel, assistantSel }: { userSel: string; assistantSel: string }) => {
+        const allElements = document.querySelectorAll(
+          `${userSel}, ${assistantSel}`,
+        );
+        const result: { role: 'user' | 'assistant'; content: string }[] = [];
+        for (const el of allElements) {
+          const role = el.getAttribute('data-message-author-role') as
+            | 'user'
+            | 'assistant';
+          result.push({ role, content: (el.textContent || '').trim() });
+        }
+        return result;
+      },
+      {
+        userSel: SELECTORS.USER_MESSAGE,
+        assistantSel: SELECTORS.ASSISTANT_MESSAGE,
+      },
+    );
+
+    // Collapse consecutive assistant messages into one turn (keep last).
+    // Thinking models emit multiple assistant nodes per turn.
+    const messages: ConversationMessage[] = [];
+    for (const msg of rawMessages) {
+      if (
+        msg.role === 'assistant' &&
+        messages.length > 0 &&
+        messages[messages.length - 1].role === 'assistant'
+      ) {
+        // Replace previous assistant message with this one (keep last in group)
+        messages[messages.length - 1] = msg;
+      } else {
+        messages.push(msg);
+      }
+    }
+
+    progress(`Read ${String(messages.length)} message(s)`, quiet);
+    return messages;
   }
 
   // ── Private ────────────────────────────────────────────────
