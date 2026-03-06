@@ -1,7 +1,7 @@
 import type { Locator, Page } from 'playwright';
 import { errors } from 'playwright';
 
-import { CHATGPT_BASE_URL, conversationLinkById, SELECTORS } from '../constants/selectors.js';
+import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversationLinkByIdBroad, projectConversationLinkById, SELECTORS } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
 
@@ -82,11 +82,7 @@ export class ChatGPTDriver {
    * Navigate to a specific chat by its ID.
    */
   async navigateToChat(chatId: string, quiet = false): Promise<void> {
-    if (!/^[\w-]+$/.test(chatId)) {
-      throw new Error(
-        `Invalid chatId: "${chatId}". Must be non-empty and contain only alphanumeric characters, hyphens, or underscores.`,
-      );
-    }
+    assertValidChatId(chatId);
     progress(`Navigating to chat: ${chatId}`, quiet);
     await this.page.goto(`${CHATGPT_BASE_URL}/c/${chatId}`, {
       waitUntil: 'domcontentloaded',
@@ -166,11 +162,7 @@ export class ChatGPTDriver {
   async deleteConversation(id: string, quiet = false): Promise<void> {
     progress(`Deleting conversation: ${id}`, quiet);
     const link = await this.openConversationMenu(id, quiet);
-
-    await this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION).click();
-    await this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM).click();
-
-    await link.waitFor({ state: 'detached', timeout: 10_000 });
+    await this.confirmDeleteAndWait(link);
     progress('Conversation deleted', quiet);
   }
 
@@ -213,12 +205,155 @@ export class ChatGPTDriver {
 
   /**
    * Get conversations within the currently open project page.
-   * On a project page, ChatGPT's sidebar shows only that project's chats,
-   * so we can safely delegate to getConversationList().
+   * Uses the broad conversation link selector that matches both
+   * regular (/c/{id}) and project (/g/.../c/{id}) chat URLs.
    */
   async getProjectConversationList(quiet = false): Promise<ConversationItem[]> {
-    // Delegates to getConversationList which handles sidebar wait internally.
-    return this.getConversationList(quiet);
+    await this.waitForReady();
+    // Wait for project chat links to render in main content area.
+    // Timeout means the project has no chats; other errors are re-thrown.
+    try {
+      await this.page.locator(SELECTORS.PROJECT_CONVERSATION_LINK).first().waitFor({
+        state: 'attached',
+        timeout: 5000,
+      });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        progress('No project conversations found', quiet);
+        return [];
+      }
+      throw error;
+    }
+    return this.page.locator(SELECTORS.PROJECT_CONVERSATION_LINK).evaluateAll((els) =>
+      els.reduce<{ id: string; title: string }[]>((acc, el) => {
+        const href = el.getAttribute('href');
+        if (href) {
+          const match = /\/c\/([^/?#]+)$/.exec(href);
+          if (match) {
+            acc.push({
+              id: match[1],
+              title: (el.textContent || '').trim(),
+            });
+          }
+        }
+        return acc;
+      }, []),
+    );
+  }
+
+  /**
+   * Delete a project conversation by ID via the project conversation context menu.
+   */
+  async deleteProjectConversation(id: string, quiet = false): Promise<void> {
+    progress(`Deleting project conversation: ${id}`, quiet);
+    const link = await this.openProjectConversationMenu(id);
+    await this.confirmDeleteAndWait(link);
+    progress('Project conversation deleted', quiet);
+  }
+
+  /**
+   * Create a new project via the sidebar UI.
+   * Expands the project section, clicks the create button,
+   * fills the name in the modal, and confirms.
+   */
+  async createProject(name: string, quiet = false): Promise<void> {
+    progress(`Creating project: ${name}`, quiet);
+
+    await this.waitForSidebarContainer(quiet);
+
+    // Expand the project section in the sidebar (only if collapsed)
+    const sectionToggle = this.page.locator(SELECTORS.PROJECT_SECTION_TOGGLE).first();
+    const expanded = await sectionToggle.getAttribute('aria-expanded');
+    if (expanded !== 'true') {
+      await sectionToggle.click();
+    }
+
+    // Click the "new project" button (now visible)
+    const newBtn = this.page.locator(SELECTORS.NEW_PROJECT_BUTTON);
+    await newBtn.waitFor({ state: 'visible', timeout: 5000 });
+    await newBtn.click();
+
+    // Fill the project name in the modal
+    const nameInput = this.page.locator(SELECTORS.PROJECT_NAME_INPUT);
+    await nameInput.waitFor({ state: 'visible', timeout: 5000 });
+    await nameInput.fill(name);
+
+    // Click the confirm button (becomes enabled after name is filled)
+    const confirmBtn = this.page.locator(SELECTORS.PROJECT_CREATE_CONFIRM);
+    await confirmBtn.waitFor({ state: 'visible', timeout: 5000 });
+    const urlBeforeCreate = this.page.url();
+    await confirmBtn.click();
+
+    await this.page.waitForURL(
+      (url) => url.toString() !== urlBeforeCreate && /\/g\/.*\/project/.test(url.toString()),
+      { timeout: 10_000 },
+    );
+
+    progress(`Project created: ${name}`, quiet);
+  }
+
+  /**
+   * Move a conversation to a project via the conversation context menu.
+   */
+  async moveToProject(chatId: string, projectName: string, quiet = false): Promise<void> {
+    progress(`Moving conversation ${chatId} to project: ${projectName}`, quiet);
+
+    await this.waitForSidebarContainer(quiet);
+    const link = this.page.locator(conversationLinkByIdBroad(chatId));
+    try {
+      await link.waitFor({ state: 'attached', timeout: 5000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Conversation "${chatId}" not found in sidebar. Run "cavendish list" to see available chats.`,
+        );
+      }
+      throw error;
+    }
+
+    await link.hover();
+    const menuButton = link.locator(SELECTORS.CONVERSATION_MENU_BUTTON);
+    await menuButton.waitFor({ state: 'visible', timeout: 5000 });
+    await menuButton.click();
+
+    await this.page.locator(SELECTORS.CONVERSATION_MOVE_TO_PROJECT_OPTION).click();
+
+    const projectItem = this.page
+      .locator(SELECTORS.PROJECT_PICKER_ITEM)
+      .filter({ hasText: projectName });
+
+    // Wait for the project picker submenu to render before checking matches
+    try {
+      await projectItem.first().waitFor({ state: 'visible', timeout: 5000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        await this.page.keyboard.press('Escape');
+        throw new Error(
+          `Project "${projectName}" not found in project picker.`,
+        );
+      }
+      throw error;
+    }
+
+    const count = await projectItem.count();
+    if (count > 1) {
+      // Multiple partial matches — find exact match by text content
+      for (let i = 0; i < count; i++) {
+        const text = await projectItem.nth(i).textContent();
+        if (text?.trim() === projectName) {
+          await projectItem.nth(i).click();
+          progress(`Conversation moved to project: ${projectName}`, quiet);
+          return;
+        }
+      }
+      await this.page.keyboard.press('Escape');
+      throw new Error(
+        `Multiple projects partially match "${projectName}" but none is an exact match. Please use the full project name.`,
+      );
+    }
+    await projectItem.first().click();
+
+    progress(`Conversation moved to project: ${projectName}`, quiet);
   }
 
   // ── Model & messaging ──────────────────────────────────────
@@ -454,6 +589,16 @@ export class ChatGPTDriver {
   // ── Private ────────────────────────────────────────────────
 
   /**
+   * Click the delete option, confirm, and wait for the link to disappear.
+   * Shared by deleteConversation and deleteProjectConversation.
+   */
+  private async confirmDeleteAndWait(link: Locator): Promise<void> {
+    await this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION).click();
+    await this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM).click();
+    await link.waitFor({ state: 'detached', timeout: 10_000 });
+  }
+
+  /**
    * Wait for the sidebar history container to be present in the DOM.
    * Unlike waitForSidebarLinks, this does NOT require links to exist —
    * an empty sidebar (0 conversations) is a valid state.
@@ -490,6 +635,33 @@ export class ChatGPTDriver {
 
     await link.hover();
     const menuButton = link.locator(SELECTORS.CONVERSATION_MENU_BUTTON);
+    await menuButton.waitFor({ state: 'visible', timeout: 5000 });
+    await menuButton.click();
+
+    return link;
+  }
+
+  /**
+   * Locate a project conversation link in the main content area, hover to
+   * reveal the overflow menu, and click it.
+   * Returns the link locator for detachment checks.
+   */
+  private async openProjectConversationMenu(id: string): Promise<Locator> {
+    await this.waitForReady();
+    const link = this.page.locator(projectConversationLinkById(id));
+    try {
+      await link.waitFor({ state: 'attached', timeout: 5000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Project conversation "${id}" not found. Run "cavendish projects --name <project> --chats" to see available chats.`,
+        );
+      }
+      throw error;
+    }
+
+    await link.hover();
+    const menuButton = link.locator(SELECTORS.PROJECT_CONVERSATION_MENU_BUTTON);
     await menuButton.waitFor({ state: 'visible', timeout: 5000 });
     await menuButton.click();
 
