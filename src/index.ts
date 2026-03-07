@@ -8,6 +8,7 @@ import { listCommand } from './commands/list.js';
 import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
 import { readCommand } from './commands/read.js';
+import { statusCommand } from './commands/status.js';
 
 const main = defineCommand({
   meta: {
@@ -25,6 +26,7 @@ const main = defineCommand({
     move: moveCommand,
     projects: projectsCommand,
     read: readCommand,
+    status: statusCommand,
   },
 });
 

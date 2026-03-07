@@ -4,6 +4,33 @@ import { resolve } from 'node:path';
 import { errorMessage, fail } from './output-handler.js';
 
 /**
+ * Global args shared across all commands.
+ * Spread into each command's `args` to avoid per-command duplication.
+ */
+export const GLOBAL_ARGS = {
+  quiet: {
+    type: 'boolean' as const,
+    description: 'Suppress stderr progress messages',
+  },
+  dryRun: {
+    type: 'boolean' as const,
+    description: 'Validate args and show planned action without executing',
+  },
+};
+
+/**
+ * Format arg for commands that produce structured output.
+ * Commands like archive/delete/move that have no formatted output should not include this.
+ */
+export const FORMAT_ARG = {
+  format: {
+    type: 'string' as const,
+    description: 'Output format: json or text (default: json)',
+    default: 'json',
+  },
+};
+
+/**
  * Extract repeatable string arguments from process.argv.
  * citty does not support array-type args, so we parse manually.
  * Supports both --flag <value> and --flag=<value> forms.

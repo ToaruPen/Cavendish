@@ -1,5 +1,6 @@
 import { defineCommand } from 'citty';
 
+import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { outputList, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -12,20 +13,18 @@ export const listCommand = defineCommand({
     description: 'List conversations from the ChatGPT sidebar',
   },
   args: {
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
-    format: {
-      type: 'string',
-      description: 'Output format: json or text (default: json)',
-      default: 'json',
-    },
+    ...GLOBAL_ARGS,
+    ...FORMAT_ARG,
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
+
+    if (args.dryRun === true) {
+      progress(`[dry-run] Would list conversations (format: ${format})`, false);
+      return;
+    }
 
     await withDriver(quiet, async (driver) => {
       progress('Fetching conversation list...', quiet);

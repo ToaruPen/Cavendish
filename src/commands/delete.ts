@@ -1,5 +1,8 @@
 import { defineCommand } from 'citty';
 
+import { assertValidChatId } from '../constants/selectors.js';
+import { GLOBAL_ARGS } from '../core/cli-args.js';
+import { fail, progress } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /**
@@ -21,14 +24,26 @@ export const deleteCommand = defineCommand({
       type: 'string',
       description: 'Project name (required for project conversations)',
     },
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
+    ...GLOBAL_ARGS,
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const projectName = args.project;
+
+    try {
+      assertValidChatId(args.chatId);
+    } catch (error: unknown) {
+      fail(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
+    if (args.dryRun === true) {
+      const target = projectName !== undefined
+        ? `project conversation ${args.chatId} in "${projectName}"`
+        : `conversation ${args.chatId}`;
+      progress(`[dry-run] Would delete ${target}`, false);
+      return;
+    }
 
     await withDriver(quiet, async (driver) => {
       if (projectName !== undefined) {

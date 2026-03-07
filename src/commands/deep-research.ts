@@ -4,6 +4,7 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
+import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -240,15 +241,6 @@ export const deepResearchCommand = defineCommand({
       type: 'string',
       description: `Response timeout in seconds (default: ${String(DEFAULT_TIMEOUT_SEC)})`,
     },
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
-    format: {
-      type: 'string',
-      description: 'Output format: json or text (default: json)',
-      default: 'json',
-    },
     file: {
       type: 'string',
       description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
@@ -261,12 +253,24 @@ export const deepResearchCommand = defineCommand({
       type: 'string',
       description: 'Path to save exported file (default: ./deep-research-report.{ext})',
     },
+    ...GLOBAL_ARGS,
+    ...FORMAT_ARG,
   },
   async run({ args }): Promise<void> {
     const v = validateArgs(args);
     if (v === undefined) { return; }
 
     const { quiet, mode, format, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
+
+    if (args.dryRun === true) {
+      const parts = [`mode: ${mode.kind}`, `format: ${format}`, `timeout: ${String(timeoutSec)}s`];
+      if (mode.kind === 'initial' && mode.filePaths.length > 0) {
+        parts.push(`${String(mode.filePaths.length)} file(s)`);
+      }
+      if (exportFormat !== undefined) { parts.push(`export: ${exportFormat}`); }
+      progress(`[dry-run] Would send Deep Research query (${parts.join(', ')})`, false);
+      return;
+    }
 
     await withDriver(quiet, async (driver) => {
       const preActionText = await sendQuery(driver, mode, quiet, timeoutMs);

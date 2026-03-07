@@ -1,5 +1,6 @@
 import { defineCommand } from 'citty';
 
+import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { fail, outputList, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -24,15 +25,8 @@ export const projectsCommand = defineCommand({
       type: 'boolean',
       description: 'Create a new project (requires --name)',
     },
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
-    format: {
-      type: 'string',
-      description: 'Output format: json or text (default: json)',
-      default: 'json',
-    },
+    ...GLOBAL_ARGS,
+    ...FORMAT_ARG,
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
@@ -49,6 +43,18 @@ export const projectsCommand = defineCommand({
 
     if (createProject && projectName === undefined) {
       fail('--create requires --name. Use: cavendish projects --create --name "Project"');
+      return;
+    }
+
+    if (args.dryRun === true) {
+      if (createProject) {
+        progress(`[dry-run] Would create project "${String(projectName)}"`, false);
+      } else if (showChats && projectName !== undefined) {
+        progress(`[dry-run] Would list chats in project "${projectName}" (format: ${format})`, false);
+      } else {
+        const filter = projectName !== undefined ? ` (filter: "${projectName}")` : '';
+        progress(`[dry-run] Would list projects${filter} (format: ${format})`, false);
+      }
       return;
     }
 
