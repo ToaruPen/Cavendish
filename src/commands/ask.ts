@@ -4,36 +4,10 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
-import { ChatGPTDriver, type ThinkingEffortLevel, type WaitForResponseResult } from '../core/chatgpt-driver.js';
+import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
+import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, fail, failStructured, json, progress, text, validateFormat } from '../core/output-handler.js';
-
-const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
-  'light', 'standard', 'extended', 'deep',
-];
-
-/** Pro models only allow standard and extended effort levels. */
-const PRO_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = ['standard', 'extended'];
-
-/**
- * Return the allowed thinking effort levels for a model, or undefined
- * if the model does not support --thinking-effort at all.
- */
-function allowedThinkingEfforts(model: string): readonly ThinkingEffortLevel[] | undefined {
-  const lower = model.toLowerCase();
-  if (lower.includes('thinking')) {return VALID_THINKING_EFFORTS;}
-  if (lower.includes('pro')) {return PRO_THINKING_EFFORTS;}
-  return undefined;
-}
-
-/**
- * Check whether a model supports GitHub integration in standard chat.
- * Only Thinking (Agent Mode) supports GitHub; Deep Research has its own path.
- */
-function supportsGitHub(model: string): boolean {
-  const lower = model.toLowerCase();
-  return lower.includes('thinking');
-}
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -114,8 +88,8 @@ function validateThinkingEffort(
   if (thinkingEffort === undefined) {
     return undefined;
   }
-  if (!VALID_THINKING_EFFORTS.includes(thinkingEffort)) {
-    return `--thinking-effort must be one of: ${VALID_THINKING_EFFORTS.join(', ')}. Got "${thinkingEffort}"`;
+  if (!THINKING_EFFORT_LEVELS.includes(thinkingEffort)) {
+    return `--thinking-effort must be one of: ${THINKING_EFFORT_LEVELS.join(', ')}. Got "${thinkingEffort}"`;
   }
   const allowedEfforts = allowedThinkingEfforts(model);
   if (allowedEfforts === undefined) {
