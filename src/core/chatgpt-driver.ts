@@ -657,10 +657,22 @@ export class ChatGPTDriver {
   /**
    * Get the most recent conversation ID from the sidebar.
    * Returns undefined when the sidebar is empty.
+   *
+   * Uses a broad selector (`href*="/c/"`) to match both regular (`/c/{id}`)
+   * and project (`/g/.../c/{id}`) conversation links.  The sidebar orders
+   * items by recency, so the first match is the most recent chat.
    */
   async getMostRecentChatId(quiet = false): Promise<string | undefined> {
-    const conversations = await this.getConversationList(quiet);
-    return conversations[0]?.id;
+    await this.waitForSidebarContainer(quiet);
+    const href = await this.page
+      .locator('#history a[href*="/c/"]')
+      .first()
+      .getAttribute('href')
+      .catch(() => null);
+    if (!href) {return undefined;}
+    // Extract the chat ID: last segment after the final "/c/"
+    const match = /\/c\/([^/?#]+)$/.exec(href);
+    return match?.[1];
   }
 
   /**
