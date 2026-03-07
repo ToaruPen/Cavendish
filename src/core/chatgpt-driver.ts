@@ -385,6 +385,10 @@ export class ChatGPTDriver {
   ): Promise<WaitForResponseResult> {
     const STABLE_THRESHOLD = 3;
     let stableCount = 0;
+    // Track whether a transition was observed (text went empty, changed, or
+    // stop button appeared). Once true, identical text is no longer stale —
+    // it's a regenerated report that happens to match the prior turn.
+    let sawTransition = false;
 
     const reportDeadline = Math.min(deadline, Date.now() + 120_000);
     while (Date.now() < reportDeadline) {
@@ -392,12 +396,16 @@ export class ChatGPTDriver {
       const hasStop = await this.hasDeepResearchStopButton();
       const text = await this.getDeepResearchResponse();
 
-      // Skip empty text, active research, or stale prior-turn content.
-      // When the stop button was observed and is now gone, trust that signal
-      // even if the text is identical to the pre-action snapshot (e.g. refresh
-      // producing the same report).
-      const isStale = !seenStopButton && text === preActionText;
-      if (text.length === 0 || hasStop || isStale) {
+      if (text.length === 0 || hasStop) {
+        sawTransition = true;
+        stableCount = 0;
+        continue;
+      }
+      if (text !== preActionText) {
+        sawTransition = true;
+      }
+      // Before any transition, identical text is likely stale prior-turn content.
+      if (!seenStopButton && !sawTransition && text === preActionText) {
         stableCount = 0;
         continue;
       }
