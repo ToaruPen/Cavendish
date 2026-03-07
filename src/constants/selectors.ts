@@ -201,6 +201,16 @@ export const SELECTORS = {
   /** Agent mode pill button in composer footer (after agent mode is enabled) */
   AGENT_MODE_PILL:
     'button.__composer-pill[aria-label*="エージェント"], button.__composer-pill[aria-label*="Agent"]',
+
+  // ── Auth / Cloudflare detection ────────────────────────────
+  /** Cloudflare Turnstile challenge iframe */
+  CF_TURNSTILE_IFRAME: 'iframe[src*="challenges.cloudflare.com"]',
+
+  /** Cloudflare challenge form (alternative detection) */
+  CF_CHALLENGE_FORM: '#challenge-form',
+
+  /** ChatGPT login button (visible on auth/login pages) */
+  LOGIN_BUTTON: '[data-testid="login-button"]',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
