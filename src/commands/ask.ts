@@ -93,6 +93,7 @@ interface ValidatedArgs {
   filePaths: string[];
   gdriveFiles: string[];
   githubRepos: string[];
+  agentMode: boolean;
   thinkingEffort: ThinkingEffortLevel | undefined;
   prompt: string;
   continueChat: boolean;
@@ -210,6 +211,8 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
+  const agentMode = args.agent === true;
+
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
   if (thinkingEffort !== undefined && chatOptions.continueChat) {
     fail('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.'); return;
@@ -234,6 +237,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     filePaths,
     gdriveFiles,
     githubRepos,
+    agentMode,
     thinkingEffort,
     prompt,
     ...chatOptions,
@@ -329,6 +333,10 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'GitHub repo(s) as context (repeatable: --github "owner/repo")',
     },
+    agent: {
+      type: 'boolean',
+      description: 'Enable agent mode (code execution, file operations)',
+    },
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
@@ -336,7 +344,7 @@ export const askCommand = defineCommand({
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,
-      filePaths, gdriveFiles, githubRepos, thinkingEffort, prompt, continueChat,
+      filePaths, gdriveFiles, githubRepos, agentMode, thinkingEffort, prompt, continueChat,
     } = validated;
 
     const browser = new BrowserManager();
@@ -366,6 +374,10 @@ export const askCommand = defineCommand({
 
       for (const repo of githubRepos) {
         await driver.attachGitHubRepo(repo, quiet);
+      }
+
+      if (agentMode) {
+        await driver.enableAgentMode(quiet);
       }
 
       progress('Sending message...', quiet);

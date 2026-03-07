@@ -156,6 +156,11 @@ export const SELECTORS = {
 
   /** Radix popover content wrapper (used for GitHub repo picker) */
   POPOVER_CONTENT: '[data-radix-popper-content-wrapper]',
+
+  // ── Agent Mode ────────────────────────────────────────────
+  /** Agent mode pill button in composer footer (after agent mode is enabled) */
+  AGENT_MODE_PILL:
+    'button.__composer-pill[aria-label*="エージェント"], button.__composer-pill[aria-label*="Agent"]',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
@@ -168,6 +173,7 @@ export const MENU_LABELS = {
   SHOW_MORE: ['さらに表示', 'Show more'] as const,
   ADD_FROM_GOOGLE_DRIVE: ['Google Drive から追加する', 'Add from Google Drive'] as const,
   GITHUB: ['GitHub'] as const,
+  AGENT_MODE: ['エージェントモード', 'Agent mode'] as const,
 } as const;
 
 export const CHATGPT_BASE_URL = 'https://chatgpt.com';

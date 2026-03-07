@@ -520,6 +520,32 @@ export class ChatGPTDriver {
     progress(`GitHub repo attached: ${repo}`, quiet);
   }
 
+  // ── Agent Mode ──────────────────────────────────────────────
+
+  /**
+   * Enable agent mode in the composer.
+   * Navigates through the submenu: + → さらに表示 → エージェントモード
+   * If agent mode is already active (pill visible), this is a no-op.
+   */
+  async enableAgentMode(quiet = false): Promise<void> {
+    progress('Enabling agent mode...', quiet);
+
+    const pill = this.page.locator(SELECTORS.AGENT_MODE_PILL);
+    const alreadyActive = await pill.isVisible().catch((): boolean => false);
+    if (alreadyActive) {
+      progress('Agent mode already active', quiet);
+      return;
+    }
+
+    await this.openComposerMenuItem(
+      [[...MENU_LABELS.SHOW_MORE], [...MENU_LABELS.AGENT_MODE]],
+      quiet,
+    );
+
+    await pill.waitFor({ state: 'visible', timeout: 5000 });
+    progress('Agent mode enabled', quiet);
+  }
+
   // ── Deep Research ─────────────────────────────────────────
 
   /**
