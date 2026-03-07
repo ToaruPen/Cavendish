@@ -146,6 +146,9 @@ export const SELECTORS = {
   /** Send button that appears after text is entered (shared with DR page) */
   SEND_BUTTON: '[data-testid="send-button"]',
 
+  /** Send button filtered to enabled state (not disabled) */
+  SEND_BUTTON_ENABLED: '[data-testid="send-button"]:not([disabled])',
+
   /** URL substring used to locate the Deep Research iframe */
   DEEP_RESEARCH_FRAME_URL: 'deep_research',
 

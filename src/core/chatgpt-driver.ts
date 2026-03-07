@@ -161,7 +161,8 @@ export class ChatGPTDriver {
 
   /**
    * Navigate to an existing DR chat and send a follow-up message.
-   * Uses JavaScript click to avoid header overlay interception on chat pages.
+   * Verifies the chat is a Deep Research session before sending.
+   * Uses force click because the sticky page-header intercepts normal clicks.
    */
   async sendDeepResearchFollowUp(
     chatId: string,
@@ -170,21 +171,26 @@ export class ChatGPTDriver {
   ): Promise<void> {
     await this.navigateToChat(chatId, quiet);
 
+    // Verify this is actually a DR session by checking for DR iframe
+    const drFrame = this.getDeepResearchContentFrame();
+    if (!drFrame) {
+      throw new Error(
+        `Chat ${chatId} does not appear to be a Deep Research session (no DR iframe found)`,
+      );
+    }
+
     const input = this.page.locator(SELECTORS.PROMPT_INPUT);
     await input.fill(text);
 
-    // Wait for send button to appear after text entry, then click with
-    // force: true — the sticky page-header intercepts normal Playwright clicks
-    // on chat pages (its children have pointer-events: auto).
     // Wait for the send button to become visible AND enabled before clicking.
     // Use force: true because the sticky page-header intercepts normal clicks.
-    const sendBtn = this.page.locator(`${SELECTORS.SEND_BUTTON}:not([disabled])`);
+    const sendBtn = this.page.locator(SELECTORS.SEND_BUTTON_ENABLED);
     try {
       await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
     } catch (e: unknown) {
       if (isTimeoutError(e)) {
         throw new Error(
-          `Send button not ready after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON})`,
+          `Send button not ready after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON_ENABLED})`,
         );
       }
       throw e;

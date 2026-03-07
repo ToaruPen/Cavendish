@@ -78,14 +78,14 @@ function validateFlagConflicts(args: Record<string, unknown>): boolean {
     fail('--refresh re-runs the existing prompt; do not provide a new prompt');
     return false;
   }
-  if (!isRefresh && (args.prompt === undefined || args.prompt === '')) {
-    fail('A prompt is required (positional argument)');
-    return false;
-  }
   return true;
 }
 
-function resolveRunMode(args: Record<string, unknown>, stdinData: string): RunMode | undefined {
+function resolveRunMode(
+  args: Record<string, unknown>,
+  stdinData: string,
+  filePaths: string[],
+): RunMode | undefined {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
   const chatId = args.chat as string;
@@ -98,22 +98,26 @@ function resolveRunMode(args: Record<string, unknown>, stdinData: string): RunMo
     return { kind: 'refresh', chatId };
   }
 
-  const prompt = buildPrompt(args.prompt as string, stdinData);
+  // Prompt can come from positional arg, stdin, or both (buildPrompt merges them).
+  // Require at least one source.
+  const prompt = buildPrompt(args.prompt as string | undefined ?? '', stdinData);
+  if (prompt.length === 0) {
+    fail('A prompt is required (positional argument or stdin)');
+    return undefined;
+  }
 
   if (isFollowUp) {
     return { kind: 'followup', chatId, prompt };
   }
 
-  const filePaths = validateFileArgs();
-  if (filePaths === undefined) { return undefined; }
   return { kind: 'initial', prompt, filePaths };
 }
 
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
 
-  // Validate flags, format, timeout, and export BEFORE reading stdin
-  // so obviously invalid invocations fail fast without blocking on EOF.
+  // Validate flags, format, timeout, export, and file args BEFORE reading
+  // stdin so obviously invalid invocations fail fast without blocking on EOF.
   if (!validateFlagConflicts(args)) { return undefined; }
 
   const format = validateFormat(args.format as string);
@@ -125,6 +129,14 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const exp = validateExport(args.export, args.exportPath);
   if (exp === undefined) { return undefined; }
 
+  // Validate file args before stdin (--file missing.txt should fail fast)
+  let filePaths: string[] = [];
+  if (args.chat === undefined) {
+    const validated = validateFileArgs();
+    if (validated === undefined) { return undefined; }
+    filePaths = validated;
+  }
+
   let stdinData: string;
   try {
     stdinData = readStdin();
@@ -133,7 +145,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
-  const mode = resolveRunMode(args, stdinData);
+  const mode = resolveRunMode(args, stdinData, filePaths);
   if (mode === undefined) { return undefined; }
 
   return {
@@ -260,15 +272,16 @@ export const deepResearchCommand = defineCommand({
         }
       }
 
-      // Export to file if requested (after copy, so export menu state is clean)
+      // Export to file if requested (after copy, so export menu state is clean).
+      // On incomplete reports, skip export but still output the partial result.
       if (exportFormat !== undefined) {
         if (!result.completed) {
           const target = exportPath ?? defaultExportFilename(exportFormat);
-          fail(`--export requested but report is incomplete; export to "${target}" aborted`);
-          return;
+          progress(`Export skipped: report is incomplete; "${target}" not written`, quiet);
+        } else {
+          const savePath = resolve(exportPath ?? defaultExportFilename(exportFormat));
+          await driver.exportDeepResearch(exportFormat, savePath, quiet);
         }
-        const savePath = resolve(exportPath ?? defaultExportFilename(exportFormat));
-        await driver.exportDeepResearch(exportFormat, savePath, quiet);
       }
 
       if (format === 'text') {
