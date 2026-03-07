@@ -95,21 +95,22 @@ export function classifyError(error: unknown): CavendishError {
   }
 
   const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
 
   // CDP / Chrome connection errors
   if (
-    message.includes('did not respond on port') ||
-    message.includes('Failed to connect to Chrome') ||
-    message.includes('ECONNREFUSED') ||
-    message.includes('connectOverCDP')
+    lower.includes('did not respond on port') ||
+    lower.includes('failed to connect to chrome') ||
+    lower.includes('econnrefused') ||
+    lower.includes('connectovercdp')
   ) {
     return new CavendishError(message, 'cdp_unavailable');
   }
 
   // Chrome not installed
   if (
-    message.includes('Chrome not found') ||
-    message.includes('Failed to launch Chrome')
+    lower.includes('chrome not found') ||
+    lower.includes('failed to launch chrome')
   ) {
     return new CavendishError(message, 'chrome_not_found');
   }
@@ -117,22 +118,20 @@ export function classifyError(error: unknown): CavendishError {
   // Auth / login detection — use specific phrases to avoid false positives
   // (e.g. "author-role", "authorization header" should NOT match)
   if (
-    message.includes('not logged in') ||
-    message.includes('Not logged in') ||
-    message.includes('login required') ||
-    message.includes('auth expired') ||
-    message.includes('session expired') ||
-    message.includes('log in to ChatGPT') ||
-    message.includes('/auth/login')
+    lower.includes('not logged in') ||
+    lower.includes('login required') ||
+    lower.includes('auth expired') ||
+    lower.includes('session expired') ||
+    lower.includes('log in to chatgpt') ||
+    lower.includes('/auth/login')
   ) {
     return new CavendishError(message, 'auth_expired');
   }
 
   // Cloudflare
   if (
-    message.includes('Cloudflare') ||
-    message.includes('cloudflare') ||
-    message.includes('challenge')
+    lower.includes('cloudflare') ||
+    lower.includes('challenge')
   ) {
     return new CavendishError(message, 'cloudflare_blocked');
   }
@@ -142,23 +141,22 @@ export function classifyError(error: unknown): CavendishError {
   // Use narrow patterns to avoid matching timeout messages that mention "selector"
   // in human-readable context (e.g. "check selector changes").
   if (
-    message.includes('waiting for locator') ||
-    message.includes('waiting for selector') ||
-    message.includes('not found in sidebar') ||
-    message.includes('not found in picker') ||
-    message.includes('not found in project picker') ||
-    message.includes('iframe not found') ||
-    message.includes('frame not found') ||
-    message.includes('not found (selector')
+    lower.includes('waiting for locator') ||
+    lower.includes('waiting for selector') ||
+    lower.includes('not found in sidebar') ||
+    lower.includes('not found in picker') ||
+    lower.includes('not found in project picker') ||
+    lower.includes('iframe not found') ||
+    lower.includes('frame not found') ||
+    lower.includes('not found (selector')
   ) {
     return new CavendishError(message, 'selector_miss');
   }
 
   // Timeout errors (Playwright TimeoutError or message-based detection)
   if (
-    message.includes('Timeout') ||
-    message.includes('timeout') ||
-    message.includes('exceeded') ||
+    lower.includes('timeout') ||
+    lower.includes('exceeded') ||
     (error instanceof Error && error.constructor.name === 'TimeoutError')
   ) {
     return new CavendishError(message, 'timeout');
