@@ -168,7 +168,7 @@ cavendish projects --create --name "New Project"
 
 ## Architecture
 
-```
+```text
 CLI (citty)
   -> BrowserManager (Chrome launch/connect via CDP)
     -> ChatGPTDriver (DOM operations)

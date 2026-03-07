@@ -351,7 +351,7 @@ cavendish projects --name "For-Agents" --chats
 
 ## 9. ディレクトリ構成
 
-```
+```text
 cavendish/
 ├── package.json
 ├── tsconfig.json
