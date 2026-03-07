@@ -1,6 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
+import { errors } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
@@ -67,8 +68,12 @@ async function waitForLogin(
       const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
       await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
       return true;
-    } catch {
-      // Prompt not visible yet — may be on login page or still loading.
+    } catch (error: unknown) {
+      // Only treat timeout (prompt not visible yet) as "not logged in".
+      // Connection/selector errors should fail fast instead of waiting 5 min.
+      if (!(error instanceof errors.TimeoutError)) {
+        throw error;
+      }
       // Fall back to CDP heuristic (non-auth tab means logged in).
       if (await isLoggedInViaCdp()) {
         return true;
@@ -82,59 +87,25 @@ async function waitForLogin(
 }
 
 /**
- * Close any Chrome process listening on the CDP port via the DevTools
- * protocol `Browser.close` command.  This terminates the Chrome process
- * cleanly without relying on platform-specific shell commands.
+ * Close any Chrome process listening on the CDP port via Playwright's
+ * `connectOverCDP` + `browser.close()`.  This terminates the Chrome process
+ * cleanly without relying on platform-specific shell commands or the
+ * global WebSocket API (unavailable in Node 20).
  *
  * Needed after profile reset so that the stale Chrome process (still
  * using the old profile in memory) is terminated before re-launch.
  */
 async function killExistingChrome(quiet: boolean): Promise<void> {
-  let wsUrl: string;
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/version`);
-    if (!res.ok) {
-      return;
-    }
-    const data = (await res.json()) as { webSocketDebuggerUrl?: string };
-    if (!data.webSocketDebuggerUrl) {
-      return;
-    }
-    wsUrl = data.webSocketDebuggerUrl;
-  } catch {
-    // Chrome is not running — nothing to kill
-    return;
-  }
-
-  progress('Stopping existing Chrome process...', quiet);
-  try {
-    // Send Browser.close via the CDP WebSocket to terminate Chrome
-    await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(wsUrl);
-      const timer = setTimeout(() => {
-        ws.close();
-        reject(new Error('Timeout waiting for Browser.close'));
-      }, 5_000);
-
-      ws.addEventListener('open', () => {
-        ws.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
-      });
-      ws.addEventListener('message', () => {
-        clearTimeout(timer);
-        ws.close();
-        resolve();
-      });
-      ws.addEventListener('error', () => {
-        // Connection error likely means Chrome already closed
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    const { chromium } = await import('playwright');
+    progress('Stopping existing Chrome process...', quiet);
+    const browser = await chromium.connectOverCDP(CDP_BASE_URL);
+    await browser.close();
     // Give Chrome a moment to fully shut down
     await new Promise((r) => setTimeout(r, 1_000));
     progress('Chrome process stopped', quiet);
   } catch {
-    progress('Could not stop Chrome automatically. Please close Chrome manually and retry.', quiet);
+    // Chrome not running or can't connect — that's fine
   }
 }
 
@@ -235,19 +206,22 @@ export const initCommand = defineCommand({
     }
 
     if (args.dryRun === true) {
-      const action = args.reset === true ? 'reset and reinitialize' : 'initialize';
-      progress(`[dry-run] Would ${action} Chrome profile at ${CHROME_PROFILE_DIR}`, false);
+      if (format === 'json') {
+        jsonRaw({ dryRun: true, steps: ['check_profile', 'connect_chrome', 'verify_login'] });
+      } else {
+        const action = args.reset === true ? 'reset and reinitialize' : 'initialize';
+        progress(`[dry-run] Would ${action} Chrome profile at ${CHROME_PROFILE_DIR}`, quiet);
+      }
       return;
     }
 
-    if (args.reset === true) {
-      await killExistingChrome(quiet);
-      handleProfileReset(quiet);
-    }
-
-    reportProfileStatus(quiet);
-
     try {
+      if (args.reset === true) {
+        await killExistingChrome(quiet);
+        handleProfileReset(quiet);
+      }
+
+      reportProfileStatus(quiet);
       const result = await setupAndVerify(quiet);
       outputResult(result, format);
 

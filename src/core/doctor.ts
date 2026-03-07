@@ -213,10 +213,10 @@ async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
       };
     }
 
-    // Check for the GitHub footer button pattern — Google Drive is a menu item,
-    // but we only check that the + button exists and is clickable.
-    // Full menu traversal would be invasive, so we just verify the entry point.
-    return { name: 'gdrive_picker', status: 'pass', detail: 'Composer + button available' };
+    // Google Drive is a menu item inside the + menu, but opening the menu
+    // to verify the Drive entry would be invasive (clicks, side-effects).
+    // We only verify the entry point (+ button) as a non-intrusive proxy.
+    return { name: 'gdrive_picker', status: 'pass', detail: 'Composer + button found (Drive menu entry not verified)' };
   } catch (error: unknown) {
     return {
       name: 'gdrive_picker',
