@@ -363,8 +363,9 @@ export class ChatGPTDriver {
     const initialText = await this.getDeepResearchResponse();
 
     // If the stop button was observed and is now gone, non-empty text is the report.
-    // Also verify it differs from the pre-action snapshot to avoid returning stale content.
-    if (seenStopButton && initialText.length > 0 && initialText !== preActionText && !await this.hasDeepResearchStopButton()) {
+    // No preActionText check here: stop-button disappearance is a reliable completion
+    // signal, even if the regenerated text is identical (e.g. refresh same prompt).
+    if (seenStopButton && initialText.length > 0 && !await this.hasDeepResearchStopButton()) {
       progress('Response complete', quiet);
       return { text: initialText, completed: true };
     }
@@ -390,7 +391,12 @@ export class ChatGPTDriver {
       const hasStop = await this.hasDeepResearchStopButton();
       const text = await this.getDeepResearchResponse();
 
-      if (text.length === 0 || hasStop || text === preActionText) {
+      // Skip empty text, active research, or stale prior-turn content.
+      // When the stop button was observed and is now gone, trust that signal
+      // even if the text is identical to the pre-action snapshot (e.g. refresh
+      // producing the same report).
+      const isStale = !seenStopButton && text === preActionText;
+      if (text.length === 0 || hasStop || isStale) {
         stableCount = 0;
         continue;
       }
