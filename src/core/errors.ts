@@ -138,17 +138,18 @@ export function classifyError(error: unknown): CavendishError {
   }
 
   // Selector / DOM misses (checked before timeout because Playwright locator
-  // failures include both "Timeout ... exceeded" and "waiting for locator")
+  // failures include both "Timeout ... exceeded" and "waiting for locator").
+  // Use narrow patterns to avoid matching timeout messages that mention "selector"
+  // in human-readable context (e.g. "check selector changes").
   if (
-    message.includes('selector') ||
+    message.includes('waiting for locator') ||
+    message.includes('waiting for selector') ||
     message.includes('not found in sidebar') ||
     message.includes('not found in picker') ||
     message.includes('not found in project picker') ||
     message.includes('iframe not found') ||
     message.includes('frame not found') ||
-    message.includes('not found (selector') ||
-    message.includes('waiting for locator') ||
-    message.includes('waiting for selector')
+    message.includes('not found (selector')
   ) {
     return new CavendishError(message, 'selector_miss');
   }

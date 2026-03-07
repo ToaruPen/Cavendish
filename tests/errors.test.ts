@@ -146,6 +146,13 @@ describe('classifyError', () => {
     expect(classifyError(err).category).toBe('selector_miss');
   });
 
+  it('classifies timeout with "selector" in human text as timeout, not selector_miss', () => {
+    const err = new Error(
+      'Deep Research start not detected within timeout. Check ChatGPT Pro status or selector changes.',
+    );
+    expect(classifyError(err).category).toBe('timeout');
+  });
+
   it('falls back to unknown for unrecognized errors', () => {
     const err = new Error('Something completely unexpected');
     expect(classifyError(err).category).toBe('unknown');
