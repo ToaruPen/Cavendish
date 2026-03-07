@@ -249,17 +249,29 @@ export class ChatGPTDriver {
     }
 
     // Phase 4: Wait for the final report to render
-    // After research completes, the iframe is replaced. The text typically
-    // transitions through empty before the report appears. We require a
-    // text change from the last research-phase snapshot to avoid returning
-    // stale content.
-    const lastResearchText = await this.getDeepResearchResponse();
+    return this.waitForDeepResearchReport(deadline, timeout, quiet);
+  }
+
+  /**
+   * Phase 4: Wait for the final report to render after research completes.
+   * If the report is already present when the stop button is gone, returns immediately.
+   */
+  private async waitForDeepResearchReport(
+    deadline: number,
+    timeout: number,
+    quiet: boolean,
+  ): Promise<WaitForResponseResult> {
+    const currentText = await this.getDeepResearchResponse();
+    if (currentText.length > 0 && !await this.hasDeepResearchStopButton()) {
+      progress('Response complete', quiet);
+      return { text: currentText, completed: true };
+    }
     const reportDeadline = Math.min(deadline, Date.now() + 120_000);
     while (Date.now() < reportDeadline) {
       await delay(POLL_INTERVAL_MS * 5);
       const hasStop = await this.hasDeepResearchStopButton();
       const text = await this.getDeepResearchResponse();
-      if (text.length > 0 && !hasStop && text !== lastResearchText) {
+      if (text.length > 0 && !hasStop) {
         progress('Response complete', quiet);
         return { text, completed: true };
       }
@@ -411,7 +423,7 @@ export class ChatGPTDriver {
       await this.openDeepResearchExportMenu(contentFrame);
 
       // Set up download listener before clicking
-      const downloadPromise = this.page.waitForEvent('download', { timeout: 30_000 });
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 60_000 });
 
       // Click the format-specific button
       const formatBtn = contentFrame.locator(selectorMap[format]);

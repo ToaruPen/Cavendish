@@ -22,12 +22,6 @@ function defaultExportFilename(format: DeepResearchExportFormat): string {
   return `deep-research-report${EXPORT_EXTENSIONS[format]}`;
 }
 
-/** Clipboard-related errors (e.g. permission denied). */
-function isClipboardError(error: unknown): boolean {
-  if (!(error instanceof Error)) { return false; }
-  return error.message.includes('clipboard') || error.name === 'NotAllowedError';
-}
-
 /**
  * `cavendish deep-research` — send a prompt to ChatGPT Deep Research and return the report.
  */
@@ -114,7 +108,7 @@ export const deepResearchCommand = defineCommand({
         quiet,
       });
 
-      // Get clean Markdown text via copy-content when available
+      // Get clean Markdown text via copy-content when available (best-effort)
       let reportText = result.text;
       if (result.completed) {
         try {
@@ -122,13 +116,11 @@ export const deepResearchCommand = defineCommand({
           if (markdown.length > 0) {
             reportText = markdown;
           }
-        } catch (error: unknown) {
-          // copyDeepResearchContent() handles frame-detach internally;
-          // only clipboard errors propagate here.
+        } catch {
+          // Copy-content is optional; fall back to raw extracted text.
+          // Failures include clipboard permission errors, selector
+          // timeouts (locale mismatch), and frame detachment.
           progress('Copy content failed, using raw text', quiet);
-          if (!isClipboardError(error)) {
-            throw error;
-          }
         }
       }
 
