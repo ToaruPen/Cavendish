@@ -65,7 +65,7 @@ async function checkChatGPT(): Promise<StatusCheck> {
     if (authPages.length > 0) {
       return { ok: false, detail: 'Not logged in (login page detected)' };
     }
-    return { ok: false, detail: 'No authenticated ChatGPT tab found (only shared links detected)' };
+    return { ok: true, detail: 'No authenticated ChatGPT tab found (only shared links detected)' };
   } catch (error: unknown) {
     return {
       ok: false,
