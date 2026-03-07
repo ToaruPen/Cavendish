@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { extractFileArgs, extractRepeatableArgs, findMissingFile } from '../src/commands/ask.js';
+import { extractFileArgs, extractRepeatableArgs, findMissingFile } from '../src/core/cli-args.js';
 
 describe('extractFileArgs()', () => {
   it('returns empty array when no --file flags', () => {

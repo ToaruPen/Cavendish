@@ -1,0 +1,92 @@
+import { statSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { errorMessage, fail } from './output-handler.js';
+
+/**
+ * Extract repeatable string arguments from process.argv.
+ * citty does not support array-type args, so we parse manually.
+ * Supports both --flag <value> and --flag=<value> forms.
+ *
+ * @param argv - process.argv to parse
+ * @param flag - the flag name without leading dashes (e.g. 'file', 'gdrive', 'github')
+ * @param resolvePaths - if true, resolve values as absolute file paths
+ */
+export function extractRepeatableArgs(
+  argv: string[],
+  flag: string,
+  resolvePaths = false,
+): string[] {
+  const prefix = `--${flag}=`;
+  const exact = `--${flag}`;
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--') { break; }
+    const parsed = parseArgPair(argv, i, prefix, exact, flag);
+    if (parsed === undefined) { continue; }
+    values.push(resolvePaths ? resolve(parsed.value) : parsed.value);
+    i += parsed.skip;
+  }
+  return values;
+}
+
+function parseArgPair(
+  argv: string[],
+  i: number,
+  prefix: string,
+  exact: string,
+  flag: string,
+): { value: string; skip: number } | undefined {
+  if (argv[i].startsWith(prefix)) {
+    const value = argv[i].slice(prefix.length);
+    if (value === '') {
+      throw new Error(`--${flag} requires a value`);
+    }
+    return { value, skip: 0 };
+  }
+  if (argv[i] === exact) {
+    if (i + 1 >= argv.length) {
+      throw new Error(`--${flag} requires a value`);
+    }
+    const value = argv[i + 1];
+    if (value === '' || value.startsWith('-')) {
+      throw new Error(`--${flag} requires a value, got "${value}"`);
+    }
+    return { value, skip: 1 };
+  }
+  return undefined;
+}
+
+/**
+ * Extract --file arguments from process.argv.
+ * Returns resolved absolute paths.
+ */
+export function extractFileArgs(argv: string[]): string[] {
+  return extractRepeatableArgs(argv, 'file', true);
+}
+
+/**
+ * Validate that all file paths exist and are regular files.
+ * Returns the first invalid path, or undefined if all are valid.
+ */
+export function findMissingFile(filePaths: string[]): string | undefined {
+  return filePaths.find((p) => {
+    try {
+      return !statSync(p).isFile();
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') {return true;}
+      throw new Error(`Failed to stat "${p}": ${errorMessage(error)}`);
+    }
+  });
+}
+
+/** Extract a repeatable arg or fail with an error message. */
+export function extractArgsOrFail(flag: string): string[] | undefined {
+  try {
+    return extractRepeatableArgs(process.argv, flag);
+  } catch (error: unknown) {
+    fail(errorMessage(error));
+    return undefined;
+  }
+}

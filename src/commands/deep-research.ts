@@ -3,7 +3,6 @@ import { defineCommand } from 'citty';
 import { fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
-import { extractArgsOrFail } from './ask.js';
 
 const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
 
@@ -34,10 +33,6 @@ export const deepResearchCommand = defineCommand({
       description: 'Output format: json or text (default: json)',
       default: 'json',
     },
-    github: {
-      type: 'string',
-      description: 'GitHub repo(s) as context (repeatable: --github "owner/repo")',
-    },
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
@@ -53,18 +48,11 @@ export const deepResearchCommand = defineCommand({
       return;
     }
 
-    const githubRepos = extractArgsOrFail('github');
-    if (githubRepos === undefined) { return; }
-
     const timeoutMs = timeoutSec * 1000;
     const prompt = args.prompt;
 
     await withDriver(quiet, async (driver) => {
       await driver.navigateToDeepResearch(quiet);
-
-      for (const repo of githubRepos) {
-        await driver.attachGitHubRepo(repo, quiet);
-      }
 
       progress('Sending Deep Research prompt...', quiet);
       const initialMsgCount = await driver.getAssistantMessageCount();

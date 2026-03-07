@@ -397,11 +397,12 @@ export class ChatGPTDriver {
         : [labelPath[i] as string];
       const isLast = i === labelPath.length - 1;
 
-      const menuItem = await this.findVisibleMenuItemWithRetry(candidates, matchedCountByLabel);
+      const menuItem = await this.findVisibleMenuItemWithRetry(candidates, matchedCountByLabel, 3, quiet);
       if (!menuItem) {
         await this.page.keyboard.press('Escape');
         throw new Error(
-          `Menu item not found at step ${String(i + 1)} of path [${labels.join(', ')}]. Tried labels: ${candidates.join(', ')}`,
+          `Menu item not found at step ${String(i + 1)} of path [${labels.join(', ')}]. `
+          + `Tried labels: [${candidates.join(', ')}], selector: ${SELECTORS.MENU_ITEM}`,
         );
       }
 
@@ -432,36 +433,22 @@ export class ChatGPTDriver {
     // Wait for the Google Picker iframe to load
     const pickerFrame = await this.waitForGooglePickerFrame();
 
-    // Wait for the Picker to finish initial load (file list appears)
+    // Wait for the search input to be ready (do NOT wait for initial result
+    // items — some users' Picker opens with an empty view).
     const searchInput = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_SEARCH);
     await searchInput.waitFor({ state: 'visible', timeout: 10_000 });
-    await pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM).first().waitFor({
-      state: 'visible',
-      timeout: 15_000,
-    });
 
     // Search for the file
     await searchInput.fill(fileName);
     await searchInput.press('Enter');
 
-    // Wait for search results to load, then click the matching result.
-    // Note: isVisible() is unreliable in cross-origin iframes, so we use
-    // hasText filter + waitFor instead of manual visibility polling.
-    const firstMatch = pickerFrame
-      .locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM)
-      .filter({ hasText: fileName })
-      .first();
-    try {
-      await firstMatch.waitFor({ state: 'attached', timeout: 15_000 });
-    } catch (error: unknown) {
-      if (isTimeoutError(error)) {
-        throw new Error(
-          `Google Drive file "${fileName}" not found in Picker search results.`,
-        );
-      }
-      throw error;
-    }
-    await firstMatch.click();
+    // Wait for search results and click the exact match
+    await this.waitForPickerExactMatch(pickerFrame, fileName);
+
+    // Record current attachment count before selecting
+    const tileCountBefore = await this.page
+      .locator(SELECTORS.FILE_ATTACHMENT_TILE)
+      .count();
 
     // Click the select button in the Picker (use first() to avoid strict mode with duplicate buttons)
     const selectButton = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_SELECT_BUTTON).first();
@@ -472,6 +459,9 @@ export class ChatGPTDriver {
       state: 'detached',
       timeout: 10_000,
     });
+
+    // Wait for the composer attachment tile to appear
+    await this.waitForAttachmentTiles(tileCountBefore + 1);
 
     progress(`Google Drive file attached: ${fileName}`, quiet);
   }
@@ -676,12 +666,7 @@ export class ChatGPTDriver {
     await fileInput.setInputFiles(filePaths);
 
     // Wait for the exact number of file tiles to appear in the composer.
-    await this.page.waitForFunction(
-      ({ selector, expected }: { selector: string; expected: number }) =>
-        document.querySelectorAll(selector).length >= expected,
-      { selector: SELECTORS.FILE_ATTACHMENT_TILE, expected: filePaths.length },
-      { timeout: 10_000 },
-    );
+    await this.waitForAttachmentTiles(filePaths.length);
     progress('Files attached', quiet);
   }
 
@@ -899,30 +884,45 @@ export class ChatGPTDriver {
   private async findVisibleMenuItemWithRetry(
     candidates: string[],
     matchedCountByLabel: Map<string, number>,
-    timeout = 5000,
+    maxAttempts = 3,
+    quiet = false,
   ): Promise<Locator | null> {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      for (const label of candidates) {
-        const allItems = this.page
-          .locator(SELECTORS.MENU_ITEM)
-          .filter({ hasText: label });
-        const skipCount = matchedCountByLabel.get(label) ?? 0;
-        // Collect only visible items to avoid stalling on hidden nth() elements
-        let visibleCount = 0;
-        const totalCount = await allItems.count();
-        for (let i = 0; i < totalCount; i++) {
-          const item = allItems.nth(i);
-          if (await item.isVisible().catch((): boolean => false)) {
-            if (visibleCount === skipCount) {
-              matchedCountByLabel.set(label, skipCount + 1);
-              return item;
-            }
-            visibleCount++;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const found = await this.findVisibleMenuItem(candidates, matchedCountByLabel);
+      if (found) {return found;}
+      if (attempt < maxAttempts) {
+        progress(
+          `Menu item retry ${String(attempt)}/${String(maxAttempts)} — candidates: [${candidates.join(', ')}], selector: ${SELECTORS.MENU_ITEM}`,
+          quiet,
+        );
+        await delay(1000);
+      }
+    }
+    return null;
+  }
+
+  /** Single-pass search for a visible menu item matching any candidate label. */
+  private async findVisibleMenuItem(
+    candidates: string[],
+    matchedCountByLabel: Map<string, number>,
+  ): Promise<Locator | null> {
+    for (const label of candidates) {
+      const allItems = this.page
+        .locator(SELECTORS.MENU_ITEM)
+        .filter({ hasText: label });
+      const skipCount = matchedCountByLabel.get(label) ?? 0;
+      let visibleCount = 0;
+      const totalCount = await allItems.count();
+      for (let i = 0; i < totalCount; i++) {
+        const item = allItems.nth(i);
+        if (await item.isVisible().catch((): boolean => false)) {
+          if (visibleCount === skipCount) {
+            matchedCountByLabel.set(label, skipCount + 1);
+            return item;
           }
+          visibleCount++;
         }
       }
-      await delay(200);
     }
     return null;
   }
@@ -944,6 +944,88 @@ export class ChatGPTDriver {
     }
     throw new Error(
       `Thinking effort menu item not found. Tried labels: ${candidates.join(', ')}`,
+    );
+  }
+
+  /**
+   * Poll Google Picker search results until an exact file name match appears,
+   * then click it. Handles the async nature of Picker search updates.
+   * Throws if no match is found within 15s, or if multiple exact matches exist.
+   */
+  private async waitForPickerExactMatch(
+    pickerFrame: FrameLocator,
+    fileName: string,
+  ): Promise<void> {
+    const allResults = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM);
+    const deadline = Date.now() + 15_000;
+    let exactMatchIndex = -1;
+
+    while (Date.now() < deadline) {
+      try {
+        await allResults.first().waitFor({
+          state: 'attached',
+          timeout: Math.max(deadline - Date.now(), 1000),
+        });
+      } catch (error: unknown) {
+        if (isTimeoutError(error)) {
+          throw new Error(
+            `Google Drive file "${fileName}" not found in Picker search results.`,
+          );
+        }
+        throw error;
+      }
+
+      const match = await this.findExactPickerMatch(allResults, fileName);
+      if (match.ambiguous) {
+        throw new Error(
+          `Multiple Google Drive files match "${fileName}" exactly. Rename duplicates to disambiguate.`,
+        );
+      }
+      if (match.index !== -1) {
+        exactMatchIndex = match.index;
+        break;
+      }
+      await delay(500);
+    }
+
+    if (exactMatchIndex === -1) {
+      throw new Error(
+        `Google Drive file "${fileName}" not found in Picker search results (no exact match).`,
+      );
+    }
+    await allResults.nth(exactMatchIndex).click();
+  }
+
+  /**
+   * Scan Picker result items for an exact first-line text match.
+   * Returns the matching index, or -1 if not found. Sets `ambiguous` if duplicates.
+   */
+  private async findExactPickerMatch(
+    allResults: Locator,
+    fileName: string,
+  ): Promise<{ index: number; ambiguous: boolean }> {
+    const count = await allResults.count();
+    let matchIndex = -1;
+    for (let i = 0; i < count; i++) {
+      const itemText = await allResults.nth(i).innerText();
+      const firstLine = itemText.split('\n')[0].trim();
+      if (firstLine === fileName) {
+        if (matchIndex !== -1) {
+          return { index: matchIndex, ambiguous: true };
+        }
+        matchIndex = i;
+      }
+    }
+    return { index: matchIndex, ambiguous: false };
+  }
+
+  /** Wait for at least `expected` attachment tiles to appear in the composer. */
+  private async waitForAttachmentTiles(expected: number): Promise<void> {
+    await this.page.waitForFunction(
+      ({ selector, count }: { selector: string; count: number }) =>
+        document.querySelectorAll(selector).length >= count,
+      { selector: SELECTORS.FILE_ATTACHMENT_TILE, count: expected },
+      { timeout: 10_000 },
     );
   }
 
