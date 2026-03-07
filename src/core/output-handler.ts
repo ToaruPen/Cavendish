@@ -39,6 +39,8 @@ export interface NdjsonEvent {
   chatId?: string;
   /** Present on 'final' events. */
   partial?: boolean;
+  /** Present on 'final' events. */
+  timeoutSec?: number;
 }
 
 /**
@@ -128,7 +130,7 @@ export function emitState(state: string, content = ''): void {
  */
 export function emitFinal(
   content: string,
-  metadata?: { model?: string; chatId?: string; partial?: boolean },
+  metadata?: { model?: string; chatId?: string; partial?: boolean; timeoutSec?: number },
 ): void {
   ndjsonChunk({
     type: 'final',
@@ -136,6 +138,7 @@ export function emitFinal(
     model: metadata?.model,
     chatId: metadata?.chatId,
     partial: metadata?.partial ?? false,
+    timeoutSec: metadata?.timeoutSec,
     timestamp: new Date().toISOString(),
   });
 }

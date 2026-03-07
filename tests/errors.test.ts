@@ -139,6 +139,13 @@ describe('classifyError', () => {
     expect(classifyError(err).category).toBe('selector_miss');
   });
 
+  it('classifies Playwright locator timeout as selector_miss, not timeout', () => {
+    const err = new Error(
+      'Timeout 30000ms exceeded. waiting for locator(\'[data-testid="prompt-textarea"]\')',
+    );
+    expect(classifyError(err).category).toBe('selector_miss');
+  });
+
   it('falls back to unknown for unrecognized errors', () => {
     const err = new Error('Something completely unexpected');
     expect(classifyError(err).category).toBe('unknown');

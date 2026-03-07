@@ -289,7 +289,7 @@ function writeResult(
   },
 ): void {
   if (opts.stream) {
-    emitFinal(result.text, { partial: !result.completed, model: opts.model, chatId: opts.chatId });
+    emitFinal(result.text, { partial: !result.completed, model: opts.model, chatId: opts.chatId, timeoutSec: opts.timeoutSec });
   } else if (opts.format === 'text') {
     text(result.text);
   } else {

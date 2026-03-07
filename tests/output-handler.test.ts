@@ -216,7 +216,7 @@ describe('OutputHandler', () => {
 
   describe('emitFinal()', () => {
     it('writes a final event with metadata', () => {
-      emitFinal('complete response', { model: 'Pro', chatId: 'chat-1', partial: false });
+      emitFinal('complete response', { model: 'Pro', chatId: 'chat-1', partial: false, timeoutSec: 120 });
 
       expect(writeCalls).toHaveLength(1);
       const parsed: unknown = JSON.parse(writeCalls[0] ?? '');
@@ -226,6 +226,7 @@ describe('OutputHandler', () => {
         model: 'Pro',
         chatId: 'chat-1',
         partial: false,
+        timeoutSec: 120,
       });
     });
 

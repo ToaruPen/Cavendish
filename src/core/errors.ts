@@ -137,17 +137,8 @@ export function classifyError(error: unknown): CavendishError {
     return new CavendishError(message, 'cloudflare_blocked');
   }
 
-  // Timeout errors (Playwright TimeoutError or message-based detection)
-  if (
-    message.includes('Timeout') ||
-    message.includes('timeout') ||
-    message.includes('exceeded') ||
-    (error instanceof Error && error.constructor.name === 'TimeoutError')
-  ) {
-    return new CavendishError(message, 'timeout');
-  }
-
-  // Selector / DOM misses
+  // Selector / DOM misses (checked before timeout because Playwright locator
+  // failures include both "Timeout ... exceeded" and "waiting for locator")
   if (
     message.includes('selector') ||
     message.includes('not found in sidebar') ||
@@ -156,9 +147,20 @@ export function classifyError(error: unknown): CavendishError {
     message.includes('iframe not found') ||
     message.includes('frame not found') ||
     message.includes('not found (selector') ||
-    message.includes('waiting for locator')
+    message.includes('waiting for locator') ||
+    message.includes('waiting for selector')
   ) {
     return new CavendishError(message, 'selector_miss');
+  }
+
+  // Timeout errors (Playwright TimeoutError or message-based detection)
+  if (
+    message.includes('Timeout') ||
+    message.includes('timeout') ||
+    message.includes('exceeded') ||
+    (error instanceof Error && error.constructor.name === 'TimeoutError')
+  ) {
+    return new CavendishError(message, 'timeout');
   }
 
   return new CavendishError(message, 'unknown');
