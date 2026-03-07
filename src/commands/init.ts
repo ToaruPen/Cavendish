@@ -43,7 +43,7 @@ async function isLoggedInViaCdp(): Promise<boolean> {
     return nonAuthPages.length > 0;
   } catch (error: unknown) {
     // CDP query failed — Chrome not running or not reachable; log and return false
-    console.debug(`[cavendish] CDP probe failed: ${errorMessage(error)}`);
+    console.error(`[cavendish] CDP probe failed: ${errorMessage(error)}`);
     return false;
   }
 }
@@ -241,8 +241,8 @@ export const initCommand = defineCommand({
     }
 
     if (args.reset === true) {
-      handleProfileReset(quiet);
       await killExistingChrome(quiet);
+      handleProfileReset(quiet);
     }
 
     reportProfileStatus(quiet);
