@@ -4,9 +4,9 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
-import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
-import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { ChatGPTDriver, type ThinkingEffortLevel, type WaitForResponseResult } from '../core/chatgpt-driver.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
+import { emitChunk, emitFinal, errorMessage, fail, failStructured, json, progress, text, validateFormat } from '../core/output-handler.js';
 
 const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',
@@ -91,6 +91,7 @@ interface ValidatedArgs {
   timeoutMs: number;
   timeoutSec: number;
   format: 'json' | 'text';
+  stream: boolean;
   filePaths: string[];
   gdriveFiles: string[];
   githubRepos: string[];
@@ -239,6 +240,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     fail(errorMessage(error)); return;
   }
   const prompt = buildPrompt(args.prompt as string, stdinData);
+  const stream = args.stream === true;
 
   return {
     quiet,
@@ -246,6 +248,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     timeoutMs: timeoutSec * 1000,
     timeoutSec,
     format,
+    stream,
     filePaths,
     gdriveFiles,
     githubRepos,
@@ -263,10 +266,42 @@ function dryRunMessage(v: ValidatedArgs): string {
   const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
   if (v.chatId !== undefined) {parts.push(`chat: ${v.chatId}`);}
   else if (v.continueChat) {parts.push('continue: most recent');}
+  if (v.stream) {parts.push('stream: true');}
   if (v.filePaths.length > 0) {parts.push(`${String(v.filePaths.length)} file(s)`);}
   if (v.gdriveFiles.length > 0) {parts.push(`${String(v.gdriveFiles.length)} Google Drive file(s)`);}
   if (v.githubRepos.length > 0) {parts.push(`${String(v.githubRepos.length)} GitHub repo(s)`);}
   return `[dry-run] Would send prompt to ChatGPT (${parts.join(', ')})`;
+}
+
+/**
+ * Write the ask command result to stdout in the appropriate format.
+ */
+function writeResult(
+  result: WaitForResponseResult,
+  opts: {
+    format: 'json' | 'text';
+    stream: boolean;
+    model: string | undefined;
+    chatId?: string;
+    url?: string;
+    project?: string;
+    timeoutSec: number;
+  },
+): void {
+  if (opts.stream) {
+    emitFinal(result.text, { partial: !result.completed, model: opts.model, chatId: opts.chatId, url: opts.url, project: opts.project, timeoutSec: opts.timeoutSec });
+  } else if (opts.format === 'text') {
+    text(result.text);
+  } else {
+    json(result.text, {
+      partial: !result.completed,
+      model: opts.model,
+      chatId: opts.chatId,
+      url: opts.url,
+      project: opts.project,
+      timeoutSec: opts.timeoutSec,
+    });
+  }
 }
 
 /**
@@ -359,6 +394,7 @@ export const askCommand = defineCommand({
     },
     ...GLOBAL_ARGS,
     ...FORMAT_ARG,
+    ...STREAM_ARG,
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
@@ -370,7 +406,7 @@ export const askCommand = defineCommand({
     }
 
     const {
-      quiet, model, timeoutMs, timeoutSec, format,
+      quiet, model, timeoutMs, timeoutSec, format, stream,
       filePaths, gdriveFiles, githubRepos, agentMode, thinkingEffort, prompt, continueChat,
       project,
     } = validated;
@@ -412,29 +448,29 @@ export const askCommand = defineCommand({
       const initialMsgCount = await driver.getAssistantMessageCount();
       await driver.sendMessage(prompt);
 
+      const onChunk = stream ? (chunk: string): void => { emitChunk(chunk); } : undefined;
+
       const result = await driver.waitForResponse({
         timeout: timeoutMs,
         quiet,
         initialMsgCount,
+        onChunk,
       });
 
       const chatId = driver.extractChatId();
       const url = driver.getCurrentUrl();
 
-      if (format === 'text') {
-        text(result.text);
-      } else {
-        json(result.text, {
-          partial: !result.completed,
-          model: continueChat ? undefined : model,
-          chatId,
-          url,
-          project,
-          timeoutSec,
-        });
-      }
+      writeResult(result, {
+        format,
+        stream,
+        model: continueChat ? undefined : model,
+        chatId,
+        url,
+        project,
+        timeoutSec,
+      });
     } catch (error: unknown) {
-      fail(errorMessage(error));
+      failStructured(error, format);
     } finally {
       await browser.close();
     }

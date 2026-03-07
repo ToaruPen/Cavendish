@@ -2,8 +2,10 @@
  * OutputHandler — agent-oriented output module.
  *
  * - stdout: structured data only (JSON or plain text)
- * - stderr: progress / log messages
+ * - stderr: progress / log messages / structured errors (JSON mode)
  */
+
+import { type CavendishError, EXIT_CODES, classifyError } from './errors.js';
 
 export interface ResponsePayload {
   content: string;
@@ -14,6 +16,35 @@ export interface ResponsePayload {
   timeoutSec?: number;
   timestamp: string;
   partial: boolean;
+}
+
+/**
+ * NDJSON event types emitted during streaming output.
+ *
+ * - chunk:  incremental response text (cumulative snapshot)
+ * - state:  lifecycle state change (e.g. Deep Research phases)
+ * - final:  the complete response (same payload as non-streaming JSON output)
+ */
+export type NdjsonEventType = 'chunk' | 'state' | 'final';
+
+export interface NdjsonEvent {
+  type: NdjsonEventType;
+  content: string;
+  timestamp: string;
+  /** Present on 'state' events to identify the lifecycle phase. */
+  state?: string;
+  /** Present on 'final' events. */
+  model?: string;
+  /** Present on 'final' events. */
+  chatId?: string;
+  /** Present on 'final' events. */
+  url?: string;
+  /** Present on 'final' events. */
+  project?: string;
+  /** Present on 'final' events. */
+  partial?: boolean;
+  /** Present on 'final' events. */
+  timeoutSec?: number;
 }
 
 /**
@@ -77,6 +108,48 @@ export function text(content: string): void {
 }
 
 /**
+ * Write a single NDJSON event line to stdout.
+ * Each call produces one JSON object followed by a newline.
+ */
+export function ndjsonChunk(event: NdjsonEvent): void {
+  process.stdout.write(`${JSON.stringify(event)}\n`);
+}
+
+/**
+ * Emit an NDJSON 'chunk' event (incremental response text).
+ */
+export function emitChunk(content: string): void {
+  ndjsonChunk({ type: 'chunk', content, timestamp: new Date().toISOString() });
+}
+
+/**
+ * Emit an NDJSON 'state' event (lifecycle phase change).
+ */
+export function emitState(state: string, content = ''): void {
+  ndjsonChunk({ type: 'state', content, state, timestamp: new Date().toISOString() });
+}
+
+/**
+ * Emit an NDJSON 'final' event (complete response).
+ */
+export function emitFinal(
+  content: string,
+  metadata?: { model?: string; chatId?: string; url?: string; project?: string; partial?: boolean; timeoutSec?: number },
+): void {
+  ndjsonChunk({
+    type: 'final',
+    content,
+    model: metadata?.model,
+    chatId: metadata?.chatId,
+    url: metadata?.url,
+    project: metadata?.project,
+    partial: metadata?.partial ?? false,
+    timeoutSec: metadata?.timeoutSec,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+/**
  * Write a progress / log message to stderr.
  * Suppressed when `quiet` is true.
  */
@@ -101,6 +174,30 @@ export function errorMessage(error: unknown): string {
 export function fail(message: string): undefined {
   progress(`Error: ${message}`, false);
   process.exitCode = 1;
+  return undefined;
+}
+
+/**
+ * Report a structured error with category-specific exit code.
+ *
+ * - When `format` is `'json'`: writes a JSON error payload to stderr.
+ * - When `format` is `'text'` (or omitted): writes a human-readable message to stderr.
+ *
+ * Automatically classifies raw errors into the appropriate category.
+ * Sets the process exit code to the category-specific value.
+ */
+export function failStructured(error: unknown, format?: 'json' | 'text'): undefined {
+  const classified: CavendishError = classifyError(error);
+  const exitCode = EXIT_CODES[classified.category];
+
+  if (format === 'json') {
+    process.stderr.write(`${JSON.stringify(classified.toPayload())}\n`);
+  } else {
+    progress(`Error: ${classified.message}`, false);
+    progress(`Action: ${classified.action}`, false);
+  }
+
+  process.exitCode = exitCode;
   return undefined;
 }
 

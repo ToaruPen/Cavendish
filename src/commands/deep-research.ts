@@ -4,8 +4,8 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
-import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG } from '../core/cli-args.js';
+import { emitFinal, emitState, errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 import { buildPrompt, readStdin, validateFileArgs } from './ask.js';
@@ -33,6 +33,7 @@ interface ValidatedArgs {
   quiet: boolean;
   mode: RunMode;
   format: 'json' | 'text';
+  stream: boolean;
   timeoutMs: number;
   timeoutSec: number;
   exportFormat: DeepResearchExportFormat | undefined;
@@ -160,10 +161,13 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const mode = resolveRunMode(args, stdinData, filePaths);
   if (mode === undefined) { return undefined; }
 
+  const stream = args.stream === true;
+
   return {
     quiet,
     mode,
     format,
+    stream,
     timeoutMs: timeoutSec * 1000,
     timeoutSec,
     exportFormat: exp.exportFormat,
@@ -195,6 +199,35 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, t
       progress('Sending Deep Research query...', quiet);
       await driver.sendDeepResearchMessage(mode.prompt);
       return '';
+  }
+}
+
+/**
+ * Write the deep-research result to stdout in the appropriate format.
+ */
+function writeDRResult(
+  reportText: string,
+  opts: {
+    format: 'json' | 'text';
+    stream: boolean;
+    chatId: string | undefined;
+    url?: string;
+    partial: boolean;
+    timeoutSec: number;
+  },
+): void {
+  if (opts.stream) {
+    emitFinal(reportText, { model: 'deep-research', chatId: opts.chatId, url: opts.url, partial: opts.partial, timeoutSec: opts.timeoutSec });
+  } else if (opts.format === 'text') {
+    text(reportText);
+  } else {
+    json(reportText, {
+      model: 'deep-research',
+      chatId: opts.chatId,
+      url: opts.url,
+      partial: opts.partial,
+      timeoutSec: opts.timeoutSec,
+    });
   }
 }
 
@@ -255,15 +288,17 @@ export const deepResearchCommand = defineCommand({
     },
     ...GLOBAL_ARGS,
     ...FORMAT_ARG,
+    ...STREAM_ARG,
   },
   async run({ args }): Promise<void> {
     const v = validateArgs(args);
     if (v === undefined) { return; }
 
-    const { quiet, mode, format, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
+    const { quiet, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
 
     if (args.dryRun === true) {
       const parts = [`mode: ${mode.kind}`, `format: ${format}`, `timeout: ${String(timeoutSec)}s`];
+      if (stream) { parts.push('stream: true'); }
       if (mode.kind === 'initial' && mode.filePaths.length > 0) {
         parts.push(`${String(mode.filePaths.length)} file(s)`);
       }
@@ -273,8 +308,10 @@ export const deepResearchCommand = defineCommand({
     }
 
     await withDriver(quiet, async (driver) => {
+      if (stream) { emitState('sending'); }
       const preActionText = await sendQuery(driver, mode, quiet, timeoutMs);
 
+      if (stream) { emitState('researching'); }
       const isFollowUpOrRefresh = mode.kind === 'refresh' || mode.kind === 'followup';
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
@@ -287,6 +324,8 @@ export const deepResearchCommand = defineCommand({
       if (chatId !== undefined) {
         progress(`Chat ID: ${chatId}`, quiet);
       }
+
+      if (stream) { emitState('generating'); }
 
       // Get clean Markdown text via copy-content when available (best-effort)
       let reportText = result.text;
@@ -315,17 +354,14 @@ export const deepResearchCommand = defineCommand({
 
       const url = driver.getCurrentUrl();
 
-      if (format === 'text') {
-        text(reportText);
-      } else {
-        json(reportText, {
-          model: 'deep-research',
-          chatId,
-          url,
-          partial: !result.completed,
-          timeoutSec,
-        });
-      }
-    });
+      writeDRResult(reportText, {
+        format,
+        stream,
+        chatId,
+        url,
+        partial: !result.completed,
+        timeoutSec,
+      });
+    }, format);
   },
 });
