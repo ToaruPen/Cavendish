@@ -82,6 +82,63 @@ async function waitForLogin(
 }
 
 /**
+ * Close any Chrome process listening on the CDP port via the DevTools
+ * protocol `Browser.close` command.  This terminates the Chrome process
+ * cleanly without relying on platform-specific shell commands.
+ *
+ * Needed after profile reset so that the stale Chrome process (still
+ * using the old profile in memory) is terminated before re-launch.
+ */
+async function killExistingChrome(quiet: boolean): Promise<void> {
+  let wsUrl: string;
+  try {
+    const res = await fetch(`${CDP_BASE_URL}/json/version`);
+    if (!res.ok) {
+      return;
+    }
+    const data = (await res.json()) as { webSocketDebuggerUrl?: string };
+    if (!data.webSocketDebuggerUrl) {
+      return;
+    }
+    wsUrl = data.webSocketDebuggerUrl;
+  } catch {
+    // Chrome is not running — nothing to kill
+    return;
+  }
+
+  progress('Stopping existing Chrome process...', quiet);
+  try {
+    // Send Browser.close via the CDP WebSocket to terminate Chrome
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => {
+        ws.close();
+        reject(new Error('Timeout waiting for Browser.close'));
+      }, 5_000);
+
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+      });
+      ws.addEventListener('message', () => {
+        clearTimeout(timer);
+        ws.close();
+        resolve();
+      });
+      ws.addEventListener('error', () => {
+        // Connection error likely means Chrome already closed
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    // Give Chrome a moment to fully shut down
+    await new Promise((r) => setTimeout(r, 1_000));
+    progress('Chrome process stopped', quiet);
+  } catch {
+    progress('Could not stop Chrome automatically. Please close Chrome manually and retry.', quiet);
+  }
+}
+
+/**
  * Handle --reset flag: delete existing Chrome profile if it exists.
  */
 function handleProfileReset(quiet: boolean): void {
@@ -185,6 +242,7 @@ export const initCommand = defineCommand({
 
     if (args.reset === true) {
       handleProfileReset(quiet);
+      await killExistingChrome(quiet);
     }
 
     reportProfileStatus(quiet);

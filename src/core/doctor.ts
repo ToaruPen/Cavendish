@@ -340,17 +340,15 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
   } catch (error: unknown) {
     const detail = `Playwright connection failed: ${errorMessage(error)}`;
     // CDP is reachable but Playwright can't connect — report as a real failure,
-    // not just skipped.  The first check is marked `fail` so the command exits
-    // with a non-zero status; the rest are skipped.
+    // not just skipped.  Use 'browser_connect' as the check name to distinguish
+    // from an actual Cloudflare challenge.
     checks.push({
-      name: PLAYWRIGHT_CHECK_NAMES[0],
+      name: 'browser_connect',
       status: 'fail',
       detail,
       action: 'Ensure Chrome allows CDP connections and no other tool is holding the session',
     });
-    for (let i = 1; i < PLAYWRIGHT_CHECK_NAMES.length; i++) {
-      checks.push({ name: PLAYWRIGHT_CHECK_NAMES[i], status: 'skip', detail });
-    }
+    checks.push(...skipPlaywrightChecks(detail));
   } finally {
     await browser.close();
   }
