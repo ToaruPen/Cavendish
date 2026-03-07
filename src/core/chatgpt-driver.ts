@@ -161,17 +161,19 @@ export class ChatGPTDriver {
 
   /**
    * Navigate to an existing DR chat and send a follow-up message.
-   * Verifies the chat is a Deep Research session before sending.
-   * Uses force click because the sticky page-header intercepts normal clicks.
+   * Returns the pre-action report text snapshot for stale-content detection.
    */
   async sendDeepResearchFollowUp(
     chatId: string,
     text: string,
     quiet = false,
     deadline?: number,
-  ): Promise<void> {
+  ): Promise<string> {
     await this.navigateToChat(chatId, quiet);
     await this.waitForDeepResearchFrame(chatId, deadline);
+
+    // Snapshot before sending so stale-content detection works correctly
+    const preActionText = await this.getDeepResearchResponse();
 
     const input = this.page.locator(SELECTORS.PROMPT_INPUT);
     await input.fill(text);
@@ -190,22 +192,23 @@ export class ChatGPTDriver {
       throw e;
     }
     await sendBtn.click({ force: true });
+    return preActionText;
   }
 
   /**
-   * Navigate to an existing DR chat and click the "更新する" (Update) button
-   * to re-run the same prompt without new input.
-   * Uses Playwright locator (not native querySelector) because the selector
-   * contains Playwright-only `:text-is()` pseudo-selector.
-   * Uses `force: true` because `#thread-bottom-container` may overlay the button.
+   * Navigate to an existing DR chat and click the "更新する" (Update) button.
+   * Returns the pre-action report text snapshot for stale-content detection.
    */
   async refreshDeepResearch(
     chatId: string,
     quiet = false,
     deadline?: number,
-  ): Promise<void> {
+  ): Promise<string> {
     await this.navigateToChat(chatId, quiet);
     const contentFrame = await this.waitForDeepResearchFrame(chatId, deadline);
+
+    // Snapshot before clicking so stale-content detection works correctly
+    const preActionText = await this.getDeepResearchResponse();
 
     const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
     try {
@@ -220,6 +223,7 @@ export class ChatGPTDriver {
     }
     await updateBtn.first().scrollIntoViewIfNeeded();
     await updateBtn.first().click({ force: true });
+    return preActionText;
   }
 
   /** Return the current page URL (for diagnostics / error messages). */
@@ -278,19 +282,16 @@ export class ChatGPTDriver {
     quiet?: boolean;
     /** Skip Phase 1 (plan/start) — use for refresh/follow-up runs that bypass the plan phase. */
     skipStartPhase?: boolean;
+    /** Report text captured BEFORE the action (send/refresh) to detect stale content. */
+    preActionText?: string;
   }): Promise<WaitForResponseResult> {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const quiet = options.quiet ?? false;
+    const preActionText = options.preActionText ?? '';
 
     progress('Waiting for Deep Research response...', quiet);
 
     const deadline = Date.now() + timeout;
-
-    // Snapshot existing report text before any action, so Phase 4 can
-    // distinguish a new report from stale content left over from a prior turn.
-    const preActionText = options.skipStartPhase
-      ? await this.getDeepResearchResponse()
-      : '';
 
     // Phase 1: Wait for plan iframe and click "開始する"
     // Skipped for refresh/follow-up runs that go straight to research.

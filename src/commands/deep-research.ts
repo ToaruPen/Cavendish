@@ -170,17 +170,22 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   };
 }
 
-async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, timeoutMs: number): Promise<void> {
+/**
+ * Send the DR query/action and return a pre-action text snapshot.
+ * For follow-up/refresh, the snapshot is taken after navigation but before
+ * the action (send/click) so stale-content detection works correctly.
+ */
+async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, timeoutMs: number): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   switch (mode.kind) {
-    case 'refresh':
+    case 'refresh': {
       progress('Refreshing Deep Research session...', quiet);
-      await driver.refreshDeepResearch(mode.chatId, quiet, deadline);
-      break;
-    case 'followup':
+      return driver.refreshDeepResearch(mode.chatId, quiet, deadline);
+    }
+    case 'followup': {
       progress('Sending Deep Research follow-up...', quiet);
-      await driver.sendDeepResearchFollowUp(mode.chatId, mode.prompt, quiet, deadline);
-      break;
+      return driver.sendDeepResearchFollowUp(mode.chatId, mode.prompt, quiet, deadline);
+    }
     case 'initial':
       await driver.navigateToDeepResearch(quiet);
       if (mode.filePaths.length > 0) {
@@ -188,7 +193,7 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, t
       }
       progress('Sending Deep Research query...', quiet);
       await driver.sendDeepResearchMessage(mode.prompt);
-      break;
+      return '';
   }
 }
 
@@ -264,12 +269,14 @@ export const deepResearchCommand = defineCommand({
     const { quiet, mode, format, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
 
     await withDriver(quiet, async (driver) => {
-      await sendQuery(driver, mode, quiet, timeoutMs);
+      const preActionText = await sendQuery(driver, mode, quiet, timeoutMs);
 
+      const isFollowUpOrRefresh = mode.kind === 'refresh' || mode.kind === 'followup';
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
         quiet,
-        skipStartPhase: mode.kind === 'refresh' || mode.kind === 'followup',
+        skipStartPhase: isFollowUpOrRefresh,
+        preActionText: isFollowUpOrRefresh ? preActionText : undefined,
       });
 
       const chatId = resolveChatId(driver, mode, quiet);
