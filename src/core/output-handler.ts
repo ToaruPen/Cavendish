@@ -38,6 +38,10 @@ export interface NdjsonEvent {
   /** Present on 'final' events. */
   chatId?: string;
   /** Present on 'final' events. */
+  url?: string;
+  /** Present on 'final' events. */
+  project?: string;
+  /** Present on 'final' events. */
   partial?: boolean;
   /** Present on 'final' events. */
   timeoutSec?: number;
@@ -130,13 +134,15 @@ export function emitState(state: string, content = ''): void {
  */
 export function emitFinal(
   content: string,
-  metadata?: { model?: string; chatId?: string; partial?: boolean; timeoutSec?: number },
+  metadata?: { model?: string; chatId?: string; url?: string; project?: string; partial?: boolean; timeoutSec?: number },
 ): void {
   ndjsonChunk({
     type: 'final',
     content,
     model: metadata?.model,
     chatId: metadata?.chatId,
+    url: metadata?.url,
+    project: metadata?.project,
     partial: metadata?.partial ?? false,
     timeoutSec: metadata?.timeoutSec,
     timestamp: new Date().toISOString(),

@@ -217,7 +217,7 @@ function writeDRResult(
   },
 ): void {
   if (opts.stream) {
-    emitFinal(reportText, { model: 'deep-research', chatId: opts.chatId, partial: opts.partial, timeoutSec: opts.timeoutSec });
+    emitFinal(reportText, { model: 'deep-research', chatId: opts.chatId, url: opts.url, partial: opts.partial, timeoutSec: opts.timeoutSec });
   } else if (opts.format === 'text') {
     text(reportText);
   } else {
