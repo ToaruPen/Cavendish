@@ -187,7 +187,12 @@ function resolveChatId(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): st
   // Initial mode: extract from URL after DR redirects to /c/{id}
   const chatId = driver.extractChatId();
   if (chatId === undefined) {
-    progress('Warning: could not extract chat ID from URL. Follow-up commands will not work for this session.', quiet);
+    const currentUrl = driver.getCurrentUrl();
+    progress(
+      `Warning: could not extract chat ID from URL (expected /c/{id} pattern, got: ${currentUrl}). `
+      + 'Follow-up commands (--chat) will not work for this session.',
+      quiet,
+    );
   }
   return chatId;
 }

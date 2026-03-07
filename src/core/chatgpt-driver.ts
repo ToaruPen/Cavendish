@@ -251,6 +251,11 @@ export class ChatGPTDriver {
     await updateBtn.first().click({ force: true });
   }
 
+  /** Return the current page URL (for diagnostics / error messages). */
+  getCurrentUrl(): string {
+    return this.page.url();
+  }
+
   /**
    * Extract the chat ID from the current page URL.
    * Expected URL pattern: https://chatgpt.com/c/{chatId}
