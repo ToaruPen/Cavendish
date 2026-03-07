@@ -208,7 +208,7 @@ export class ChatGPTDriver {
     const deadline = Date.now() + timeout;
 
     // Phase 1: Wait for plan iframe and click "開始する"
-    const started = await this.clickDeepResearchStart(quiet);
+    const started = await this.clickDeepResearchStart(deadline, quiet);
 
     if (!started) {
       const text = await this.getDeepResearchResponse();
@@ -308,12 +308,13 @@ export class ChatGPTDriver {
    * Returns true if research was started (button clicked or auto-started).
    */
   private async clickDeepResearchStart(
+    deadline: number,
     quiet: boolean,
   ): Promise<boolean> {
-    // Use a dedicated start-phase timeout (120s) instead of the full
-    // research deadline so initialization failures are detected quickly.
+    // Cap at 120s so initialization failures are detected quickly,
+    // but also respect the caller's deadline when it is shorter.
     const START_PHASE_MS = 120_000;
-    const startDeadline = Date.now() + START_PHASE_MS;
+    const startDeadline = Math.min(deadline, Date.now() + START_PHASE_MS);
     while (Date.now() < startDeadline) {
       await delay(POLL_INTERVAL_MS * 5);
 
@@ -340,7 +341,7 @@ export class ChatGPTDriver {
         // Frame not ready yet — retry
       }
     }
-    progress('Deep Research start not detected within 120s — check ChatGPT Pro status or selector changes', quiet);
+    progress('Deep Research start not detected — check ChatGPT Pro status or selector changes', quiet);
     return false;
   }
 
