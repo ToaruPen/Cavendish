@@ -208,7 +208,7 @@ export class ChatGPTDriver {
     const deadline = Date.now() + timeout;
 
     // Phase 1: Wait for plan iframe and click "開始する"
-    const started = await this.clickDeepResearchStart(deadline, quiet);
+    const started = await this.clickDeepResearchStart(quiet);
 
     if (!started) {
       const text = await this.getDeepResearchResponse();
@@ -308,10 +308,13 @@ export class ChatGPTDriver {
    * Returns true if research was started (button clicked or auto-started).
    */
   private async clickDeepResearchStart(
-    deadline: number,
     quiet: boolean,
   ): Promise<boolean> {
-    while (Date.now() < deadline) {
+    // Use a dedicated start-phase timeout (120s) instead of the full
+    // research deadline so initialization failures are detected quickly.
+    const START_PHASE_MS = 120_000;
+    const startDeadline = Date.now() + START_PHASE_MS;
+    while (Date.now() < startDeadline) {
       await delay(POLL_INTERVAL_MS * 5);
 
       // Research may auto-start after countdown — detect early
@@ -337,7 +340,7 @@ export class ChatGPTDriver {
         // Frame not ready yet — retry
       }
     }
-    progress('Start button not found — deadline reached', quiet);
+    progress('Deep Research start not detected within 120s — check ChatGPT Pro status or selector changes', quiet);
     return false;
   }
 
@@ -371,39 +374,32 @@ export class ChatGPTDriver {
   /**
    * Copy the DR report content as clean Markdown via the iframe's
    * "コンテンツをコピーする" button. Returns the Markdown text from clipboard.
-   * Falls back to `getDeepResearchResponse()` if the copy button is unavailable.
+   * Throws on failure — callers are responsible for fallback handling.
    */
   async copyDeepResearchContent(): Promise<string> {
     const contentFrame = this.getDeepResearchContentFrame();
     if (!contentFrame) {
-      return this.getDeepResearchResponse();
+      throw new Error('Deep Research content frame not found');
     }
 
-    try {
-      // Clear clipboard before copy so we can verify the write succeeded
-      await this.page.evaluate(() => navigator.clipboard.writeText(''));
+    // Clear clipboard before copy so we can verify the write succeeded
+    await this.page.evaluate(() => navigator.clipboard.writeText(''));
 
-      await this.openDeepResearchExportMenu(contentFrame);
+    await this.openDeepResearchExportMenu(contentFrame);
 
-      // Click "コンテンツをコピーする"
-      const copyBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_COPY_CONTENT);
-      await copyBtn.click();
-      await delay(POLL_INTERVAL_MS * 5);
+    // Click "コンテンツをコピーする"
+    const copyBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_COPY_CONTENT);
+    await copyBtn.click();
+    await delay(POLL_INTERVAL_MS * 5);
 
-      // Read from clipboard and verify it was actually updated
-      const copied = await this.page.evaluate(
-        () => navigator.clipboard.readText(),
-      );
-      if (copied.length === 0) {
-        return await this.getDeepResearchResponse();
-      }
-      return copied;
-    } catch (error: unknown) {
-      if (isFrameDetachedError(error)) {
-        return this.getDeepResearchResponse();
-      }
-      throw error;
+    // Read from clipboard and verify it was actually updated
+    const copied = await this.page.evaluate(
+      () => navigator.clipboard.readText(),
+    );
+    if (copied.length === 0) {
+      throw new Error('Clipboard was not updated after copy-content click');
     }
+    return copied;
   }
 
   /**

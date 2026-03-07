@@ -130,7 +130,12 @@ export const deepResearchCommand = defineCommand({
       }
 
       // Export to file if requested (after copy, so export menu state is clean)
-      if (exportFormat !== undefined && result.completed) {
+      if (exportFormat !== undefined) {
+        if (!result.completed) {
+          const target = args.exportPath ?? defaultExportFilename(exportFormat);
+          fail(`--export requested but report is incomplete; export to "${target}" aborted`);
+          return;
+        }
         const savePath = resolve(args.exportPath ?? defaultExportFilename(exportFormat));
         await driver.exportDeepResearch(exportFormat, savePath, quiet);
       }
