@@ -444,16 +444,18 @@ export class ChatGPTDriver {
     await searchInput.fill(fileName);
     await searchInput.press('Enter');
 
-    // Find the first visible matching result (poll until rendered, skipping hidden autocomplete)
-    const allMatches = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM).filter({ hasText: fileName });
+    // Find the first visible result whose text exactly matches fileName
+    const allResults = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM);
     let clickedResult = false;
     const resultDeadline = Date.now() + 10_000;
     while (Date.now() < resultDeadline) {
-      const matchCount = await allMatches.count();
-      for (let j = 0; j < matchCount; j++) {
-        const match = allMatches.nth(j);
-        if (await match.isVisible().catch((): boolean => false)) {
-          await match.click();
+      const resultCount = await allResults.count();
+      for (let j = 0; j < resultCount; j++) {
+        const result = allResults.nth(j);
+        if (!(await result.isVisible().catch((): boolean => false))) { continue; }
+        const resultText = await result.innerText().catch((): string => '');
+        if (resultText.trim() === fileName) {
+          await result.click();
           clickedResult = true;
           break;
         }
@@ -912,11 +914,18 @@ export class ChatGPTDriver {
           .locator(SELECTORS.MENU_ITEM)
           .filter({ hasText: label });
         const skipCount = matchedCountByLabel.get(label) ?? 0;
-        const item = allItems.nth(skipCount);
-        const visible = await item.isVisible().catch((): boolean => false);
-        if (visible) {
-          matchedCountByLabel.set(label, skipCount + 1);
-          return item;
+        // Collect only visible items to avoid stalling on hidden nth() elements
+        let visibleCount = 0;
+        const totalCount = await allItems.count();
+        for (let i = 0; i < totalCount; i++) {
+          const item = allItems.nth(i);
+          if (await item.isVisible().catch((): boolean => false)) {
+            if (visibleCount === skipCount) {
+              matchedCountByLabel.set(label, skipCount + 1);
+              return item;
+            }
+            visibleCount++;
+          }
         }
       }
       await delay(200);
