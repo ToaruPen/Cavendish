@@ -171,11 +171,19 @@ export class ChatGPTDriver {
   ): Promise<void> {
     await this.navigateToChat(chatId, quiet);
 
-    // Verify this is actually a DR session by checking for DR iframe
-    const drFrame = this.getDeepResearchContentFrame();
+    // Poll for DR iframe — it may not be ready immediately after navigation
+    let drFrame: Frame | undefined;
+    const maxAttempts = 15;
+    for (let i = 0; i < maxAttempts; i++) {
+      drFrame = this.getDeepResearchContentFrame();
+      if (drFrame) { break; }
+      await delay(POLL_INTERVAL_MS * 5);
+    }
     if (!drFrame) {
       throw new Error(
-        `Chat ${chatId} does not appear to be a Deep Research session (no DR iframe found)`,
+        `Chat ${chatId} does not appear to be a Deep Research session `
+        + `(no DR iframe found after ${String(maxAttempts)} attempts, `
+        + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
       );
     }
 
@@ -213,13 +221,19 @@ export class ChatGPTDriver {
 
     // Poll for iframe — it may not be ready immediately after navigation
     let contentFrame: Frame | undefined;
-    for (let i = 0; i < 15; i++) {
+    const maxAttempts = 15;
+    const pollInterval = POLL_INTERVAL_MS * 5;
+    for (let i = 0; i < maxAttempts; i++) {
       contentFrame = this.getDeepResearchContentFrame();
       if (contentFrame) { break; }
-      await delay(POLL_INTERVAL_MS * 5);
+      await delay(pollInterval);
     }
     if (!contentFrame) {
-      throw new Error(`Deep Research iframe not found on the chat page (chatId=${chatId})`);
+      throw new Error(
+        `Deep Research iframe not found after polling ${String(maxAttempts)} times `
+        + `(interval: ${String(pollInterval)}ms, chatId: ${chatId}, `
+        + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
+      );
     }
 
     const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
