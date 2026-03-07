@@ -329,8 +329,13 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
     await browser.connect(quiet);
     const page = await browser.getPage(quiet);
 
-    // Ensure we are on a ChatGPT page
-    if (!page.url().startsWith(CHATGPT_BASE_URL)) {
+    // Ensure we are on an interactive ChatGPT page (not /share/, /auth/, etc.)
+    const pageUrl = page.url();
+    const isNonInteractive =
+      !pageUrl.startsWith(CHATGPT_BASE_URL) ||
+      pageUrl.includes('/share/') ||
+      pageUrl.includes('/auth/');
+    if (isNonInteractive) {
       progress('Navigating to ChatGPT...', quiet);
       await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
     }
