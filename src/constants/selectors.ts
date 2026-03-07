@@ -142,10 +142,18 @@ export const SELECTORS = {
   GDRIVE_PICKER_SELECT_BUTTON:
     '[role="button"]:has-text("選択"), [role="button"]:has-text("Select")',
 
-  // ── Deep Research ─────────────────────────────────────────
-  /** Deep Research send button — uses data-testid="send-button" instead of
-   *  the normal composer's .composer-submit-button-color class. Only valid on /deep-research page. */
-  DEEP_RESEARCH_SEND_BUTTON: '[data-testid="send-button"]',
+  // ── Deep Research ──────────────────────────────────────────
+  /** Send button that appears after text is entered (shared with DR page) */
+  SEND_BUTTON: '[data-testid="send-button"]',
+
+  /** Deep Research app container (present only on /deep-research) */
+  DEEP_RESEARCH_APP: '.deep-research-app',
+
+  /** "開始する" button inside DR iframe — starts research after plan display */
+  DEEP_RESEARCH_START_BUTTON: 'button:has-text("開始する"), button:has-text("Start research")',
+
+  /** "リサーチを停止" button inside DR iframe — visible during research phase */
+  DEEP_RESEARCH_STOP_BUTTON: 'button:has-text("リサーチを停止"), button:has-text("Stop research")',
 
   // ── GitHub integration ────────────────────────────────────
   /** GitHub pill button in composer footer (after GitHub is enabled) */

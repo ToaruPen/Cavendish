@@ -126,7 +126,7 @@ function validateThinkingEffort(
 }
 
 /** Validate file-related args (--file). Returns file paths or undefined on error. */
-function validateFileArgs(): string[] | undefined {
+export function validateFileArgs(): string[] | undefined {
   let filePaths: string[];
   try {
     filePaths = extractFileArgs(process.argv);

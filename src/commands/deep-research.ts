@@ -1,13 +1,14 @@
 import { defineCommand } from 'citty';
 
-import { fail, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
+import { buildPrompt, readStdin, validateFileArgs } from './ask.js';
 
 const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
 
 /**
- * `cavendish deep-research` — send a prompt to Deep Research and return the report.
+ * `cavendish deep-research` — send a prompt to ChatGPT Deep Research and return the report.
  */
 export const deepResearchCommand = defineCommand({
   meta: {
@@ -17,7 +18,7 @@ export const deepResearchCommand = defineCommand({
   args: {
     prompt: {
       type: 'positional',
-      description: 'The research prompt',
+      description: 'The prompt to send to Deep Research',
       required: true,
     },
     timeout: {
@@ -33,44 +34,57 @@ export const deepResearchCommand = defineCommand({
       description: 'Output format: json or text (default: json)',
       default: 'json',
     },
+    file: {
+      type: 'string',
+      description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
+    },
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+
     const format = validateFormat(args.format);
     if (format === undefined) { return; }
 
-    const timeoutSec = args.timeout !== undefined
-      ? Number(args.timeout)
-      : DEFAULT_TIMEOUT_SEC;
-
+    const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : DEFAULT_TIMEOUT_SEC;
     if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
       fail(`--timeout must be a positive number, got "${String(args.timeout)}"`);
       return;
     }
-
     const timeoutMs = timeoutSec * 1000;
-    const prompt = args.prompt;
+
+    const filePaths = validateFileArgs();
+    if (filePaths === undefined) { return; }
+
+    let stdinData: string;
+    try {
+      stdinData = readStdin();
+    } catch (error: unknown) {
+      fail(errorMessage(error));
+      return;
+    }
+    const prompt = buildPrompt(args.prompt, stdinData);
 
     await withDriver(quiet, async (driver) => {
       await driver.navigateToDeepResearch(quiet);
 
-      progress('Sending Deep Research prompt...', quiet);
-      const initialMsgCount = await driver.getAssistantMessageCount();
-      await driver.sendDeepResearch(prompt, quiet);
+      if (filePaths.length > 0) {
+        await driver.attachFiles(filePaths, quiet);
+      }
 
-      const result = await driver.waitForResponse({
+      progress('Sending Deep Research query...', quiet);
+      await driver.sendDeepResearchMessage(prompt);
+
+      const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
         quiet,
-        initialMsgCount,
-        label: 'Deep Research',
       });
 
       if (format === 'text') {
         text(result.text);
       } else {
         json(result.text, {
-          partial: !result.completed,
           model: 'deep-research',
+          partial: !result.completed,
           timeoutSec,
         });
       }
