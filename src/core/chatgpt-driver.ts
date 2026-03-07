@@ -286,6 +286,12 @@ export class ChatGPTDriver {
 
     const deadline = Date.now() + timeout;
 
+    // Snapshot existing report text before any action, so Phase 4 can
+    // distinguish a new report from stale content left over from a prior turn.
+    const preActionText = options.skipStartPhase
+      ? await this.getDeepResearchResponse()
+      : '';
+
     // Phase 1: Wait for plan iframe and click "開始する"
     // Skipped for refresh/follow-up runs that go straight to research.
     if (!options.skipStartPhase) {
@@ -332,7 +338,7 @@ export class ChatGPTDriver {
     }
 
     // Phase 4: Wait for the final report to render
-    return this.waitForDeepResearchReport(deadline, timeout, quiet, researchStarted);
+    return this.waitForDeepResearchReport(deadline, timeout, quiet, researchStarted, preActionText);
   }
 
   /**
@@ -343,26 +349,38 @@ export class ChatGPTDriver {
    *   research finished. When false (button appeared and disappeared between
    *   polls), we require text to change from the initial snapshot to distinguish
    *   the final report from leftover plan text.
+   * @param preActionText - Snapshot of report text taken before the action
+   *   (follow-up send / refresh click). Used to detect stale content from a
+   *   prior turn that should not be treated as a new report.
    */
   private async waitForDeepResearchReport(
     deadline: number,
     timeout: number,
     quiet: boolean,
     seenStopButton: boolean,
+    preActionText = '',
   ): Promise<WaitForResponseResult> {
     const initialText = await this.getDeepResearchResponse();
 
     // If the stop button was observed and is now gone, non-empty text is the report.
-    if (seenStopButton && initialText.length > 0 && !await this.hasDeepResearchStopButton()) {
+    // Also verify it differs from the pre-action snapshot to avoid returning stale content.
+    if (seenStopButton && initialText.length > 0 && initialText !== preActionText && !await this.hasDeepResearchStopButton()) {
       progress('Response complete', quiet);
       return { text: initialText, completed: true };
     }
 
-    // When the stop button was never observed, we require evidence that the
-    // text is the final report rather than leftover plan text.  Two signals:
-    //   (a) text changed from the initial snapshot, OR
-    //   (b) text has been stable (non-empty, no stop button) for several polls,
-    //       meaning the report was already rendered before Phase 4 began.
+    return this.pollForDeepResearchReport(deadline, timeout, quiet, seenStopButton, initialText, preActionText);
+  }
+
+  /** Poll until the DR report stabilizes or changes from the initial snapshot. */
+  private async pollForDeepResearchReport(
+    deadline: number,
+    timeout: number,
+    quiet: boolean,
+    seenStopButton: boolean,
+    initialText: string,
+    preActionText: string,
+  ): Promise<WaitForResponseResult> {
     const STABLE_THRESHOLD = 3;
     let stableCount = 0;
 
@@ -372,19 +390,18 @@ export class ChatGPTDriver {
       const hasStop = await this.hasDeepResearchStopButton();
       const text = await this.getDeepResearchResponse();
 
-      if (text.length > 0 && !hasStop) {
-        if (seenStopButton || text !== initialText) {
-          progress('Response complete', quiet);
-          return { text, completed: true };
-        }
-        // Text unchanged from initial — count consecutive stable polls
-        stableCount++;
-        if (stableCount >= STABLE_THRESHOLD) {
-          progress('Response complete (stable)', quiet);
-          return { text, completed: true };
-        }
-      } else {
+      if (text.length === 0 || hasStop || text === preActionText) {
         stableCount = 0;
+        continue;
+      }
+      if (seenStopButton || text !== initialText) {
+        progress('Response complete', quiet);
+        return { text, completed: true };
+      }
+      stableCount++;
+      if (stableCount >= STABLE_THRESHOLD) {
+        progress('Response complete (stable)', quiet);
+        return { text, completed: true };
       }
     }
 
@@ -481,7 +498,7 @@ export class ChatGPTDriver {
   private async waitForDeepResearchFrame(chatId: string, deadline?: number): Promise<Frame> {
     const pollInterval = POLL_INTERVAL_MS * 5;
     const defaultDeadline = Date.now() + 15_000;
-    const effectiveDeadline = deadline !== undefined ? Math.max(deadline, defaultDeadline) : defaultDeadline;
+    const effectiveDeadline = deadline !== undefined ? Math.min(deadline, defaultDeadline) : defaultDeadline;
     let attempts = 0;
     while (Date.now() < effectiveDeadline) {
       const frame = this.getDeepResearchContentFrame();
