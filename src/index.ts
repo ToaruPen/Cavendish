@@ -2,6 +2,7 @@ import { defineCommand, runMain } from 'citty';
 
 import { archiveCommand } from './commands/archive.js';
 import { askCommand } from './commands/ask.js';
+import { deepResearchCommand } from './commands/deep-research.js';
 import { deleteCommand } from './commands/delete.js';
 import { listCommand } from './commands/list.js';
 import { moveCommand } from './commands/move.js';
@@ -18,6 +19,7 @@ const main = defineCommand({
   subCommands: {
     archive: archiveCommand,
     ask: askCommand,
+    'deep-research': deepResearchCommand,
     delete: deleteCommand,
     list: listCommand,
     move: moveCommand,

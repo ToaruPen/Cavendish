@@ -28,9 +28,6 @@ export const SELECTORS = {
   /** Hidden file input (no id attribute) */
   FILE_INPUT_GENERIC: 'input[type="file"]:not([id])',
 
-  /** Plus button that opens the file attachment menu */
-  FILE_ADD_BUTTON: '[data-testid="composer-plus-btn"]',
-
   /** File tile that appears in the composer after a file is attached.
    *  Uses the Tailwind group name which is specific to file tiles. */
   FILE_ATTACHMENT_TILE: '.group\\/file-tile',
@@ -123,9 +120,55 @@ export const SELECTORS = {
   /** Create project confirm button in the modal (scoped to modal) */
   PROJECT_CREATE_CONFIRM:
     '[data-testid="modal-new-project-enhanced"] button:has-text("プロジェクトを作成する"), [data-testid="modal-new-project-enhanced"] button:has-text("Create project")',
+
+  // ── Composer + menu (submenu navigation) ──────────────────
+  /** Plus button that opens the composer attachment/feature menu */
+  COMPOSER_PLUS_BUTTON: '[data-testid="composer-plus-btn"]',
+
+  /** Generic menu item — matches both menuitem and menuitemradio (used in composer + menu) */
+  MENU_ITEM: '[role="menuitem"], [role="menuitemradio"]',
+
+  // ── Google Drive ──────────────────────────────────────────
+  /** Google Picker iframe */
+  GDRIVE_PICKER_IFRAME: 'iframe[src*="docs.google.com/picker"]',
+
+  /** Search input inside the Google Picker iframe */
+  GDRIVE_PICKER_SEARCH: 'input[type="text"]',
+
+  /** File result items inside the Google Picker iframe */
+  GDRIVE_PICKER_RESULT_ITEM: '[role="option"]',
+
+  /** Select button inside the Google Picker iframe (Google Closure Library uses div[role=button]) */
+  GDRIVE_PICKER_SELECT_BUTTON:
+    '[role="button"]:has-text("選択"), [role="button"]:has-text("Select")',
+
+  // ── Deep Research ─────────────────────────────────────────
+  /** Deep Research send button — uses data-testid="send-button" instead of
+   *  the normal composer's .composer-submit-button-color class. Only valid on /deep-research page. */
+  DEEP_RESEARCH_SEND_BUTTON: '[data-testid="send-button"]',
+
+  // ── GitHub integration ────────────────────────────────────
+  /** GitHub pill button in composer footer (after GitHub is enabled) */
+  GITHUB_FOOTER_BUTTON: '[data-testid="composer-footer-actions"] button:has-text("GitHub")',
+
+  /** Repository search input in the GitHub picker popover */
+  GITHUB_REPO_SEARCH: 'input[placeholder="リポジトリを検索..."], input[placeholder="Search repositories..."]',
+
+  /** Radix popover content wrapper (used for GitHub repo picker) */
+  POPOVER_CONTENT: '[data-radix-popper-content-wrapper]',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
+
+/**
+ * Bilingual menu labels used with openComposerMenuItem().
+ * Each entry is [Japanese, English] for locale-agnostic matching.
+ */
+export const MENU_LABELS = {
+  SHOW_MORE: ['さらに表示', 'Show more'] as const,
+  ADD_FROM_GOOGLE_DRIVE: ['Google Drive から追加する', 'Add from Google Drive'] as const,
+  GITHUB: ['GitHub'] as const,
+} as const;
 
 export const CHATGPT_BASE_URL = 'https://chatgpt.com';
 

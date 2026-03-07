@@ -1,10 +1,10 @@
-import { fstatSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { fstatSync, readFileSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
 
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
+import { extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
 import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 
 const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
@@ -23,6 +23,15 @@ function allowedThinkingEfforts(model: string): readonly ThinkingEffortLevel[] |
   if (lower.includes('thinking')) {return VALID_THINKING_EFFORTS;}
   if (lower.includes('pro')) {return PRO_THINKING_EFFORTS;}
   return undefined;
+}
+
+/**
+ * Check whether a model supports GitHub integration in standard chat.
+ * Only Thinking (Agent Mode) supports GitHub; Deep Research has its own path.
+ */
+function supportsGitHub(model: string): boolean {
+  const lower = model.toLowerCase();
+  return lower.includes('thinking');
 }
 
 const DEFAULT_MODEL = 'Pro';
@@ -62,53 +71,6 @@ export function buildPrompt(prompt: string, stdinData: string): string {
 }
 
 /**
- * Extract --file arguments from process.argv.
- * citty does not support array-type args, so we parse manually.
- * Supports both --file <path> and --file=<path> forms.
- * Returns resolved absolute paths.
- */
-export function extractFileArgs(argv: string[]): string[] {
-  const files: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--') {break;} // respect end-of-options
-    if (argv[i].startsWith('--file=')) {
-      const value = argv[i].slice('--file='.length);
-      if (value === '') {
-        throw new Error('--file requires a file path');
-      }
-      files.push(resolve(value));
-    } else if (argv[i] === '--file') {
-      if (i + 1 >= argv.length) {
-        throw new Error('--file requires a file path');
-      }
-      const value = argv[i + 1];
-      if (value.startsWith('-')) {
-        throw new Error(`--file requires a file path, got "${value}"`);
-      }
-      files.push(resolve(value));
-      i++; // skip the value
-    }
-  }
-  return files;
-}
-
-/**
- * Validate that all file paths exist and are regular files.
- * Returns the first invalid path, or undefined if all are valid.
- */
-export function findMissingFile(filePaths: string[]): string | undefined {
-  return filePaths.find((p) => {
-    try {
-      return !statSync(p).isFile();
-    } catch (error: unknown) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') {return true;}
-      throw new Error(`Failed to stat "${p}": ${errorMessage(error)}`);
-    }
-  });
-}
-
-/**
  * Resolve the effective timeout: use explicit --timeout if provided,
  * otherwise pick a model-appropriate default.
  */
@@ -129,6 +91,8 @@ interface ValidatedArgs {
   timeoutSec: number;
   format: 'json' | 'text';
   filePaths: string[];
+  gdriveFiles: string[];
+  githubRepos: string[];
   thinkingEffort: ThinkingEffortLevel | undefined;
   prompt: string;
   continueChat: boolean;
@@ -231,8 +195,20 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const filePaths = validateFileArgs();
   if (filePaths === undefined) {return undefined;}
 
+  const gdriveFiles = extractArgsOrFail('gdrive');
+  if (gdriveFiles === undefined) {return undefined;}
+
+  const githubRepos = extractArgsOrFail('github');
+  if (githubRepos === undefined) {return undefined;}
+
   const chatOptions = validateChatOptions(args);
   if (chatOptions === undefined) {return undefined;}
+
+  // Skip GitHub model check when continuing — the chat already has its model.
+  if (githubRepos.length > 0 && !chatOptions.continueChat && !supportsGitHub(model)) {
+    fail(`--github requires a model with GitHub support (e.g. Thinking). Model "${model}" does not support GitHub in standard chat.`);
+    return undefined;
+  }
 
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
   if (thinkingEffort !== undefined && chatOptions.continueChat) {
@@ -256,6 +232,8 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     timeoutSec,
     format,
     filePaths,
+    gdriveFiles,
+    githubRepos,
     thinkingEffort,
     prompt,
     ...chatOptions,
@@ -343,6 +321,14 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'Project name to ask within',
     },
+    gdrive: {
+      type: 'string',
+      description: 'Google Drive file(s) to attach (repeatable: --gdrive "file1" --gdrive "file2")',
+    },
+    github: {
+      type: 'string',
+      description: 'GitHub repo(s) as context (repeatable: --github "owner/repo")',
+    },
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
@@ -350,7 +336,7 @@ export const askCommand = defineCommand({
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,
-      filePaths, thinkingEffort, prompt, continueChat,
+      filePaths, gdriveFiles, githubRepos, thinkingEffort, prompt, continueChat,
     } = validated;
 
     const browser = new BrowserManager();
@@ -372,6 +358,14 @@ export const askCommand = defineCommand({
 
       if (filePaths.length > 0) {
         await driver.attachFiles(filePaths, quiet);
+      }
+
+      for (const gdFile of gdriveFiles) {
+        await driver.attachGoogleDriveFile(gdFile, quiet);
+      }
+
+      for (const repo of githubRepos) {
+        await driver.attachGitHubRepo(repo, quiet);
       }
 
       progress('Sending message...', quiet);
