@@ -117,14 +117,23 @@ cavendish ask --project "For-Agents" "プロジェクトの方針を教えてく
 # 既存チャットに追加メッセージ
 cavendish ask --continue "続きを詳しく説明してください"
 
-# ストリーミング出力（NDJSON）
-cavendish ask --stream "質問テキスト"
+# 特定のチャットIDで継続
+cavendish ask --continue --chat <chat-id> "続きの質問"
+
+# Google Driveファイル添付
+cavendish ask --gdrive "document.pdf" "このファイルを分析して"
+
+# GitHubリポジトリ連携
+cavendish ask --github "owner/repo" "このコードベースをレビューして"
 
 # エージェントモード
 cavendish ask --agent "問題を解いてください"
 
-# 特定のチャットIDで継続
-cavendish ask --continue --chat <chat-id> "続きの質問"
+# Thinking effort設定（Thinking/Proモデル向け）
+cavendish ask --model thinking --thinking-effort extended "難しい問題"
+
+# ストリーミング出力（NDJSON）
+cavendish ask --stream "質問テキスト"
 
 # ドライラン（実行せず引数検証のみ）
 cavendish ask --dry-run "質問テキスト"
@@ -136,14 +145,21 @@ cavendish ask --dry-run "質問テキスト"
 # Deep Researchクエリ
 cavendish deep-research "調査テーマ"
 
+# ファイル添付
+cavendish deep-research --file ./data.csv "このデータを分析して"
+
 # フォローアップチャット
 cavendish deep-research --chat <chat-id> "追加の質問"
 
-# Google Driveファイル添付
-cavendish deep-research --gdrive "document.pdf" "このファイルを分析して"
+# 同一プロンプトで再実行
+cavendish deep-research --chat <chat-id> --refresh
 
-# GitHubリポジトリ連携
-cavendish deep-research --github "owner/repo" "このリポジトリをレビューして"
+# レポートをエクスポート（markdown / word / pdf）
+cavendish deep-research --export markdown "調査テーマ"
+cavendish deep-research --export pdf --exportPath ./report.pdf "調査テーマ"
+
+# ストリーミング出力
+cavendish deep-research --stream "調査テーマ"
 ```
 
 ### 4.4 チャット管理系
@@ -178,16 +194,25 @@ cavendish projects
 cavendish projects --name "For-Agents" --chats
 ```
 
-### 4.6 出力オプション（全コマンド共通）
+### 4.6 共通オプション
+
+#### 全コマンド共通
+
+```bash
+--quiet           # 進捗表示なし
+--dry-run         # 実行せず引数検証のみ
+```
+
+#### ask / deep-research 共通
 
 ```bash
 --format text     # プレーンテキスト
 --format json     # 構造化出力（デフォルト、メタデータ含む）
 --stream          # NDJSONストリーミング出力
---timeout 120     # 秒数指定（デフォルト: 120秒）
---quiet           # 進捗表示なし
---dry-run         # 実行せず引数検証のみ
+--timeout 120     # 秒数指定（デフォルト: 120秒、Pro: 2400秒、DR: 1800秒）
 ```
+
+※ `--format` は `list`, `read`, `projects`, `status` でも利用可能。`doctor` は独自の `--json` フラグを使用。
 
 ---
 

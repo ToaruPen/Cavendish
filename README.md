@@ -156,15 +156,22 @@ cavendish projects --name "For-Agents" --chats
 cavendish projects --create --name "New Project"
 ```
 
-### Common Options
+### Global Options (all commands)
+
+```bash
+--quiet                  # Suppress progress output
+--dry-run                # Validate args without executing
+```
+
+### Options for ask / deep-research
 
 ```bash
 --format text|json       # Output format (default: json)
 --stream                 # NDJSON streaming output
 --timeout 120            # Timeout in seconds (default: 120, Pro: 2400, DR: 1800)
---quiet                  # Suppress progress output
---dry-run                # Validate args without executing
 ```
+
+> `--format` is also accepted by `list`, `read`, `projects`, and `status`. `doctor` uses its own `--json` flag.
 
 ## Architecture
 
