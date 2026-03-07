@@ -81,6 +81,11 @@ export const deepResearchCommand = defineCommand({
       return;
     }
 
+    if (exportFormat === undefined && args.exportPath !== undefined) {
+      fail('--exportPath requires --export (e.g. --export markdown --exportPath report.md)');
+      return;
+    }
+
     const filePaths = validateFileArgs();
     if (filePaths === undefined) { return; }
 

@@ -1639,8 +1639,7 @@ function isFrameDetachedError(error: unknown): boolean {
   if (!(error instanceof Error)) { return false; }
   const msg = error.message;
   return msg.includes('frame was detached') ||
-    msg.includes('Execution context was destroyed') ||
-    msg.includes('Target closed');
+    msg.includes('Execution context was destroyed');
 }
 
 /**
