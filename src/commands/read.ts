@@ -1,7 +1,8 @@
 import { defineCommand } from 'citty';
 
 import type { ConversationMessage } from '../core/chatgpt-driver.js';
-import { jsonRaw, text, validateFormat } from '../core/output-handler.js';
+import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /**
@@ -28,20 +29,18 @@ export const readCommand = defineCommand({
       description: 'The conversation ID to read',
       required: true,
     },
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
-    format: {
-      type: 'string',
-      description: 'Output format: json or text (default: json)',
-      default: 'json',
-    },
+    ...GLOBAL_ARGS,
+    ...FORMAT_ARG,
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
+
+    if (args.dryRun === true) {
+      progress(`[dry-run] Would read conversation ${args.chatId} (format: ${format})`, false);
+      return;
+    }
 
     await withDriver(quiet, async (driver) => {
       const messages = await driver.readConversation(args.chatId, quiet);
