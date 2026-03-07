@@ -211,9 +211,13 @@ export class ChatGPTDriver {
     // Throws if start is not detected within timeout.
     await this.clickDeepResearchStart(deadline, quiet);
 
-    // Phase 2: Wait for research to start (stop button appears in iframe)
+    // Phase 2: Wait for research to start (stop button appears in iframe).
+    // Cap at 60s so fast/auto-finish runs and selector misses fall through
+    // to Phase 4 quickly instead of waiting the full deadline.
+    const STOP_DETECT_MS = 60_000;
+    const stopDetectDeadline = Math.min(deadline, Date.now() + STOP_DETECT_MS);
     let researchStarted = false;
-    while (Date.now() < deadline) {
+    while (Date.now() < stopDetectDeadline) {
       await delay(POLL_INTERVAL_MS * 5);
       if (await this.hasDeepResearchStopButton()) {
         researchStarted = true;
