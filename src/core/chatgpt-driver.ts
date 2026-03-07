@@ -664,15 +664,25 @@ export class ChatGPTDriver {
    */
   async getMostRecentChatId(quiet = false): Promise<string | undefined> {
     await this.waitForSidebarContainer(quiet);
-    const href = await this.page
-      .locator('#history a[href*="/c/"]')
-      .first()
-      .getAttribute('href')
-      .catch(() => null);
-    if (!href) {return undefined;}
-    // Extract the chat ID: last segment after the final "/c/"
+    const links = this.page.locator(SELECTORS.MOST_RECENT_CONVERSATION_LINK);
+    if (await links.count() === 0) {
+      return undefined;
+    }
+
+    const href = await links.first().getAttribute('href');
+    if (!href) {
+      throw new Error(
+        `Recent conversation link is missing href (selector: ${SELECTORS.MOST_RECENT_CONVERSATION_LINK})`,
+      );
+    }
+
     const match = /\/c\/([^/?#]+)$/.exec(href);
-    return match?.[1];
+    if (!match) {
+      throw new Error(
+        `Unexpected recent conversation href format: "${href}" (selector: ${SELECTORS.MOST_RECENT_CONVERSATION_LINK})`,
+      );
+    }
+    return match[1];
   }
 
   /**
