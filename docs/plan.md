@@ -1,8 +1,8 @@
-# ChatGPT CLI 計画書
+# Cavendish 計画書
 
 ## 1. 概要
 
-Playwrightを用いてChatGPTのWeb UIを自動操作し、任意のコーディングエージェント（Claude Code, Codex CLI等）からシェルコマンド一つでChatGPT Proモデルへの問い合わせ、ファイル添付レビュー、プロジェクト操作等を行えるCLIツール。
+Playwrightを用いてChatGPTのWeb UIを自動操作し、任意のコーディングエージェント（Claude Code, Codex CLI等）からシェルコマンド一つでChatGPT Proモデルへの問い合わせ、ファイル添付レビュー、プロジェクト操作、Deep Research等を行えるCLIツール。
 
 ---
 
@@ -11,7 +11,9 @@ Playwrightを用いてChatGPTのWeb UIを自動操作し、任意のコーディ
 - **ランタイム**: Node.js（PlaywrightのネイティブがNode.jsであり、TypeScriptとの親和性が高い）
 - **ブラウザ自動化**: Playwright（headed モード、専用Chromeプロファイル）
 - **言語**: TypeScript
-- **パッケージマネージャ**: npm or pnpm
+- **パッケージマネージャ**: npm
+- **CLIフレームワーク**: citty (UnJS)
+- **ビルドツール**: tsup
 - **配布**: npm パッケージとしてグローバルインストール可能にする
 
 ---
@@ -26,18 +28,18 @@ Playwrightを用いてChatGPTのWeb UIを自動操作し、任意のコーディ
            │ shell exec
            ▼
 ┌──────────────────────┐
-│    chatgpt-cli       │
+│    cavendish         │
 │  (Node.js CLI)       │
 │                      │
 │  ┌────────────────┐  │
 │  │ Command Parser │  │
-│  │  (commander)   │  │
+│  │  (citty)       │  │
 │  └───────┬────────┘  │
 │          ▼           │
 │  ┌────────────────┐  │
 │  │ Browser Manager│  │
 │  │ (Playwright)   │  │
-│  │ - 起動/接続    │  │
+│  │ - spawn/接続   │  │
 │  │ - プロファイル  │  │
 │  │   管理         │  │
 │  └───────┬────────┘  │
@@ -50,9 +52,16 @@ Playwrightを用いてChatGPTのWeb UIを自動操作し、任意のコーディ
 │  └───────┬────────┘  │
 │          ▼           │
 │  ┌────────────────┐  │
+│  │ Error Handler  │  │
+│  │ - エラー分類   │  │
+│  │ - 終了コード   │  │
+│  └───────┬────────┘  │
+│          ▼           │
+│  ┌────────────────┐  │
 │  │ Output Handler │  │
 │  │ - stdout出力   │  │
-│  │ - JSON/text    │  │
+│  │ - JSON/text/   │  │
+│  │   NDJSON       │  │
 │  └────────────────┘  │
 └──────────────────────┘
            │
@@ -71,74 +80,139 @@ Playwrightを用いてChatGPTのWeb UIを自動操作し、任意のコーディ
 ### 4.1 セットアップ系
 
 ```bash
-# 初回セットアップ: 専用Chromeプロファイルを作成し、手動ログインを促す
-chatgpt-cli init
+# 初回セットアップ
+cavendish init
+
+# プロファイルリセット＋再認証
+cavendish init --reset
+
+# 統合診断
+cavendish doctor
+cavendish doctor --json
 
 # ログイン状態の確認
-chatgpt-cli status
+cavendish status
 ```
 
 ### 4.2 メッセージ送信系（中核機能）
 
 ```bash
 # 基本的な問い合わせ
-chatgpt-cli ask "質問テキスト"
+cavendish ask "質問テキスト"
 
 # モデル指定
-chatgpt-cli ask --model pro "質問テキスト"
-chatgpt-cli ask --model auto "質問テキスト"
+cavendish ask --model pro "質問テキスト"
+cavendish ask --model auto "質問テキスト"
 
 # ファイル添付
-chatgpt-cli ask --file ./src/main.ts "このコードをレビューしてください"
-chatgpt-cli ask --file ./a.ts --file ./b.ts "この2つのファイルを比較してください"
+cavendish ask --file ./src/main.ts "このコードをレビューしてください"
+cavendish ask --file ./a.ts --file ./b.ts "この2つのファイルを比較してください"
 
 # 標準入力からの読み取り
-cat error.log | chatgpt-cli ask "このエラーを分析してください"
+cat error.log | cavendish ask "このエラーを分析してください"
 
 # プロジェクト内で実行
-chatgpt-cli ask --project "For-Agents" "プロジェクトの方針を教えてください"
+cavendish ask --project "For-Agents" "プロジェクトの方針を教えてください"
 
 # 既存チャットに追加メッセージ
-chatgpt-cli ask --continue "続きを詳しく説明してください"
+cavendish ask --continue "続きを詳しく説明してください"
+
+# 特定のチャットIDで継続
+cavendish ask --continue --chat <chat-id> "続きの質問"
+
+# Google Driveファイル添付
+cavendish ask --gdrive "document.pdf" "このファイルを分析して"
+
+# GitHubリポジトリ連携
+cavendish ask --github "owner/repo" "このコードベースをレビューして"
+
+# エージェントモード
+cavendish ask --agent "問題を解いてください"
+
+# Thinking effort設定（Thinking/Proモデル向け）
+cavendish ask --model thinking --thinking-effort extended "難しい問題"
+
+# ストリーミング出力（NDJSON）
+cavendish ask --stream "質問テキスト"
+
+# ドライラン（実行せず引数検証のみ）
+cavendish ask --dry-run "質問テキスト"
 ```
 
-### 4.3 チャット管理系
+### 4.3 Deep Research
+
+```bash
+# Deep Researchクエリ
+cavendish deep-research "調査テーマ"
+
+# ファイル添付
+cavendish deep-research --file ./data.csv "このデータを分析して"
+
+# フォローアップチャット
+cavendish deep-research --chat <chat-id> "追加の質問"
+
+# 同一プロンプトで再実行
+cavendish deep-research --chat <chat-id> --refresh
+
+# レポートをエクスポート（markdown / word / pdf）
+cavendish deep-research --export markdown "調査テーマ"
+cavendish deep-research --export pdf --exportPath ./report.pdf "調査テーマ"
+
+# ストリーミング出力
+cavendish deep-research --stream "調査テーマ"
+```
+
+### 4.4 チャット管理系
 
 ```bash
 # チャット一覧
-chatgpt-cli list
+cavendish list
+
+# チャット読み取り
+cavendish read <chat-id>
 
 # チャット削除
-chatgpt-cli delete <chat-id>
+cavendish delete <chat-id>
 
-# 新規チャット作成（メッセージ送信なし）
-chatgpt-cli new --model pro
+# プロジェクトチャット削除
+cavendish delete <chat-id> --project "Project Name"
+
+# チャットのアーカイブ
+cavendish archive <chat-id>
+
+# チャットをプロジェクトに移動
+cavendish move <chat-id> --project "Project Name"
 ```
 
-### 4.4 プロジェクト系
+### 4.5 プロジェクト系
 
 ```bash
 # プロジェクト一覧
-chatgpt-cli projects
+cavendish projects
 
 # プロジェクト内のチャット一覧
-chatgpt-cli projects --name "For-Agents" --chats
+cavendish projects --name "For-Agents" --chats
 ```
 
-### 4.5 出力オプション（全コマンド共通）
+### 4.6 共通オプション
+
+#### 全コマンド共通
 
 ```bash
-# 出力形式
---format text     # デフォルト: プレーンテキスト
---format json     # 構造化出力（メタデータ含む）
---format markdown # Markdown形式
-
-# タイムアウト
---timeout 120     # 秒数指定（デフォルト: 120秒）
-
-# 静かモード（進捗表示なし）
---quiet
+--quiet           # 進捗表示なし
+--dry-run         # 実行せず引数検証のみ
 ```
+
+#### ask / deep-research 共通
+
+```bash
+--format text     # プレーンテキスト
+--format json     # 構造化出力（デフォルト、メタデータ含む）
+--stream          # NDJSONストリーミング出力
+--timeout 120     # 秒数指定（デフォルト: 120秒、Pro: 2400秒、DR: 1800秒）
+```
+
+※ `--format` は `list`, `read`, `projects`, `status` でも利用可能。`doctor` は独自の `--json` フラグを使用。
 
 ---
 
@@ -148,13 +222,15 @@ chatgpt-cli projects --name "For-Agents" --chats
 
 責務：Chromeの起動・接続・プロファイル管理
 
-- `launch()`: 専用プロファイルでChromeをheadedモードで起動
-- `isRunning()`: 既にChromeが起動しているか確認
-- `connect()`: 起動済みChromeにCDP経由で接続
+- `spawn()`: 専用プロファイルでChromeをheadedモードで起動（detached spawn + CDP connect）
+- `connect()`: CDP経由で起動済みChromeに接続（最大3回リトライ）
 - `getPage()`: ChatGPTのタブを取得、なければ新規作成
 - `close()`: ブラウザを終了
 
-設計方針：CLIの呼び出しごとにChromeを起動・終了するとオーバーヘッドが大きいため、初回起動後はChromeプロセスを常駐させ、以降は `connect()` で接続する。一定時間アクセスがなければ自動終了するタイマーを設ける。
+設計方針：CLIの呼び出しごとにChromeを起動・終了するとオーバーヘッドが大きいため、Chromeプロセスを常駐させ（detached spawn）、以降は `connect()` でCDP経由で接続する。
+
+- Chromeプロファイル: `~/.cavendish/chrome-profile/`
+- CDPエンドポイント: `~/.cavendish/cdp-endpoint.json`
 
 ### 5.2 ChatGPTDriver
 
@@ -169,6 +245,14 @@ chatgpt-cli projects --name "For-Agents" --chats
 - `getLastResponse()`: 最新のアシスタント応答を取得
 - `getConversationList()`: サイドバーからチャット一覧を取得
 - `deleteConversation(id)`: チャットを削除
+- `attachGoogleDriveFile(name)`: Google DriveファイルをPicker経由で添付
+- `attachGitHubRepo(repo)`: GitHubリポジトリを連携
+- `enableAgentMode()`: エージェントモードを有効化
+- `setThinkingEffort(level)`: Thinking effort levelを設定
+- `getMostRecentChatId()`: 最新のチャットIDを取得
+- `clickDeepResearchStart()`: Deep Research開始ボタンをクリック
+- `waitForDeepResearchReport()`: Deep Researchレポート完了を待機
+- `exportDeepResearch(method)`: Deep Researchレポートをエクスポート
 
 すべての操作はセレクタベースで行い、スクリーンショットは使用しない。
 
@@ -176,71 +260,75 @@ chatgpt-cli projects --name "For-Agents" --chats
 
 責務：結果の整形と出力
 
-- `text(response)`: プレーンテキストとしてstdoutに出力
-- `json(response)`: メタデータ（モデル名、思考時間、トークン数等）含む構造化出力
-- `markdown(response)`: Markdown形式出力
+- `text(response)`: プレーンテキスト出力
+- `json(response, metadata)`: 構造化出力（model, chatId, url, project, timeoutSec, partial, timestamp）
+- `emitChunk(content)`: NDJSONチャンクイベント
+- `emitState(state)`: NDJSONステートイベント
+- `emitFinal(content, metadata)`: NDJSON最終イベント
+- `failStructured(error)`: 構造化エラー出力（stderr）
 
-### 5.4 ConfigManager
+### 5.4 データ保存先
 
-責務：設定ファイルの管理
+- Chromeプロファイル: `~/.cavendish/chrome-profile/`
+- CDPエンドポイント: `~/.cavendish/cdp-endpoint.json`
 
-- 保存先: `~/.chatgpt-cli/config.json`
-- Chromeプロファイル: `~/.chatgpt-cli/chrome-profile/`
-- 設定項目：デフォルトモデル、タイムアウト、出力形式等
+### 5.5 ErrorHandler (errors.ts)
+
+責務：構造化エラーハンドリング
+
+- エラーカテゴリ: `cdp_unavailable`(2), `chrome_not_found`(3), `auth_expired`(4), `cloudflare_blocked`(5), `selector_miss`(6), `timeout`(7), `unknown`(1)
+- `CavendishError`: カテゴリ・終了コード・推奨アクション付きエラー
+- `classifyError()`: 汎用Errorをカテゴリに自動分類
+- `--format json`時: stderrに構造化JSONエラーを出力
+
+### 5.6 DoctorChecks (doctor.ts)
+
+責務：統合診断
+
+- 9つの診断項目: `chrome_cdp`, `profile_dir`, `config_file`, `browser_connect`, `cloudflare`, `auth_status`, `prompt_textarea`, `model_picker`, `gdrive_picker`
+- pass/fail/skip ステータス
+- `--json`で機械可読な診断結果出力
 
 ---
 
-## 6. 重要セレクタ定義（検証済み）
+## 6. セレクタ定義
 
-今回の検証で確認したセレクタをCLIに組み込む。ChatGPTのUI更新で変更される可能性があるため、セレクタは定数ファイルに集約し、変更時の修正を容易にする。
+すべてのセレクタは `src/constants/selectors.ts` に集約管理されている。ChatGPTのUI更新で変更される可能性があるため、インラインでのセレクタ記述は禁止。
 
-```typescript
-// selectors.ts
-export const SELECTORS = {
-  // 入力欄
-  PROMPT_INPUT: '#prompt-textarea',
-  
-  // モデル選択
-  MODEL_SELECTOR_BUTTON: 'button:has-text("モデル セレクター")', // aria-label含む
-  MODEL_MENU: 'menu',                     // ドロップダウンメニュー
-  MODEL_MENUITEM: 'menuitem',             // 各モデル項目
-  
-  // 送信ボタン
-  SUBMIT_BUTTON: '.composer-submit-button-color',
-  
-  // ファイル添付
-  FILE_INPUT_GENERIC: 'input[type="file"]:not([id])',
-  FILE_ADD_BUTTON: '[data-testid="composer-plus-btn"]',
-  
-  // 応答
-  ASSISTANT_MESSAGE: '[data-message-author-role="assistant"]',
-  USER_MESSAGE: '[data-message-author-role="user"]',
-  
-  // 応答完了検知
-  COPY_BUTTON: '[aria-label="コピーする"]',
-  THINKING_INDICATOR: '.agent-turn',
-  
-  // チャット管理
-  CONVERSATION_LINK: 'a[href^="/c/"]',
-  NEW_CHAT_LINK: 'a[href="/"]',
-  
-  // プロジェクト
-  PROJECT_LINK: 'a[href*="/project"]',
-};
-```
+現在70以上のセレクタが14カテゴリに分類されている：
+
+- **Input**: プロンプト入力欄、送信ボタン
+- **Model Selection**: モデルセレクター、メニュー項目
+- **File Attachment**: ファイルinput、添付ボタン、添付タイル
+- **Messages**: アシスタント/ユーザーメッセージ
+- **Response Completion**: コピーボタン、停止ボタン、フィードバック
+- **Thinking Effort**: 思考レベル設定
+- **Chat Management**: チャットリンク、新規チャット
+- **Projects**: プロジェクトリンク、プロジェクトチャット
+- **Composer + Menu**: コンポーザーメニュー、メニュー項目
+- **Google Drive**: Driveピッカー、検索、ファイル選択
+- **Deep Research**: DRアプリ、iframe、エクスポート
+- **GitHub Integration**: GitHubメニュー、リポジトリ選択
+- **Agent Mode**: エージェントモード切り替え
+- **Auth/Cloudflare Detection**: ログイン検知、Cloudflareチャレンジ
+
+※ すべてのセレクタは日本語/英語のバイリンガル対応（i18nサポート）。
 
 ---
 
 ## 7. エラーハンドリング方針
 
-| エラー種別 | 対処 |
-|---|---|
-| Chromeが起動できない | エラーメッセージ + `chatgpt-cli init` を案内 |
-| ログインセッション切れ | 検知して `chatgpt-cli init` でのログインを案内 |
-| Cloudflareチャレンジ発動 | 検知してユーザーに手動解決を案内 |
-| 入力欄の空振り | JS確認 → 最大3回リトライ |
-| 応答タイムアウト | タイムアウト値と共に部分応答を返す |
-| セレクタ変更（UI更新） | エラーログに具体的セレクタを出力し、修正を容易に |
+| カテゴリ | 終了コード | 対処 |
+|---|---|---|
+| `cdp_unavailable` | 2 | `cavendish init` を案内 |
+| `chrome_not_found` | 3 | Chrome のインストールを案内 |
+| `auth_expired` | 4 | ChatGPTへの再ログインを案内 |
+| `cloudflare_blocked` | 5 | 手動でCloudflareチャレンジ解決を案内 |
+| `selector_miss` | 6 | UI変更の可能性。`cavendish doctor` を案内 |
+| `timeout` | 7 | `--timeout` の増加またはChatGPTの応答確認を案内 |
+| `unknown` | 1 | エラーメッセージの詳細を確認 |
+
+`--format json` 時はstderrに `{ error: true, category, message, exitCode, action }` を出力。
 
 ---
 
@@ -261,47 +349,69 @@ export const SELECTORS = {
 
 ### Phase 3: チャット・プロジェクト管理
 
-- `list`, `delete`, `new` コマンド
+- `list`, `delete` コマンド
 - `projects` コマンド
 - `--project`, `--continue` オプション
 
 ### Phase 4: 安定化・拡張
 
-- リトライロジックの強化
-- Chromeプロセス常駐化とタイマー自動終了
-- npm パッケージとしての公開準備
-- テストの整備
+- Deep Researchコマンド（`deep-research`）
+- Google Drive / GitHub連携
+- エージェントモード（`--agent`）
+- `--chat` フラグ（Deep Researchフォローアップ）
+- `--dry-run` フラグ、`status` コマンド拡張
+- Chromeプロセス常駐化（CDP接続、起動ごとのlaunch不要）
+
+### Phase 5: エージェント統合強化
+
+- `init` コマンド（Chrome セットアップ/再認証）
+- `doctor` コマンド（統合診断 + `--json`）
+- `status` コマンドの doctor 化
+- ストリーミング出力（`--stream` / NDJSON）
+- 構造化エラー出力（エラーカテゴリ・終了コード）
+- `ask` の JSON 出力に chatId、url、project メタデータ追加
+- `--continue` の決定性改善（chatId ベース）
 
 ---
 
 ## 9. ディレクトリ構成
 
-```
-chatgpt-cli/
+```text
+cavendish/
 ├── package.json
 ├── tsconfig.json
 ├── src/
-│   ├── index.ts              # エントリポイント (commander)
+│   ├── index.ts              # エントリポイント (citty)
 │   ├── commands/
-│   │   ├── init.ts           # init コマンド
-│   │   ├── status.ts         # status コマンド
 │   │   ├── ask.ts            # ask コマンド
+│   │   ├── deep-research.ts  # deep-research コマンド
+│   │   ├── init.ts           # init コマンド
+│   │   ├── doctor.ts         # doctor コマンド
+│   │   ├── status.ts         # status コマンド
 │   │   ├── list.ts           # list コマンド
+│   │   ├── read.ts           # read コマンド
 │   │   ├── delete.ts         # delete コマンド
-│   │   ├── projects.ts       # projects コマンド
-│   │   └── new.ts            # new コマンド
+│   │   ├── archive.ts        # archive コマンド
+│   │   ├── move.ts           # move コマンド
+│   │   └── projects.ts       # projects コマンド
 │   ├── core/
-│   │   ├── browser-manager.ts
-│   │   ├── chatgpt-driver.ts
-│   │   ├── output-handler.ts
-│   │   └── config-manager.ts
-│   ├── constants/
-│   │   └── selectors.ts      # セレクタ定義
-│   └── utils/
-│       ├── logger.ts         # 進捗表示
-│       └── retry.ts          # リトライユーティリティ
+│   │   ├── browser-manager.ts  # Chrome起動/CDP接続管理
+│   │   ├── chatgpt-driver.ts   # DOM操作
+│   │   ├── output-handler.ts   # 出力フォーマット
+│   │   ├── cli-args.ts         # 共有CLI引数定義
+│   │   ├── doctor.ts           # 診断ロジック
+│   │   ├── errors.ts           # 構造化エラー型
+│   │   └── with-driver.ts      # ドライバーライフサイクル
+│   └── constants/
+│       └── selectors.ts        # セレクタ定義（70+）
 ├── tests/
-└── README.md
+│   ├── errors.test.ts
+│   ├── output-handler.test.ts
+│   ├── ask-file.test.ts
+│   ├── ask-stdin.test.ts
+│   └── ask-chat-options.test.ts
+└── docs/
+    └── plan.md
 ```
 
 ---
@@ -317,7 +427,7 @@ chatgpt-cli/
 
 ## 付録: 検証で確認済みの技術的事実
 
-以下は2026年2月28日時点でのChatGPT Web UIに対する実機検証の結果である。
+以下は2026年2月28日時点でのChatGPT Web UIに対する実機検証の結果に基づく。セレクタは `src/constants/selectors.ts` に70以上のエントリとして管理されており、継続的に検証・更新されている。
 
 ### DOM構造
 
@@ -344,7 +454,7 @@ fileInput.dispatchEvent(new Event('change', { bubbles: true }));
 
 - ChatGPTはCloudflare経由（server: cloudflare, cf-ray確認済み）
 - Sentinel/Proof of Workチャレンジが毎メッセージ送信時に実行される
-- インラインスクリプト内にwebdriver/headless検知コードは確認されなかった
+- `chromium.launchPersistentContext` + `channel: 'chrome'` はCloudflare検知を誘発するため、`ignoreDefaultArgs: ['--enable-automation']` + `--disable-blink-features=AutomationControlled` で回避
 - headed + 専用プロファイル構成であればbot検知リスクは最小
 
 ### API エンドポイント（参考）
