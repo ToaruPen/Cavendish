@@ -62,34 +62,67 @@ export function buildPrompt(prompt: string, stdinData: string): string {
 }
 
 /**
+ * Extract repeatable string arguments from process.argv.
+ * citty does not support array-type args, so we parse manually.
+ * Supports both --flag <value> and --flag=<value> forms.
+ *
+ * @param argv - process.argv to parse
+ * @param flag - the flag name without leading dashes (e.g. 'file', 'gdrive', 'github')
+ * @param resolvePaths - if true, resolve values as absolute file paths
+ */
+export function extractRepeatableArgs(
+  argv: string[],
+  flag: string,
+  resolvePaths = false,
+): string[] {
+  const prefix = `--${flag}=`;
+  const exact = `--${flag}`;
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--') { break; }
+    const parsed = parseArgPair(argv, i, prefix, exact, flag);
+    if (parsed === undefined) { continue; }
+    values.push(resolvePaths ? resolve(parsed.value) : parsed.value);
+    i += parsed.skip;
+  }
+  return values;
+}
+
+function parseArgPair(
+  argv: string[],
+  i: number,
+  prefix: string,
+  exact: string,
+  flag: string,
+): { value: string; skip: number } | undefined {
+  if (argv[i].startsWith(prefix)) {
+    const value = argv[i].slice(prefix.length);
+    if (value === '') {
+      throw new Error(`--${flag} requires a value`);
+    }
+    return { value, skip: 0 };
+  }
+  if (argv[i] === exact) {
+    if (i + 1 >= argv.length) {
+      throw new Error(`--${flag} requires a value`);
+    }
+    const value = argv[i + 1];
+    if (value === '' || value.startsWith('-')) {
+      throw new Error(`--${flag} requires a value, got "${value}"`);
+    }
+    return { value, skip: 1 };
+  }
+  return undefined;
+}
+
+/**
  * Extract --file arguments from process.argv.
  * citty does not support array-type args, so we parse manually.
  * Supports both --file <path> and --file=<path> forms.
  * Returns resolved absolute paths.
  */
 export function extractFileArgs(argv: string[]): string[] {
-  const files: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--') {break;} // respect end-of-options
-    if (argv[i].startsWith('--file=')) {
-      const value = argv[i].slice('--file='.length);
-      if (value === '') {
-        throw new Error('--file requires a file path');
-      }
-      files.push(resolve(value));
-    } else if (argv[i] === '--file') {
-      if (i + 1 >= argv.length) {
-        throw new Error('--file requires a file path');
-      }
-      const value = argv[i + 1];
-      if (value.startsWith('-')) {
-        throw new Error(`--file requires a file path, got "${value}"`);
-      }
-      files.push(resolve(value));
-      i++; // skip the value
-    }
-  }
-  return files;
+  return extractRepeatableArgs(argv, 'file', true);
 }
 
 /**
@@ -129,6 +162,8 @@ interface ValidatedArgs {
   timeoutSec: number;
   format: 'json' | 'text';
   filePaths: string[];
+  gdriveFiles: string[];
+  githubRepos: string[];
   thinkingEffort: ThinkingEffortLevel | undefined;
   prompt: string;
   continueChat: boolean;
@@ -158,6 +193,16 @@ function validateThinkingEffort(
     return `--thinking-effort "${thinkingEffort}" is not valid for model "${model}". Allowed: ${allowedEfforts.join(', ')}`;
   }
   return undefined;
+}
+
+/** Extract a repeatable arg or fail with an error message. */
+function extractArgsOrFail(flag: string): string[] | undefined {
+  try {
+    return extractRepeatableArgs(process.argv, flag);
+  } catch (error: unknown) {
+    fail(errorMessage(error));
+    return undefined;
+  }
 }
 
 /** Validate file-related args (--file). Returns file paths or undefined on error. */
@@ -231,6 +276,12 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const filePaths = validateFileArgs();
   if (filePaths === undefined) {return undefined;}
 
+  const gdriveFiles = extractArgsOrFail('gdrive');
+  if (gdriveFiles === undefined) {return undefined;}
+
+  const githubRepos = extractArgsOrFail('github');
+  if (githubRepos === undefined) {return undefined;}
+
   const chatOptions = validateChatOptions(args);
   if (chatOptions === undefined) {return undefined;}
 
@@ -256,6 +307,8 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     timeoutSec,
     format,
     filePaths,
+    gdriveFiles,
+    githubRepos,
     thinkingEffort,
     prompt,
     ...chatOptions,
@@ -343,6 +396,14 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'Project name to ask within',
     },
+    gdrive: {
+      type: 'string',
+      description: 'Google Drive file(s) to attach (repeatable: --gdrive "file1" --gdrive "file2")',
+    },
+    github: {
+      type: 'string',
+      description: 'GitHub repo(s) as context (repeatable: --github "owner/repo")',
+    },
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
@@ -350,7 +411,7 @@ export const askCommand = defineCommand({
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,
-      filePaths, thinkingEffort, prompt, continueChat,
+      filePaths, gdriveFiles, githubRepos, thinkingEffort, prompt, continueChat,
     } = validated;
 
     const browser = new BrowserManager();
@@ -372,6 +433,14 @@ export const askCommand = defineCommand({
 
       if (filePaths.length > 0) {
         await driver.attachFiles(filePaths, quiet);
+      }
+
+      for (const gdFile of gdriveFiles) {
+        await driver.attachGoogleDriveFile(gdFile, quiet);
+      }
+
+      for (const repo of githubRepos) {
+        await driver.attachGitHubRepo(repo, quiet);
       }
 
       progress('Sending message...', quiet);

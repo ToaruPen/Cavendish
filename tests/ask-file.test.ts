@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { extractFileArgs, findMissingFile } from '../src/commands/ask.js';
+import { extractFileArgs, extractRepeatableArgs, findMissingFile } from '../src/commands/ask.js';
 
 describe('extractFileArgs()', () => {
   it('returns empty array when no --file flags', () => {
@@ -31,7 +31,7 @@ describe('extractFileArgs()', () => {
   it('throws when --file is at end of argv (no value)', () => {
     expect(() =>
       extractFileArgs(['node', 'index.mjs', 'ask', '--file']),
-    ).toThrow('--file requires a file path');
+    ).toThrow('--file requires a value');
   });
 
   it('stops parsing at -- (end-of-options)', () => {
@@ -45,7 +45,7 @@ describe('extractFileArgs()', () => {
   it('throws when --file value looks like a flag', () => {
     expect(() =>
       extractFileArgs(['node', 'index.mjs', 'ask', '--file', '--quiet']),
-    ).toThrow('--file requires a file path');
+    ).toThrow('--file requires a value');
   });
 
   it('extracts --file= (equals) form', () => {
@@ -57,7 +57,7 @@ describe('extractFileArgs()', () => {
   it('throws when --file= has empty value', () => {
     expect(() =>
       extractFileArgs(['node', 'index.mjs', 'ask', '--file=']),
-    ).toThrow('--file requires a file path');
+    ).toThrow('--file requires a value');
   });
 
   it('resolves relative paths to absolute', () => {
@@ -65,6 +65,45 @@ describe('extractFileArgs()', () => {
     expect(result).toHaveLength(1);
     expect(isAbsolute(result[0])).toBe(true);
     expect(result[0]).toContain('src/index.ts');
+  });
+});
+
+describe('extractRepeatableArgs() with non-file flags', () => {
+  it('extracts multiple --gdrive arguments without path resolution', () => {
+    const result = extractRepeatableArgs(
+      ['node', 'index.mjs', 'ask', '--gdrive', 'report.pdf', '--gdrive', 'data.csv', 'hello'],
+      'gdrive',
+    );
+    expect(result).toEqual(['report.pdf', 'data.csv']);
+  });
+
+  it('extracts --github arguments without path resolution', () => {
+    const result = extractRepeatableArgs(
+      ['node', 'index.mjs', 'ask', '--github', 'owner/repo', 'hello'],
+      'github',
+    );
+    expect(result).toEqual(['owner/repo']);
+  });
+
+  it('error messages include the correct flag name', () => {
+    expect(() =>
+      extractRepeatableArgs(['node', 'index.mjs', 'ask', '--gdrive'], 'gdrive'),
+    ).toThrow('--gdrive requires a value');
+  });
+
+  it('rejects empty string values in space-separated form', () => {
+    expect(() =>
+      extractRepeatableArgs(['node', 'index.mjs', 'ask', '--github', ''], 'github'),
+    ).toThrow('--github requires a value');
+  });
+
+  it('does not resolve paths when resolvePaths is false', () => {
+    const result = extractRepeatableArgs(
+      ['node', 'index.mjs', 'ask', '--gdrive', './relative/file.txt'],
+      'gdrive',
+      false,
+    );
+    expect(result).toEqual(['./relative/file.txt']);
   });
 });
 

@@ -1,7 +1,7 @@
-import type { Locator, Page } from 'playwright';
+import type { FrameLocator, Locator, Page } from 'playwright';
 import { errors } from 'playwright';
 
-import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversationLinkByIdBroad, projectConversationLinkById, SELECTORS } from '../constants/selectors.js';
+import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversationLinkByIdBroad, MENU_LABELS, projectConversationLinkById, SELECTORS } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
 
@@ -57,6 +57,8 @@ export interface WaitForResponseOptions {
   quiet?: boolean;
   /** Assistant message count captured BEFORE sendMessage to avoid race conditions. */
   initialMsgCount: number;
+  /** Label prefix for progress messages (e.g. 'Deep Research'). Defaults to 'Response'. */
+  label?: string;
 }
 
 export interface WaitForResponseResult {
@@ -356,6 +358,216 @@ export class ChatGPTDriver {
     progress(`Conversation moved to project: ${projectName}`, quiet);
   }
 
+  // ── Composer + menu (submenu navigation) ───────────────────
+
+  /**
+   * Open the composer + menu and navigate to a menu item by label path.
+   * Supports nested submenus via hover-to-expand (Radix UI behavior).
+   *
+   * Each step in the path can be a single label string or an array of
+   * locale candidates (tried in order). This supports bilingual menus
+   * (e.g. Japanese + English).
+   *
+   * @param labelPath - e.g. [['さらに表示', 'Show more'], 'GitHub']
+   */
+  async openComposerMenuItem(
+    labelPath: (string | string[])[],
+    quiet = false,
+  ): Promise<void> {
+    const labels = labelPath.map((s) => (Array.isArray(s) ? s[0] : s));
+    progress(`Opening composer menu: ${labels.join(' → ')}`, quiet);
+
+    await this.waitForReady();
+    await this.page.locator(SELECTORS.COMPOSER_PLUS_BUTTON).click();
+
+    await this.page.locator(SELECTORS.MENU_ITEM).first().waitFor({
+      state: 'visible',
+      timeout: 5000,
+    });
+
+    // Track the number of menu items matched so far to handle duplicate
+    // labels at different nesting levels (e.g. 'さらに表示' appearing in
+    // both the parent and child menus). At each step we skip previously
+    // matched items using nth().
+    const matchedCountByLabel = new Map<string, number>();
+
+    for (let i = 0; i < labelPath.length; i++) {
+      const candidates = Array.isArray(labelPath[i])
+        ? labelPath[i] as string[]
+        : [labelPath[i] as string];
+      const isLast = i === labelPath.length - 1;
+
+      const menuItem = await this.findVisibleMenuItemWithRetry(candidates, matchedCountByLabel);
+      if (!menuItem) {
+        await this.page.keyboard.press('Escape');
+        throw new Error(
+          `Menu item not found at step ${String(i + 1)} of path [${labels.join(', ')}]. Tried labels: ${candidates.join(', ')}`,
+        );
+      }
+
+      if (isLast) {
+        await menuItem.click();
+      } else {
+        await menuItem.hover();
+        await delay(300);
+      }
+    }
+  }
+
+  // ── Google Drive attachment ────────────────────────────────
+
+  /**
+   * Attach files from Google Drive via the Picker iframe.
+   * Opens the composer + menu, selects "Google Drive から追加する",
+   * searches for the file in the Picker, and selects it.
+   */
+  async attachGoogleDriveFile(fileName: string, quiet = false): Promise<void> {
+    progress(`Attaching Google Drive file: ${fileName}`, quiet);
+
+    await this.openComposerMenuItem(
+      [[...MENU_LABELS.ADD_FROM_GOOGLE_DRIVE]],
+      quiet,
+    );
+
+    // Wait for the Google Picker iframe to load
+    const pickerFrame = await this.waitForGooglePickerFrame();
+
+    // Wait for the Picker to finish initial load (file list appears)
+    const searchInput = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_SEARCH);
+    await searchInput.waitFor({ state: 'visible', timeout: 10_000 });
+    await pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM).first().waitFor({
+      state: 'visible',
+      timeout: 15_000,
+    });
+
+    // Search for the file
+    await searchInput.fill(fileName);
+    await searchInput.press('Enter');
+
+    // Find the first visible matching result (poll until rendered, skipping hidden autocomplete)
+    const allMatches = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM).filter({ hasText: fileName });
+    let clickedResult = false;
+    const resultDeadline = Date.now() + 10_000;
+    while (Date.now() < resultDeadline) {
+      const matchCount = await allMatches.count();
+      for (let j = 0; j < matchCount; j++) {
+        const match = allMatches.nth(j);
+        if (await match.isVisible().catch((): boolean => false)) {
+          await match.click();
+          clickedResult = true;
+          break;
+        }
+      }
+      if (clickedResult) { break; }
+      await delay(500);
+    }
+    if (!clickedResult) {
+      throw new Error(
+        `Google Drive file "${fileName}" not found in Picker search results.`,
+      );
+    }
+
+    // Click the select button in the Picker (use first() to avoid strict mode with duplicate buttons)
+    const selectButton = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_SELECT_BUTTON).first();
+    await selectButton.click();
+
+    // Wait for the Picker to close (iframe detaches)
+    await this.page.locator(SELECTORS.GDRIVE_PICKER_IFRAME).waitFor({
+      state: 'detached',
+      timeout: 10_000,
+    });
+
+    progress(`Google Drive file attached: ${fileName}`, quiet);
+  }
+
+  // ── GitHub integration ────────────────────────────────────
+
+  /**
+   * Enable GitHub integration in the composer and select a repository.
+   * Navigates through the submenu: + → さらに表示 → GitHub
+   * Then opens the repo picker and selects the specified repository.
+   */
+  async attachGitHubRepo(repo: string, quiet = false): Promise<void> {
+    progress(`Attaching GitHub repo: ${repo}`, quiet);
+
+    const githubPill = this.page.locator(SELECTORS.GITHUB_FOOTER_BUTTON);
+    const alreadyEnabled = await githubPill.isVisible().catch((): boolean => false);
+
+    if (!alreadyEnabled) {
+      // Navigate through nested submenus to enable GitHub (first repo only)
+      await this.openComposerMenuItem(
+        [[...MENU_LABELS.SHOW_MORE], ...MENU_LABELS.GITHUB],
+        quiet,
+      );
+      await githubPill.waitFor({ state: 'visible', timeout: 5000 });
+    }
+
+    // Click GitHub pill to open repo picker
+    await githubPill.click();
+
+    // Search for the repository
+    const repoSearch = this.page.locator(SELECTORS.GITHUB_REPO_SEARCH);
+    await repoSearch.waitFor({ state: 'visible', timeout: 5000 });
+    await repoSearch.fill(repo);
+
+    // Find and click the matching repository in the popover
+    const popover = this.page.locator(SELECTORS.POPOVER_CONTENT);
+    const repoItem = popover.getByText(repo, { exact: true }).first();
+
+    try {
+      await repoItem.waitFor({ state: 'visible', timeout: 5000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        await this.page.keyboard.press('Escape');
+        throw new Error(
+          `GitHub repository "${repo}" not found in picker. Ensure the repo is registered in ChatGPT's GitHub app settings.`,
+        );
+      }
+      throw error;
+    }
+    await repoItem.click();
+
+    // Close the repo picker (multi-select popover stays open after selection)
+    await this.page.keyboard.press('Escape');
+    await popover.waitFor({ state: 'hidden', timeout: 5000 });
+
+    progress(`GitHub repo attached: ${repo}`, quiet);
+  }
+
+  // ── Deep Research ─────────────────────────────────────────
+
+  /**
+   * Navigate to the Deep Research page.
+   */
+  async navigateToDeepResearch(quiet = false): Promise<void> {
+    progress('Navigating to Deep Research...', quiet);
+    await this.page.goto(`${CHATGPT_BASE_URL}/deep-research`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await this.waitForReady();
+    progress('Deep Research page ready', quiet);
+  }
+
+  /**
+   * Send a prompt via the Deep Research page and wait for the report.
+   * Deep Research takes significantly longer than normal chat (minutes to tens of minutes).
+   */
+  async sendDeepResearch(text: string, quiet = false): Promise<void> {
+    await this.waitForReady();
+    if (new URL(this.page.url()).pathname !== '/deep-research') {
+      throw new Error(`Expected Deep Research page but got: ${this.page.url()}`);
+    }
+    const input = this.page.locator(SELECTORS.PROMPT_INPUT);
+    await input.fill(text);
+
+    // Deep Research uses a dedicated send button (data-testid="send-button"), not the normal composer submit
+    const sendButton = this.page.locator(SELECTORS.DEEP_RESEARCH_SEND_BUTTON);
+    await sendButton.waitFor({ state: 'visible', timeout: 5000 });
+    await sendButton.click();
+    progress('Deep Research prompt sent', quiet);
+  }
+
+
   // ── Model & messaging ──────────────────────────────────────
 
   /**
@@ -483,9 +695,10 @@ export class ChatGPTDriver {
       onChunk,
       quiet = false,
       initialMsgCount,
+      label = 'Response',
     } = options;
 
-    progress('Waiting for response...', quiet);
+    progress(`Waiting for ${label}...`, quiet);
 
     const completed = await this.waitForCompletionWithChunks(
       initialMsgCount,
@@ -495,10 +708,10 @@ export class ChatGPTDriver {
     );
 
     if (completed) {
-      progress('Response complete', quiet);
+      progress(`${label} complete`, quiet);
     } else {
       progress(
-        `Timed out after ${String(timeout)}ms — returning partial response`,
+        `${label} timed out after ${String(Math.round(timeout / 1000))}s — returning partial response`,
         quiet,
       );
     }
@@ -589,6 +802,18 @@ export class ChatGPTDriver {
   // ── Private ────────────────────────────────────────────────
 
   /**
+   * Wait for the Google Picker iframe to load and return its Frame object.
+   * Playwright can access cross-origin iframes within the same browser context.
+   */
+  private async waitForGooglePickerFrame(): Promise<FrameLocator> {
+    await this.page.locator(SELECTORS.GDRIVE_PICKER_IFRAME).waitFor({
+      state: 'attached',
+      timeout: 15_000,
+    });
+    return this.page.frameLocator(SELECTORS.GDRIVE_PICKER_IFRAME);
+  }
+
+  /**
    * Click the delete option, confirm, and wait for the link to disappear.
    * Shared by deleteConversation and deleteProjectConversation.
    */
@@ -666,6 +891,37 @@ export class ChatGPTDriver {
     await menuButton.click();
 
     return link;
+  }
+
+  /**
+   * Find a visible menu item matching any of the given label candidates.
+   * Retries up to `timeout` ms to handle submenu render delays after hover.
+   * Uses `matchedCountByLabel` to skip previously matched items with
+   * the same label, allowing correct navigation through nested menus
+   * where a label like "さらに表示" appears at multiple nesting levels.
+   */
+  private async findVisibleMenuItemWithRetry(
+    candidates: string[],
+    matchedCountByLabel: Map<string, number>,
+    timeout = 5000,
+  ): Promise<Locator | null> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      for (const label of candidates) {
+        const allItems = this.page
+          .locator(SELECTORS.MENU_ITEM)
+          .filter({ hasText: label });
+        const skipCount = matchedCountByLabel.get(label) ?? 0;
+        const item = allItems.nth(skipCount);
+        const visible = await item.isVisible().catch((): boolean => false);
+        if (visible) {
+          matchedCountByLabel.set(label, skipCount + 1);
+          return item;
+        }
+      }
+      await delay(200);
+    }
+    return null;
   }
 
   /**
