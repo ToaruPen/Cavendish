@@ -64,7 +64,7 @@ async function waitForLogin(
 
   while (Date.now() < deadline) {
     try {
-      const page = await browser.getPage(true);
+      const page = await browser.getPage(quiet);
       const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
       await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
       return true;
@@ -100,8 +100,12 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
     const { chromium } = await import('playwright');
     progress('Stopping existing Chrome process...', quiet);
     const browser = await chromium.connectOverCDP(CDP_BASE_URL);
-    const cdpSession = await browser.newBrowserCDPSession();
-    await cdpSession.send('Browser.close');
+    try {
+      const cdpSession = await browser.newBrowserCDPSession();
+      await cdpSession.send('Browser.close');
+    } finally {
+      await browser.close();
+    }
     // Give Chrome a moment to fully shut down
     await new Promise((r) => setTimeout(r, 1_000));
     progress('Chrome process stopped', quiet);
