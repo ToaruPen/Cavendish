@@ -176,13 +176,15 @@ export class ChatGPTDriver {
     // Wait for send button to appear after text entry, then click with
     // force: true — the sticky page-header intercepts normal Playwright clicks
     // on chat pages (its children have pointer-events: auto).
-    const sendBtn = this.page.locator(SELECTORS.SEND_BUTTON);
+    // Wait for the send button to become visible AND enabled before clicking.
+    // Use force: true because the sticky page-header intercepts normal clicks.
+    const sendBtn = this.page.locator(`${SELECTORS.SEND_BUTTON}:not([disabled])`);
     try {
       await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
     } catch (e: unknown) {
       if (isTimeoutError(e)) {
         throw new Error(
-          `Send button not visible after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON})`,
+          `Send button not ready after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON})`,
         );
       }
       throw e;

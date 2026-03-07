@@ -62,35 +62,33 @@ function validateExport(
   return { exportFormat, exportPath: rawExportPath as string | undefined };
 }
 
-function resolveRunMode(args: Record<string, unknown>): RunMode | undefined {
+function validateFlagConflicts(args: Record<string, unknown>): boolean {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
-  const chatId = args.chat as string;
 
   if (isRefresh && !isFollowUp) {
     fail('--refresh requires --chat (specify the DR session to refresh)');
-    return undefined;
+    return false;
   }
   if (isFollowUp && args.file !== undefined) {
     fail('--file is not supported with --chat');
-    return undefined;
+    return false;
   }
   if (isRefresh && args.prompt !== undefined && args.prompt !== '') {
     fail('--refresh re-runs the existing prompt; do not provide a new prompt');
-    return undefined;
+    return false;
   }
   if (!isRefresh && (args.prompt === undefined || args.prompt === '')) {
     fail('A prompt is required (positional argument)');
-    return undefined;
+    return false;
   }
+  return true;
+}
 
-  let stdinData: string;
-  try {
-    stdinData = readStdin();
-  } catch (error: unknown) {
-    fail(errorMessage(error));
-    return undefined;
-  }
+function resolveRunMode(args: Record<string, unknown>, stdinData: string): RunMode | undefined {
+  const isFollowUp = args.chat !== undefined;
+  const isRefresh = args.refresh === true;
+  const chatId = args.chat as string;
 
   if (isRefresh) {
     if (stdinData.length > 0) {
@@ -114,8 +112,9 @@ function resolveRunMode(args: Record<string, unknown>): RunMode | undefined {
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
 
-  const mode = resolveRunMode(args);
-  if (mode === undefined) { return undefined; }
+  // Validate flags, format, timeout, and export BEFORE reading stdin
+  // so obviously invalid invocations fail fast without blocking on EOF.
+  if (!validateFlagConflicts(args)) { return undefined; }
 
   const format = validateFormat(args.format as string);
   if (format === undefined) { return undefined; }
@@ -125,6 +124,17 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const exp = validateExport(args.export, args.exportPath);
   if (exp === undefined) { return undefined; }
+
+  let stdinData: string;
+  try {
+    stdinData = readStdin();
+  } catch (error: unknown) {
+    fail(errorMessage(error));
+    return undefined;
+  }
+
+  const mode = resolveRunMode(args, stdinData);
+  if (mode === undefined) { return undefined; }
 
   return {
     quiet,
