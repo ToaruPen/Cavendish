@@ -76,7 +76,7 @@ function checkProfile(): DoctorCheck {
     name: 'profile_dir',
     status: exists ? 'pass' : 'fail',
     detail: exists ? CHROME_PROFILE_DIR : 'not found',
-    action: exists ? undefined : `Run "cavendish ask" once to create ${CHROME_PROFILE_DIR}`,
+    action: exists ? undefined : `Run "cavendish init" to create ${CHROME_PROFILE_DIR}`,
   };
 }
 
@@ -339,7 +339,18 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
     checks.push(...playwrightChecks);
   } catch (error: unknown) {
     const detail = `Playwright connection failed: ${errorMessage(error)}`;
-    checks.push(...skipPlaywrightChecks(detail));
+    // CDP is reachable but Playwright can't connect — report as a real failure,
+    // not just skipped.  The first check is marked `fail` so the command exits
+    // with a non-zero status; the rest are skipped.
+    checks.push({
+      name: PLAYWRIGHT_CHECK_NAMES[0],
+      status: 'fail',
+      detail,
+      action: 'Ensure Chrome allows CDP connections and no other tool is holding the session',
+    });
+    for (let i = 1; i < PLAYWRIGHT_CHECK_NAMES.length; i++) {
+      checks.push({ name: PLAYWRIGHT_CHECK_NAMES[i], status: 'skip', detail });
+    }
   } finally {
     await browser.close();
   }

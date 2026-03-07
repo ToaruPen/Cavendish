@@ -33,10 +33,17 @@ async function isLoggedInViaCdp(): Promise<boolean> {
     const pages = (await res.json()) as { url: string }[];
     const chatgptPages = pages.filter((p) => p.url.startsWith(CHATGPT_BASE_URL));
     const nonAuthPages = chatgptPages.filter(
-      (p) => !p.url.includes('/auth/') && !p.url.includes('/share/'),
+      (p) =>
+        !p.url.includes('/auth/') &&
+        !p.url.includes('/share/') &&
+        !p.url.includes('/login') &&
+        // Bare landing page (logged-out homepage) is not a reliable auth signal
+        new URL(p.url).pathname !== '/',
     );
     return nonAuthPages.length > 0;
-  } catch {
+  } catch (error: unknown) {
+    // CDP query failed — Chrome not running or not reachable; log and return false
+    console.debug(`[cavendish] CDP probe failed: ${errorMessage(error)}`);
     return false;
   }
 }
