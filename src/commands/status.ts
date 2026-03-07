@@ -57,10 +57,15 @@ async function checkChatGPT(): Promise<StatusCheck> {
     if (chatgptPages.length === 0) {
       return { ok: false, detail: 'No ChatGPT tab open' };
     }
-    const loggedIn = chatgptPages.some((p) => !p.url.includes('/auth/'));
-    return loggedIn
-      ? { ok: true, detail: 'Logged in' }
-      : { ok: false, detail: 'Not logged in (login page detected)' };
+    const authPages = chatgptPages.filter((p) => p.url.includes('/auth/'));
+    const nonAuthPages = chatgptPages.filter((p) => !p.url.includes('/auth/') && !p.url.includes('/share/'));
+    if (nonAuthPages.length > 0) {
+      return { ok: true, detail: 'Logged in' };
+    }
+    if (authPages.length > 0) {
+      return { ok: false, detail: 'Not logged in (login page detected)' };
+    }
+    return { ok: false, detail: 'No authenticated ChatGPT tab found (only shared links detected)' };
   } catch (error: unknown) {
     return {
       ok: false,
