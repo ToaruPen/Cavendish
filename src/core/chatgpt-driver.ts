@@ -177,7 +177,16 @@ export class ChatGPTDriver {
     // force: true — the sticky page-header intercepts normal Playwright clicks
     // on chat pages (its children have pointer-events: auto).
     const sendBtn = this.page.locator(SELECTORS.SEND_BUTTON);
-    await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    try {
+      await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    } catch (e: unknown) {
+      if (isTimeoutError(e)) {
+        throw new Error(
+          `Send button not visible after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON})`,
+        );
+      }
+      throw e;
+    }
     await sendBtn.click({ force: true });
   }
 
