@@ -142,10 +142,41 @@ export const SELECTORS = {
   GDRIVE_PICKER_SELECT_BUTTON:
     '[role="button"]:has-text("選択"), [role="button"]:has-text("Select")',
 
-  // ── Deep Research ─────────────────────────────────────────
-  /** Deep Research send button — uses data-testid="send-button" instead of
-   *  the normal composer's .composer-submit-button-color class. Only valid on /deep-research page. */
-  DEEP_RESEARCH_SEND_BUTTON: '[data-testid="send-button"]',
+  // ── Deep Research ──────────────────────────────────────────
+  /** Send button that appears after text is entered (shared with DR page) */
+  SEND_BUTTON: '[data-testid="send-button"]',
+
+  /** URL substring used to locate the Deep Research iframe */
+  DEEP_RESEARCH_FRAME_URL: 'deep_research',
+
+  /** Deep Research app container (present only on /deep-research) */
+  DEEP_RESEARCH_APP: '.deep-research-app',
+
+  /** "開始する" button inside DR iframe — starts research after plan display */
+  DEEP_RESEARCH_START_BUTTON: 'button:has-text("開始する"), button:has-text("Start research")',
+
+  /** "リサーチを停止" button inside DR iframe — visible during research phase */
+  DEEP_RESEARCH_STOP_BUTTON: 'button:has-text("リサーチを停止"), button:has-text("Stop research")',
+
+  /** Export button inside DR iframe header (opens export menu) */
+  DEEP_RESEARCH_EXPORT_BUTTON:
+    'button[aria-label="エクスポートする"], button[aria-label="Export"]',
+
+  /** "コンテンツをコピーする" option in the DR export menu */
+  DEEP_RESEARCH_COPY_CONTENT:
+    'button:has-text("コンテンツをコピーする"), button:has-text("Copy content")',
+
+  /** "マークダウンにエクスポートする" option in the DR export menu */
+  DEEP_RESEARCH_EXPORT_MARKDOWN:
+    'button:has-text("マークダウンにエクスポートする"), button:has-text("Export to Markdown")',
+
+  /** "Word にエクスポートする" option in the DR export menu */
+  DEEP_RESEARCH_EXPORT_WORD:
+    'button:has-text("Word にエクスポートする"), button:has-text("Export to Word")',
+
+  /** "PDF にエクスポートする" option in the DR export menu */
+  DEEP_RESEARCH_EXPORT_PDF:
+    'button:has-text("PDF にエクスポートする"), button:has-text("Export to PDF")',
 
   // ── GitHub integration ────────────────────────────────────
   /** GitHub pill button in composer footer (after GitHub is enabled) */

@@ -1,4 +1,4 @@
-import type { FrameLocator, Locator, Page } from 'playwright';
+import type { Frame, FrameLocator, Locator, Page } from 'playwright';
 import { errors } from 'playwright';
 
 import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversationLinkByIdBroad, MENU_LABELS, projectConversationLinkById, SELECTORS } from '../constants/selectors.js';
@@ -8,6 +8,8 @@ import { progress } from './output-handler.js';
 type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
+
+export type DeepResearchExportFormat = 'markdown' | 'word' | 'pdf';
 
 export interface ConversationItem {
   id: string;
@@ -125,6 +127,362 @@ export class ChatGPTDriver {
       waitUntil: 'domcontentloaded',
     });
     await this.waitForReady();
+  }
+
+  // ── Deep Research ──────────────────────────────────────────
+
+  /**
+   * Navigate to the Deep Research page.
+   */
+  async navigateToDeepResearch(quiet = false): Promise<void> {
+    progress('Opening Deep Research...', quiet);
+    await this.page.goto(`${CHATGPT_BASE_URL}/deep-research`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await this.page.locator(SELECTORS.DEEP_RESEARCH_APP).waitFor({
+      state: 'attached',
+      timeout: 30_000,
+    });
+    await this.waitForReady();
+  }
+
+  /**
+   * Type a message into the prompt and click the Deep Research send button.
+   * The send button (`[data-testid="send-button"]`) only appears after text is entered.
+   */
+  async sendDeepResearchMessage(text: string): Promise<void> {
+    await this.waitForReady();
+    const input = this.page.locator(SELECTORS.PROMPT_INPUT);
+    await input.fill(text);
+    const sendBtn = this.page.locator(SELECTORS.SEND_BUTTON);
+    await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    await sendBtn.click();
+  }
+
+  /**
+   * Extract the Deep Research response text from the nested iframe.
+   *
+   * DR responses are rendered inside a sandboxed iframe
+   * (`iframe[title="internal://deep-research"]`) which itself contains
+   * an `about:blank` child frame with the actual report content.
+   */
+  async getDeepResearchResponse(): Promise<string> {
+    const contentFrame = this.getDeepResearchContentFrame();
+    if (!contentFrame) {
+      return '';
+    }
+    try {
+      return await contentFrame.evaluate(
+        () => {
+          const main = document.querySelector('main');
+          if (main) {
+            return main.textContent ? main.textContent.trim() : '';
+          }
+          return document.body.textContent ? document.body.textContent.trim() : '';
+        },
+      );
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) { return ''; }
+      throw error;
+    }
+  }
+
+  /**
+   * Wait for a Deep Research response to complete.
+   *
+   * DR flow: send → plan display (with countdown) → click "開始する" →
+   * research phase ("リサーチ中..." + "リサーチを停止する") → final report.
+   *
+   * Completion: the "リサーチを停止する" button disappears, then we wait
+   * for the final report to render in the iframe.
+   */
+  async waitForDeepResearchResponse(options: {
+    timeout?: number;
+    quiet?: boolean;
+  }): Promise<WaitForResponseResult> {
+    const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+    const quiet = options.quiet ?? false;
+
+    progress('Waiting for Deep Research response...', quiet);
+
+    const deadline = Date.now() + timeout;
+
+    // Phase 1: Wait for plan iframe and click "開始する"
+    // Throws if start is not detected within timeout.
+    await this.clickDeepResearchStart(deadline, quiet);
+
+    // Phase 2: Wait for research to start (stop button appears in iframe).
+    // Cap at 60s so fast/auto-finish runs and selector misses fall through
+    // to Phase 4 quickly instead of waiting the full deadline.
+    const STOP_DETECT_MS = 60_000;
+    const stopDetectDeadline = Math.min(deadline, Date.now() + STOP_DETECT_MS);
+    let researchStarted = false;
+    while (Date.now() < stopDetectDeadline) {
+      await delay(POLL_INTERVAL_MS * 5);
+      if (await this.hasDeepResearchStopButton()) {
+        researchStarted = true;
+        progress('Researching...', quiet);
+        break;
+      }
+    }
+
+    if (!researchStarted) {
+      // The stop button may have appeared and disappeared between polls
+      // (fast/auto-finish runs). Fall through to Phase 4 to check for
+      // an already-completed report instead of returning partial.
+      progress('Stop button not observed, checking for report...', quiet);
+    }
+
+    // Phase 3: Wait for research to complete (stop button disappears)
+    if (researchStarted) {
+      let lastLoggedAt = Date.now();
+      while (Date.now() < deadline) {
+        await delay(POLL_INTERVAL_MS * 5);
+        if (!await this.hasDeepResearchStopButton()) {
+          progress('Research phase complete, waiting for report...', quiet);
+          break;
+        }
+        const now = Date.now();
+        if (now - lastLoggedAt > 30_000) {
+          progress('Still researching...', quiet);
+          lastLoggedAt = now;
+        }
+      }
+    }
+
+    // Phase 4: Wait for the final report to render
+    return this.waitForDeepResearchReport(deadline, timeout, quiet, researchStarted);
+  }
+
+  /**
+   * Phase 4: Wait for the final report to render after research completes.
+   *
+   * @param seenStopButton - Whether the stop button was observed during Phase 2/3.
+   *   When true, the stop button's disappearance is a reliable signal that
+   *   research finished. When false (button appeared and disappeared between
+   *   polls), we require text to change from the initial snapshot to distinguish
+   *   the final report from leftover plan text.
+   */
+  private async waitForDeepResearchReport(
+    deadline: number,
+    timeout: number,
+    quiet: boolean,
+    seenStopButton: boolean,
+  ): Promise<WaitForResponseResult> {
+    const initialText = await this.getDeepResearchResponse();
+
+    // If the stop button was observed and is now gone, non-empty text is the report.
+    if (seenStopButton && initialText.length > 0 && !await this.hasDeepResearchStopButton()) {
+      progress('Response complete', quiet);
+      return { text: initialText, completed: true };
+    }
+
+    // When the stop button was never observed, we require evidence that the
+    // text is the final report rather than leftover plan text.  Two signals:
+    //   (a) text changed from the initial snapshot, OR
+    //   (b) text has been stable (non-empty, no stop button) for several polls,
+    //       meaning the report was already rendered before Phase 4 began.
+    const STABLE_THRESHOLD = 3;
+    let stableCount = 0;
+
+    const reportDeadline = Math.min(deadline, Date.now() + 120_000);
+    while (Date.now() < reportDeadline) {
+      await delay(POLL_INTERVAL_MS * 5);
+      const hasStop = await this.hasDeepResearchStopButton();
+      const text = await this.getDeepResearchResponse();
+
+      if (text.length > 0 && !hasStop) {
+        if (seenStopButton || text !== initialText) {
+          progress('Response complete', quiet);
+          return { text, completed: true };
+        }
+        // Text unchanged from initial — count consecutive stable polls
+        stableCount++;
+        if (stableCount >= STABLE_THRESHOLD) {
+          progress('Response complete (stable)', quiet);
+          return { text, completed: true };
+        }
+      } else {
+        stableCount = 0;
+      }
+    }
+
+    const partial = await this.getDeepResearchResponse();
+    progress(`Timed out after ${String(timeout)}ms — returning partial response`, quiet);
+    return { text: partial, completed: false };
+  }
+
+  /**
+   * Check if the "リサーチを停止する" button is present in the DR iframe.
+   */
+  private async hasDeepResearchStopButton(): Promise<boolean> {
+    const contentFrame = this.getDeepResearchContentFrame();
+    if (!contentFrame) {
+      return false;
+    }
+    try {
+      const count = await contentFrame.locator(SELECTORS.DEEP_RESEARCH_STOP_BUTTON).count();
+      return count > 0;
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) { return false; }
+      throw error;
+    }
+  }
+
+  /**
+   * Wait for the DR plan iframe to render, then click "開始する" to
+   * skip the countdown and start research immediately.
+   * Returns true if research was started (button clicked or auto-started).
+   */
+  private async clickDeepResearchStart(
+    deadline: number,
+    quiet: boolean,
+  ): Promise<void> {
+    // Cap at 120s so initialization failures are detected quickly,
+    // but also respect the caller's deadline when it is shorter.
+    const START_PHASE_MS = 120_000;
+    const startDeadline = Math.min(deadline, Date.now() + START_PHASE_MS);
+    while (Date.now() < startDeadline) {
+      await delay(POLL_INTERVAL_MS * 5);
+
+      // Research may auto-start after countdown — detect early
+      if (await this.hasDeepResearchStopButton()) {
+        progress('Research already started (auto-start)', quiet);
+        return;
+      }
+
+      const contentFrame = this.getDeepResearchContentFrame();
+      if (!contentFrame) {
+        continue;
+      }
+
+      try {
+        const startBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_START_BUTTON);
+        if (await startBtn.count() > 0) {
+          progress('Plan ready — starting research...', quiet);
+          await startBtn.first().click();
+          return;
+        }
+      } catch (error: unknown) {
+        if (!isFrameDetachedError(error)) { throw error; }
+        // Frame not ready yet — retry
+      }
+    }
+    throw new Error(
+      'Deep Research start not detected within timeout. ' +
+      'Check ChatGPT Pro status or selector changes.',
+    );
+  }
+
+  /**
+   * Get the inner content frame of the DR iframe.
+   * The DR response is rendered inside a double-nested iframe:
+   * page → iframe[title="internal://deep-research"] → iframe#root (about:blank)
+   */
+  private getDeepResearchContentFrame(): Frame | undefined {
+    const drFrame = this.page.frames().find(
+      (f) => f.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL),
+    );
+    if (!drFrame) {
+      return undefined;
+    }
+    const nested = drFrame.childFrames();
+    return nested[0];
+  }
+
+  /**
+   * Open the export menu in the DR iframe.
+   * Waits for the export button to become visible before clicking.
+   */
+  private async openDeepResearchExportMenu(contentFrame: Frame): Promise<void> {
+    const exportBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_EXPORT_BUTTON);
+    await exportBtn.first().waitFor({ state: 'visible', timeout: 5_000 });
+    await exportBtn.first().click();
+    await delay(POLL_INTERVAL_MS * 5);
+  }
+
+  /**
+   * Copy the DR report content as clean Markdown via the iframe's
+   * "コンテンツをコピーする" button. Returns the Markdown text from clipboard.
+   * Throws on failure — callers are responsible for fallback handling.
+   */
+  async copyDeepResearchContent(): Promise<string> {
+    const contentFrame = this.getDeepResearchContentFrame();
+    if (!contentFrame) {
+      throw new Error('Deep Research content frame not found');
+    }
+
+    try {
+      // Clear clipboard before copy so we can verify the write succeeded
+      await this.page.evaluate(() => navigator.clipboard.writeText(''));
+
+      await this.openDeepResearchExportMenu(contentFrame);
+
+      // Click "コンテンツをコピーする"
+      const copyBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_COPY_CONTENT);
+      await copyBtn.click();
+      await delay(POLL_INTERVAL_MS * 5);
+
+      // Read from clipboard and verify it was actually updated
+      const copied = await this.page.evaluate(
+        () => navigator.clipboard.readText(),
+      );
+      if (copied.length === 0) {
+        throw new Error('Clipboard was not updated after copy-content click');
+      }
+      return copied;
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) {
+        throw new Error('Deep Research iframe was replaced during copy. Try again.');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Export the DR report to a file (markdown, word, or pdf).
+   * Clicks the export menu item and captures the browser download.
+   * Returns the path to the saved file.
+   */
+  async exportDeepResearch(
+    format: DeepResearchExportFormat,
+    savePath: string,
+    quiet = false,
+  ): Promise<string> {
+    const contentFrame = this.getDeepResearchContentFrame();
+    if (!contentFrame) {
+      throw new Error('Deep Research iframe not found — is the report loaded?');
+    }
+
+    const selectorMap: Record<DeepResearchExportFormat, string> = {
+      markdown: SELECTORS.DEEP_RESEARCH_EXPORT_MARKDOWN,
+      word: SELECTORS.DEEP_RESEARCH_EXPORT_WORD,
+      pdf: SELECTORS.DEEP_RESEARCH_EXPORT_PDF,
+    };
+
+    progress(`Exporting report as ${format}...`, quiet);
+
+    try {
+      await this.openDeepResearchExportMenu(contentFrame);
+
+      // Set up download listener before clicking
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 60_000 });
+
+      // Click the format-specific button
+      const formatBtn = contentFrame.locator(selectorMap[format]);
+      await formatBtn.click();
+
+      const download = await downloadPromise;
+      await download.saveAs(savePath);
+
+      progress(`Report saved to ${savePath}`, quiet);
+      return savePath;
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) {
+        throw new Error(`Export failed — iframe was replaced during export. Try again.`);
+      }
+      throw error;
+    }
   }
 
   // ── Chat management ────────────────────────────────────────
@@ -545,40 +903,6 @@ export class ChatGPTDriver {
     await pill.waitFor({ state: 'visible', timeout: 5000 });
     progress('Agent mode enabled', quiet);
   }
-
-  // ── Deep Research ─────────────────────────────────────────
-
-  /**
-   * Navigate to the Deep Research page.
-   */
-  async navigateToDeepResearch(quiet = false): Promise<void> {
-    progress('Navigating to Deep Research...', quiet);
-    await this.page.goto(`${CHATGPT_BASE_URL}/deep-research`, {
-      waitUntil: 'domcontentloaded',
-    });
-    await this.waitForReady();
-    progress('Deep Research page ready', quiet);
-  }
-
-  /**
-   * Send a prompt via the Deep Research page and wait for the report.
-   * Deep Research takes significantly longer than normal chat (minutes to tens of minutes).
-   */
-  async sendDeepResearch(text: string, quiet = false): Promise<void> {
-    await this.waitForReady();
-    if (new URL(this.page.url()).pathname !== '/deep-research') {
-      throw new Error(`Expected Deep Research page but got: ${this.page.url()}`);
-    }
-    const input = this.page.locator(SELECTORS.PROMPT_INPUT);
-    await input.fill(text);
-
-    // Deep Research uses a dedicated send button (data-testid="send-button"), not the normal composer submit
-    const sendButton = this.page.locator(SELECTORS.DEEP_RESEARCH_SEND_BUTTON);
-    await sendButton.waitFor({ state: 'visible', timeout: 5000 });
-    await sendButton.click();
-    progress('Deep Research prompt sent', quiet);
-  }
-
 
   // ── Model & messaging ──────────────────────────────────────
 
@@ -1348,6 +1672,17 @@ function delay(ms: number): Promise<void> {
 
 function isTimeoutError(error: unknown): boolean {
   return error instanceof errors.TimeoutError;
+}
+
+/**
+ * Check if an error is caused by a detached frame or destroyed execution context.
+ * These are expected during iframe replacement in Deep Research.
+ */
+function isFrameDetachedError(error: unknown): boolean {
+  if (!(error instanceof Error)) { return false; }
+  const msg = error.message;
+  return msg.includes('frame was detached') ||
+    msg.includes('Execution context was destroyed');
 }
 
 /**

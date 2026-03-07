@@ -48,6 +48,12 @@ export class BrowserManager {
       throw new Error('Failed to connect to Chrome');
     }
 
+    // Grant clipboard permissions for DR copy-content feature
+    await context.grantPermissions(
+      ['clipboard-read', 'clipboard-write'],
+      { origin: CHATGPT_BASE_URL },
+    );
+
     // Reuse existing chatgpt.com tab
     for (const page of context.pages()) {
       if (page.url().startsWith(CHATGPT_BASE_URL)) {
