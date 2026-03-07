@@ -173,24 +173,12 @@ export class ChatGPTDriver {
     const input = this.page.locator(SELECTORS.PROMPT_INPUT);
     await input.fill(text);
 
-    // Wait for send button to appear after text entry
-    await this.page.locator(SELECTORS.SEND_BUTTON).waitFor({
-      state: 'visible',
-      timeout: 5_000,
-    });
-
-    // Use JavaScript click — the sticky page-header intercepts Playwright
-    // clicks on chat pages (its children have pointer-events: auto).
-    const clicked = await this.page.evaluate((sel) => {
-      const btn = document.querySelector(sel);
-      if (btn instanceof HTMLElement) { btn.click(); return true; }
-      return false;
-    }, SELECTORS.SEND_BUTTON);
-    if (!clicked) {
-      throw new Error(
-        `Send button not found after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON})`,
-      );
-    }
+    // Wait for send button to appear after text entry, then click with
+    // force: true — the sticky page-header intercepts normal Playwright clicks
+    // on chat pages (its children have pointer-events: auto).
+    const sendBtn = this.page.locator(SELECTORS.SEND_BUTTON);
+    await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    await sendBtn.click({ force: true });
   }
 
   /**

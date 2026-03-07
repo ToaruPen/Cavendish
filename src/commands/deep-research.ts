@@ -158,14 +158,14 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): 
   }
 }
 
-function resolveChatId(driver: ChatGPTDriver, mode: RunMode): string | undefined {
+function resolveChatId(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): string | undefined {
   if (mode.kind === 'followup' || mode.kind === 'refresh') {
     return mode.chatId;
   }
   // Initial mode: extract from URL after DR redirects to /c/{id}
   const chatId = driver.extractChatId();
   if (chatId === undefined) {
-    fail('Could not extract chat ID from URL after Deep Research completed. The page may not have navigated to /c/{id}.');
+    progress('Warning: could not extract chat ID from URL. Follow-up commands will not work for this session.', quiet);
   }
   return chatId;
 }
@@ -232,9 +232,10 @@ export const deepResearchCommand = defineCommand({
         quiet,
       });
 
-      const chatId = resolveChatId(driver, mode);
-      if (chatId === undefined) { return; }
-      progress(`Chat ID: ${chatId}`, quiet);
+      const chatId = resolveChatId(driver, mode, quiet);
+      if (chatId !== undefined) {
+        progress(`Chat ID: ${chatId}`, quiet);
+      }
 
       // Get clean Markdown text via copy-content when available (best-effort)
       let reportText = result.text;
