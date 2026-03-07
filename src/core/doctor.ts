@@ -13,7 +13,7 @@ import type { Page } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 
-import { BrowserManager, CAVENDISH_DIR, CDP_BASE_URL, CDP_PORT, CHROME_PROFILE_DIR } from './browser-manager.js';
+import { BrowserManager, CAVENDISH_DIR, CDP_BASE_URL, CHROME_PROFILE_DIR } from './browser-manager.js';
 import { errorMessage, progress } from './output-handler.js';
 
 const CONFIG_FILE = join(CAVENDISH_DIR, 'config.json');
@@ -58,14 +58,14 @@ async function checkCdp(): Promise<DoctorCheck> {
       name: 'chrome_cdp',
       status: 'fail',
       detail: `HTTP ${String(res.status)}`,
-      action: `Start Chrome with --remote-debugging-port=${String(CDP_PORT)}`,
+      action: 'Run "cavendish init" to start Chrome with CDP enabled',
     };
   } catch (error: unknown) {
     return {
       name: 'chrome_cdp',
       status: 'fail',
       detail: `Not running: ${errorMessage(error)}`,
-      action: `Start Chrome with --remote-debugging-port=${String(CDP_PORT)}`,
+      action: 'Run "cavendish init" to start Chrome with CDP enabled',
     };
   }
 }
@@ -216,7 +216,7 @@ async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
     // Google Drive is a menu item inside the + menu, but opening the menu
     // to verify the Drive entry would be invasive (clicks, side-effects).
     // We only verify the entry point (+ button) as a non-intrusive proxy.
-    return { name: 'gdrive_picker', status: 'pass', detail: 'Composer + button found (Drive menu entry not verified)' };
+    return { name: 'gdrive_picker', status: 'skip', detail: 'Composer + button found but Drive menu entry not verified' };
   } catch (error: unknown) {
     return {
       name: 'gdrive_picker',
