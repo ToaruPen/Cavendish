@@ -787,10 +787,20 @@ export class ChatGPTDriver {
    * Playwright can access cross-origin iframes within the same browser context.
    */
   private async waitForGooglePickerFrame(): Promise<FrameLocator> {
-    await this.page.locator(SELECTORS.GDRIVE_PICKER_IFRAME).waitFor({
-      state: 'attached',
-      timeout: 15_000,
-    });
+    try {
+      await this.page.locator(SELECTORS.GDRIVE_PICKER_IFRAME).waitFor({
+        state: 'attached',
+        timeout: 15_000,
+      });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Google Picker iframe not found (selector: ${SELECTORS.GDRIVE_PICKER_IFRAME}). `
+          + 'Verify that Google Drive is linked to your ChatGPT account and the Picker UI has not changed.',
+        );
+      }
+      throw error;
+    }
     return this.page.frameLocator(SELECTORS.GDRIVE_PICKER_IFRAME);
   }
 
