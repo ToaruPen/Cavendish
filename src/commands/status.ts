@@ -34,10 +34,11 @@ async function checkCdp(): Promise<StatusResult['cdp']> {
       return { ok: true, detail: `Connected (${chrome})`, chrome };
     }
     return { ok: false, detail: `HTTP ${String(res.status)}` };
-  } catch {
+  } catch (error: unknown) {
+    const reason = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
-      detail: `Not running (start Chrome with --remote-debugging-port=${String(CDP_PORT)})`,
+      detail: `Not running: ${reason} (start Chrome with --remote-debugging-port=${String(CDP_PORT)})`,
     };
   }
 }
