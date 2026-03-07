@@ -34,7 +34,11 @@ export const deepResearchCommand = defineCommand({
     prompt: {
       type: 'positional',
       description: 'The prompt to send to Deep Research',
-      required: true,
+      required: false,
+    },
+    chat: {
+      type: 'string',
+      description: 'Chat ID of an existing DR session to send a follow-up',
     },
     timeout: {
       type: 'string',
@@ -64,9 +68,16 @@ export const deepResearchCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isFollowUp = args.chat !== undefined;
 
     const format = validateFormat(args.format);
     if (format === undefined) { return; }
+
+    // Prompt is required unless future --refresh is added
+    if (args.prompt === undefined || args.prompt === '') {
+      fail('A prompt is required (positional argument)');
+      return;
+    }
 
     const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : DEFAULT_TIMEOUT_SEC;
     if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
@@ -89,6 +100,11 @@ export const deepResearchCommand = defineCommand({
     const filePaths = validateFileArgs();
     if (filePaths === undefined) { return; }
 
+    if (isFollowUp && filePaths.length > 0) {
+      fail('--file is not supported with --chat (follow-up mode)');
+      return;
+    }
+
     let stdinData: string;
     try {
       stdinData = readStdin();
@@ -99,19 +115,32 @@ export const deepResearchCommand = defineCommand({
     const prompt = buildPrompt(args.prompt, stdinData);
 
     await withDriver(quiet, async (driver) => {
-      await driver.navigateToDeepResearch(quiet);
+      if (isFollowUp) {
+        // Follow-up: navigate to existing chat and send follow-up
+        progress('Sending Deep Research follow-up...', quiet);
+        await driver.sendDeepResearchFollowUp(args.chat, prompt, quiet);
+      } else {
+        // Initial: navigate to /deep-research page
+        await driver.navigateToDeepResearch(quiet);
 
-      if (filePaths.length > 0) {
-        await driver.attachFiles(filePaths, quiet);
+        if (filePaths.length > 0) {
+          await driver.attachFiles(filePaths, quiet);
+        }
+
+        progress('Sending Deep Research query...', quiet);
+        await driver.sendDeepResearchMessage(prompt);
       }
-
-      progress('Sending Deep Research query...', quiet);
-      await driver.sendDeepResearchMessage(prompt);
 
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
         quiet,
       });
+
+      // Extract chat ID for use in follow-up commands
+      const chatId = driver.extractChatId();
+      if (chatId !== undefined) {
+        progress(`Chat ID: ${chatId}`, quiet);
+      }
 
       // Get clean Markdown text via copy-content when available (best-effort)
       let reportText = result.text;
@@ -145,6 +174,7 @@ export const deepResearchCommand = defineCommand({
       } else {
         json(reportText, {
           model: 'deep-research',
+          chatId,
           partial: !result.completed,
           timeoutSec,
         });

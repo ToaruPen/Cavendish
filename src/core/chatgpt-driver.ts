@@ -160,6 +160,47 @@ export class ChatGPTDriver {
   }
 
   /**
+   * Navigate to an existing DR chat and send a follow-up message.
+   * Uses JavaScript click to avoid header overlay interception on chat pages.
+   */
+  async sendDeepResearchFollowUp(
+    chatId: string,
+    text: string,
+    quiet = false,
+  ): Promise<void> {
+    await this.navigateToChat(chatId, quiet);
+
+    const input = this.page.locator(SELECTORS.PROMPT_INPUT);
+    await input.fill(text);
+
+    // Wait for send button to appear after text entry
+    await this.page.locator(SELECTORS.SEND_BUTTON).waitFor({
+      state: 'visible',
+      timeout: 5_000,
+    });
+
+    // Use JavaScript click — the sticky page-header intercepts Playwright
+    // clicks on chat pages (its children have pointer-events: auto).
+    const clicked = await this.page.evaluate((sel) => {
+      const btn = document.querySelector(sel);
+      if (btn instanceof HTMLElement) { btn.click(); return true; }
+      return false;
+    }, SELECTORS.SEND_BUTTON);
+    if (!clicked) {
+      throw new Error('Send button not found after entering follow-up text');
+    }
+  }
+
+  /**
+   * Extract the chat ID from the current page URL.
+   * Expected URL pattern: https://chatgpt.com/c/{chatId}
+   */
+  extractChatId(): string | undefined {
+    const match = /\/c\/([^/?#]+)/.exec(this.page.url());
+    return match?.[1];
+  }
+
+  /**
    * Extract the Deep Research response text from the nested iframe.
    *
    * DR responses are rendered inside a sandboxed iframe
@@ -378,15 +419,18 @@ export class ChatGPTDriver {
    * Get the inner content frame of the DR iframe.
    * The DR response is rendered inside a double-nested iframe:
    * page → iframe[title="internal://deep-research"] → iframe#root (about:blank)
+   *
+   * Uses the LAST matching frame so that follow-up responses (which add
+   * a new iframe per turn) pick up the latest report, not the old one.
    */
   private getDeepResearchContentFrame(): Frame | undefined {
-    const drFrame = this.page.frames().find(
+    const drFrames = this.page.frames().filter(
       (f) => f.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL),
     );
-    if (!drFrame) {
+    if (drFrames.length === 0) {
       return undefined;
     }
-    const nested = drFrame.childFrames();
+    const nested = drFrames[drFrames.length - 1].childFrames();
     return nested[0];
   }
 
