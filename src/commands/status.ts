@@ -131,7 +131,7 @@ export const statusCommand = defineCommand({
       process.stderr.write(`${formatTextOutput(result).join('\n')}\n`);
     }
 
-    if (!result.cdp.ok || !result.chatgpt.ok || !result.profile.ok || !result.config.ok) {
+    if (!result.cdp.ok || !result.chatgpt.ok || !result.profile.ok) {
       process.exitCode = 1;
     }
   },
