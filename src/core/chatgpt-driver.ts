@@ -9,6 +9,8 @@ type StopButtonResult = 'attached' | 'message' | 'timeout';
 
 export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
 
+export type DeepResearchExportFormat = 'markdown' | 'word' | 'pdf';
+
 export interface ConversationItem {
   id: string;
   title: string;
@@ -338,6 +340,94 @@ export class ChatGPTDriver {
     }
     const nested = drFrame.childFrames();
     return nested[0];
+  }
+
+  /**
+   * Open the export menu in the DR iframe.
+   * Waits for the export button to become visible before clicking.
+   */
+  private async openDeepResearchExportMenu(contentFrame: Frame): Promise<void> {
+    const exportBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_EXPORT_BUTTON);
+    await exportBtn.first().waitFor({ state: 'visible', timeout: 5_000 });
+    await exportBtn.first().click();
+    await delay(POLL_INTERVAL_MS * 5);
+  }
+
+  /**
+   * Copy the DR report content as clean Markdown via the iframe's
+   * "コンテンツをコピーする" button. Returns the Markdown text from clipboard.
+   * Falls back to `getDeepResearchResponse()` if the copy button is unavailable.
+   */
+  async copyDeepResearchContent(): Promise<string> {
+    const contentFrame = this.getDeepResearchContentFrame();
+    if (!contentFrame) {
+      return this.getDeepResearchResponse();
+    }
+
+    try {
+      await this.openDeepResearchExportMenu(contentFrame);
+
+      // Click "コンテンツをコピーする"
+      const copyBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_COPY_CONTENT);
+      await copyBtn.click();
+      await delay(POLL_INTERVAL_MS * 5);
+
+      // Read from clipboard
+      return await this.page.evaluate(
+        () => navigator.clipboard.readText(),
+      );
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) {
+        return this.getDeepResearchResponse();
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Export the DR report to a file (markdown, word, or pdf).
+   * Clicks the export menu item and captures the browser download.
+   * Returns the path to the saved file.
+   */
+  async exportDeepResearch(
+    format: DeepResearchExportFormat,
+    savePath: string,
+    quiet = false,
+  ): Promise<string> {
+    const contentFrame = this.getDeepResearchContentFrame();
+    if (!contentFrame) {
+      throw new Error('Deep Research iframe not found — is the report loaded?');
+    }
+
+    const selectorMap: Record<DeepResearchExportFormat, string> = {
+      markdown: SELECTORS.DEEP_RESEARCH_EXPORT_MARKDOWN,
+      word: SELECTORS.DEEP_RESEARCH_EXPORT_WORD,
+      pdf: SELECTORS.DEEP_RESEARCH_EXPORT_PDF,
+    };
+
+    progress(`Exporting report as ${format}...`, quiet);
+
+    try {
+      await this.openDeepResearchExportMenu(contentFrame);
+
+      // Set up download listener before clicking
+      const downloadPromise = this.page.waitForEvent('download', { timeout: 30_000 });
+
+      // Click the format-specific button
+      const formatBtn = contentFrame.locator(selectorMap[format]);
+      await formatBtn.click();
+
+      const download = await downloadPromise;
+      await download.saveAs(savePath);
+
+      progress(`Report saved to ${savePath}`, quiet);
+      return savePath;
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) {
+        throw new Error(`Export failed — iframe was replaced during export. Try again.`);
+      }
+      throw error;
+    }
   }
 
   // ── Chat management ────────────────────────────────────────

@@ -1,11 +1,32 @@
+import { resolve } from 'node:path';
+
 import { defineCommand } from 'citty';
 
+import type { DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 import { buildPrompt, readStdin, validateFileArgs } from './ask.js';
 
 const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
+
+const VALID_EXPORT_FORMATS: readonly DeepResearchExportFormat[] = ['markdown', 'word', 'pdf'];
+
+const EXPORT_EXTENSIONS: Record<DeepResearchExportFormat, string> = {
+  markdown: '.md',
+  word: '.docx',
+  pdf: '.pdf',
+};
+
+function defaultExportFilename(format: DeepResearchExportFormat): string {
+  return `deep-research-report${EXPORT_EXTENSIONS[format]}`;
+}
+
+/** Clipboard-related errors (e.g. permission denied). */
+function isClipboardError(error: unknown): boolean {
+  if (!(error instanceof Error)) { return false; }
+  return error.message.includes('clipboard') || error.name === 'NotAllowedError';
+}
 
 /**
  * `cavendish deep-research` — send a prompt to ChatGPT Deep Research and return the report.
@@ -38,6 +59,14 @@ export const deepResearchCommand = defineCommand({
       type: 'string',
       description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
     },
+    export: {
+      type: 'string',
+      description: 'Export report to file: markdown, word, or pdf (e.g. --export markdown)',
+    },
+    exportPath: {
+      type: 'string',
+      description: 'Path to save exported file (default: ./deep-research-report.{ext})',
+    },
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
@@ -51,6 +80,12 @@ export const deepResearchCommand = defineCommand({
       return;
     }
     const timeoutMs = timeoutSec * 1000;
+
+    const exportFormat = args.export as DeepResearchExportFormat | undefined;
+    if (exportFormat !== undefined && !VALID_EXPORT_FORMATS.includes(exportFormat)) {
+      fail(`--export must be one of: ${VALID_EXPORT_FORMATS.join(', ')}. Got "${exportFormat}"`);
+      return;
+    }
 
     const filePaths = validateFileArgs();
     if (filePaths === undefined) { return; }
@@ -79,10 +114,34 @@ export const deepResearchCommand = defineCommand({
         quiet,
       });
 
+      // Get clean Markdown text via copy-content when available
+      let reportText = result.text;
+      if (result.completed) {
+        try {
+          const markdown = await driver.copyDeepResearchContent();
+          if (markdown.length > 0) {
+            reportText = markdown;
+          }
+        } catch (error: unknown) {
+          // copyDeepResearchContent() handles frame-detach internally;
+          // only clipboard errors propagate here.
+          progress('Copy content failed, using raw text', quiet);
+          if (!isClipboardError(error)) {
+            throw error;
+          }
+        }
+      }
+
+      // Export to file if requested (after copy, so export menu state is clean)
+      if (exportFormat !== undefined && result.completed) {
+        const savePath = resolve(args.exportPath ?? defaultExportFilename(exportFormat));
+        await driver.exportDeepResearch(exportFormat, savePath, quiet);
+      }
+
       if (format === 'text') {
-        text(result.text);
+        text(reportText);
       } else {
-        json(result.text, {
+        json(reportText, {
           model: 'deep-research',
           partial: !result.completed,
           timeoutSec,
