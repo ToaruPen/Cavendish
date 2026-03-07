@@ -6,7 +6,7 @@ import { defineCommand } from 'citty';
 import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 import { CAVENDISH_DIR, CDP_BASE_URL, CDP_PORT, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
-import { jsonRaw, progress, validateFormat } from '../core/output-handler.js';
+import { jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
 const CONFIG_FILE = join(CAVENDISH_DIR, 'config.json');
 
@@ -128,7 +128,9 @@ export const statusCommand = defineCommand({
     if (format === 'json') {
       jsonRaw(result);
     } else {
-      process.stderr.write(`${formatTextOutput(result).join('\n')}\n`);
+      for (const line of formatTextOutput(result)) {
+        text(line);
+      }
     }
 
     if (!result.cdp.ok || !result.chatgpt.ok || !result.profile.ok) {
