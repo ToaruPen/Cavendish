@@ -146,6 +146,9 @@ export const SELECTORS = {
   /** Send button that appears after text is entered (shared with DR page) */
   SEND_BUTTON: '[data-testid="send-button"]',
 
+  /** URL substring used to locate the Deep Research iframe */
+  DEEP_RESEARCH_FRAME_URL: 'deep_research',
+
   /** Deep Research app container (present only on /deep-research) */
   DEEP_RESEARCH_APP: '.deep-research-app',
 

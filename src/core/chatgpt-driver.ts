@@ -273,6 +273,14 @@ export class ChatGPTDriver {
       return { text: initialText, completed: true };
     }
 
+    // When the stop button was never observed, we require evidence that the
+    // text is the final report rather than leftover plan text.  Two signals:
+    //   (a) text changed from the initial snapshot, OR
+    //   (b) text has been stable (non-empty, no stop button) for several polls,
+    //       meaning the report was already rendered before Phase 4 began.
+    const STABLE_THRESHOLD = 3;
+    let stableCount = 0;
+
     const reportDeadline = Math.min(deadline, Date.now() + 120_000);
     while (Date.now() < reportDeadline) {
       await delay(POLL_INTERVAL_MS * 5);
@@ -280,12 +288,18 @@ export class ChatGPTDriver {
       const text = await this.getDeepResearchResponse();
 
       if (text.length > 0 && !hasStop) {
-        // When the stop button was never observed, require the text to differ
-        // from the initial snapshot to avoid accepting leftover plan text.
         if (seenStopButton || text !== initialText) {
           progress('Response complete', quiet);
           return { text, completed: true };
         }
+        // Text unchanged from initial — count consecutive stable polls
+        stableCount++;
+        if (stableCount >= STABLE_THRESHOLD) {
+          progress('Response complete (stable)', quiet);
+          return { text, completed: true };
+        }
+      } else {
+        stableCount = 0;
       }
     }
 
@@ -363,7 +377,7 @@ export class ChatGPTDriver {
    */
   private getDeepResearchContentFrame(): Frame | undefined {
     const drFrame = this.page.frames().find(
-      (f) => f.url().includes('deep_research'),
+      (f) => f.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL),
     );
     if (!drFrame) {
       return undefined;
