@@ -202,7 +202,7 @@ export class ChatGPTDriver {
       await delay(POLL_INTERVAL_MS * 5);
     }
     if (!contentFrame) {
-      throw new Error('Deep Research iframe not found on the chat page');
+      throw new Error(`Deep Research iframe not found on the chat page (chatId=${chatId})`);
     }
 
     const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
