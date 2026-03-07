@@ -655,6 +655,15 @@ export class ChatGPTDriver {
   }
 
   /**
+   * Get the most recent conversation ID from the sidebar.
+   * Returns undefined when the sidebar is empty.
+   */
+  async getMostRecentChatId(quiet = false): Promise<string | undefined> {
+    const conversations = await this.getConversationList(quiet);
+    return conversations[0]?.id;
+  }
+
+  /**
    * Delete a conversation by ID via the sidebar context menu.
    */
   async deleteConversation(id: string, quiet = false): Promise<void> {

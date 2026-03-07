@@ -2,6 +2,7 @@ import { fstatSync, readFileSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
 
+import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
@@ -150,28 +151,39 @@ export function validateFileArgs(): string[] | undefined {
   return filePaths;
 }
 
-/** Validate --continue / --chat / --project mutual-exclusion rules. */
+/** Validate --continue / --chat / --project mutual-exclusion rules.
+ *
+ * Priority:
+ *  1. `--chat <id>` (with or without --continue) → navigate to that chat (implicit continue)
+ *  2. `--continue` alone → navigate to the most recent chat (deterministic)
+ *  3. Neither → new chat
+ */
 function validateChatOptions(
   args: Record<string, unknown>,
 ): { continueChat: boolean; chatId: string | undefined; project: string | undefined } | undefined {
-  const continueChat = args.continue === true;
   const chatId = args.chat as string | undefined;
   const project = args.project as string | undefined;
+  // --chat implies --continue; explicit --continue flag is optional when --chat is given
+  const continueChat = args.continue === true || chatId !== undefined;
 
   if (chatId !== undefined && chatId === '') {
     fail('--chat cannot be empty. Use: --chat <id>');
     return undefined;
   }
+  if (chatId !== undefined) {
+    try {
+      assertValidChatId(chatId);
+    } catch (error: unknown) {
+      fail(errorMessage(error));
+      return undefined;
+    }
+  }
   if (project !== undefined && project === '') {
     fail('--project cannot be empty. Use: --project <name>');
     return undefined;
   }
-  if (chatId !== undefined && !continueChat) {
-    fail('--chat requires --continue. Use: cavendish ask --continue --chat <id> "prompt"');
-    return undefined;
-  }
   if (continueChat && project !== undefined) {
-    fail('--continue and --project cannot be used together.');
+    fail('--continue/--chat and --project cannot be used together.');
     return undefined;
   }
   return { continueChat, chatId, project };
@@ -249,6 +261,8 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
  */
 function dryRunMessage(v: ValidatedArgs): string {
   const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
+  if (v.chatId !== undefined) {parts.push(`chat: ${v.chatId}`);}
+  else if (v.continueChat) {parts.push('continue: most recent');}
   if (v.filePaths.length > 0) {parts.push(`${String(v.filePaths.length)} file(s)`);}
   if (v.gdriveFiles.length > 0) {parts.push(`${String(v.gdriveFiles.length)} Google Drive file(s)`);}
   if (v.githubRepos.length > 0) {parts.push(`${String(v.githubRepos.length)} GitHub repo(s)`);}
@@ -257,26 +271,30 @@ function dryRunMessage(v: ValidatedArgs): string {
 
 /**
  * Handle navigation based on --continue, --chat, and --project flags.
+ *
+ * Priority:
+ *  1. `--chat <id>` → navigate to that specific chat
+ *  2. `--continue` (no --chat) → navigate to the most recent chat from sidebar
+ *  3. `--project <name>` → navigate to project
+ *  4. None → new chat
  */
 async function navigate(
   driver: ChatGPTDriver,
-  page: import('playwright').Page,
   validated: ValidatedArgs,
 ): Promise<void> {
   const { continueChat, chatId, project, quiet } = validated;
 
-  if (continueChat && chatId !== undefined) {
+  if (chatId !== undefined) {
     await driver.navigateToChat(chatId, quiet);
   } else if (continueChat) {
-    // Note: with CDP, getPage() returns the first ChatGPT tab, which may
-    // not be the user's active tab when multiple ChatGPT tabs are open.
-    // Use --chat <id> for deterministic behaviour in multi-tab setups.
-    const { pathname } = new URL(page.url());
-    if (!pathname.startsWith('/c/')) {
+    const recentId = await driver.getMostRecentChatId(quiet);
+    if (recentId === undefined) {
       throw new Error(
-        'Current page is not a chat. Use --chat <id> to specify which chat to continue.',
+        'No conversations found in sidebar. Cannot continue — start a new chat first.',
       );
     }
+    progress(`Continuing most recent chat: ${recentId}`, quiet);
+    await driver.navigateToChat(recentId, quiet);
   } else if (project !== undefined) {
     await driver.navigateToProject(project, quiet);
   } else {
@@ -317,11 +335,11 @@ export const askCommand = defineCommand({
     },
     continue: {
       type: 'boolean',
-      description: 'Continue in the current chat instead of starting a new one',
+      description: 'Continue the most recent chat (deterministic; use --chat <id> for a specific chat)',
     },
     chat: {
       type: 'string',
-      description: 'Chat ID to continue in (requires --continue)',
+      description: 'Chat ID to continue (implies --continue; e.g. --chat abc123)',
     },
     project: {
       type: 'string',
@@ -354,6 +372,7 @@ export const askCommand = defineCommand({
     const {
       quiet, model, timeoutMs, timeoutSec, format,
       filePaths, gdriveFiles, githubRepos, agentMode, thinkingEffort, prompt, continueChat,
+      project,
     } = validated;
 
     const browser = new BrowserManager();
@@ -362,7 +381,7 @@ export const askCommand = defineCommand({
       const page = await browser.getPage(quiet);
       const driver = new ChatGPTDriver(page);
 
-      await navigate(driver, page, validated);
+      await navigate(driver, validated);
 
       // Skip model selection when continuing an existing chat
       if (!continueChat) {
@@ -399,12 +418,18 @@ export const askCommand = defineCommand({
         initialMsgCount,
       });
 
+      const chatId = driver.extractChatId();
+      const url = driver.getCurrentUrl();
+
       if (format === 'text') {
         text(result.text);
       } else {
         json(result.text, {
           partial: !result.completed,
           model: continueChat ? undefined : model,
+          chatId,
+          url,
+          project,
           timeoutSec,
         });
       }
