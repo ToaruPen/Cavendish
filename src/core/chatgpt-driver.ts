@@ -170,22 +170,7 @@ export class ChatGPTDriver {
     quiet = false,
   ): Promise<void> {
     await this.navigateToChat(chatId, quiet);
-
-    // Poll for DR iframe — it may not be ready immediately after navigation
-    let drFrame: Frame | undefined;
-    const maxAttempts = 15;
-    for (let i = 0; i < maxAttempts; i++) {
-      drFrame = this.getDeepResearchContentFrame();
-      if (drFrame) { break; }
-      await delay(POLL_INTERVAL_MS * 5);
-    }
-    if (!drFrame) {
-      throw new Error(
-        `Chat ${chatId} does not appear to be a Deep Research session `
-        + `(no DR iframe found after ${String(maxAttempts)} attempts, `
-        + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
-      );
-    }
+    await this.waitForDeepResearchFrame(chatId);
 
     const input = this.page.locator(SELECTORS.PROMPT_INPUT);
     await input.fill(text);
@@ -218,23 +203,7 @@ export class ChatGPTDriver {
     quiet = false,
   ): Promise<void> {
     await this.navigateToChat(chatId, quiet);
-
-    // Poll for iframe — it may not be ready immediately after navigation
-    let contentFrame: Frame | undefined;
-    const maxAttempts = 15;
-    const pollInterval = POLL_INTERVAL_MS * 5;
-    for (let i = 0; i < maxAttempts; i++) {
-      contentFrame = this.getDeepResearchContentFrame();
-      if (contentFrame) { break; }
-      await delay(pollInterval);
-    }
-    if (!contentFrame) {
-      throw new Error(
-        `Deep Research iframe not found after polling ${String(maxAttempts)} times `
-        + `(interval: ${String(pollInterval)}ms, chatId: ${chatId}, `
-        + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
-      );
-    }
+    const contentFrame = await this.waitForDeepResearchFrame(chatId);
 
     const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
     try {
@@ -305,6 +274,8 @@ export class ChatGPTDriver {
   async waitForDeepResearchResponse(options: {
     timeout?: number;
     quiet?: boolean;
+    /** Skip Phase 1 (plan/start) — use for refresh/follow-up runs that bypass the plan phase. */
+    skipStartPhase?: boolean;
   }): Promise<WaitForResponseResult> {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const quiet = options.quiet ?? false;
@@ -314,8 +285,10 @@ export class ChatGPTDriver {
     const deadline = Date.now() + timeout;
 
     // Phase 1: Wait for plan iframe and click "開始する"
-    // Throws if start is not detected within timeout.
-    await this.clickDeepResearchStart(deadline, quiet);
+    // Skipped for refresh/follow-up runs that go straight to research.
+    if (!options.skipStartPhase) {
+      await this.clickDeepResearchStart(deadline, quiet);
+    }
 
     // Phase 2: Wait for research to start (stop button appears in iframe).
     // Cap at 60s so fast/auto-finish runs and selector misses fall through
@@ -497,6 +470,25 @@ export class ChatGPTDriver {
     }
     const nested = drFrames[drFrames.length - 1].childFrames();
     return nested[0];
+  }
+
+  /**
+   * Poll for the Deep Research iframe to appear after navigation.
+   * Returns the content frame or throws with diagnostic details.
+   */
+  private async waitForDeepResearchFrame(chatId: string): Promise<Frame> {
+    const maxAttempts = 15;
+    const pollInterval = POLL_INTERVAL_MS * 5;
+    for (let i = 0; i < maxAttempts; i++) {
+      const frame = this.getDeepResearchContentFrame();
+      if (frame) { return frame; }
+      await delay(pollInterval);
+    }
+    throw new Error(
+      `Deep Research iframe not found after polling ${String(maxAttempts)} times `
+      + `(interval: ${String(pollInterval)}ms, chatId: ${chatId}, `
+      + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
+    );
   }
 
   /**

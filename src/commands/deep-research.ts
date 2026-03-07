@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 
+import { assertValidChatId } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
@@ -128,6 +129,16 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const exp = validateExport(args.export, args.exportPath);
   if (exp === undefined) { return undefined; }
+
+  // Validate chatId format early to fail fast on invalid characters
+  if (args.chat !== undefined) {
+    try {
+      assertValidChatId(args.chat as string);
+    } catch (error: unknown) {
+      fail(errorMessage(error));
+      return undefined;
+    }
+  }
 
   // Validate file args before stdin (--file missing.txt should fail fast)
   let filePaths: string[] = [];
@@ -257,6 +268,7 @@ export const deepResearchCommand = defineCommand({
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
         quiet,
+        skipStartPhase: mode.kind === 'refresh' || mode.kind === 'followup',
       });
 
       const chatId = resolveChatId(driver, mode, quiet);
