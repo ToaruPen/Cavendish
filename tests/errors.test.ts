@@ -104,9 +104,36 @@ describe('classifyError', () => {
     expect(classifyError(err).category).toBe('chrome_not_found');
   });
 
-  it('classifies auth errors', () => {
+  it('classifies auth errors (not logged in)', () => {
     const err = new Error('Not logged in (login page detected)');
     expect(classifyError(err).category).toBe('auth_expired');
+  });
+
+  it('classifies auth errors (login required)', () => {
+    expect(classifyError(new Error('Login required to access ChatGPT')).category).toBe('auth_expired');
+  });
+
+  it('classifies auth errors (session expired)', () => {
+    expect(classifyError(new Error('Session expired, please re-authenticate')).category).toBe('auth_expired');
+  });
+
+  it('classifies auth errors (/auth/login URL)', () => {
+    expect(classifyError(new Error('Redirected to /auth/login')).category).toBe('auth_expired');
+  });
+
+  it('does not classify "author-role" as auth error', () => {
+    const err = new Error('Unexpected data-testid author-role in DOM');
+    expect(classifyError(err).category).not.toBe('auth_expired');
+  });
+
+  it('does not classify "authorization header" as auth error', () => {
+    const err = new Error('Missing authorization header in request');
+    expect(classifyError(err).category).not.toBe('auth_expired');
+  });
+
+  it('does not classify "session storage" as auth error', () => {
+    const err = new Error('Failed to read session storage key');
+    expect(classifyError(err).category).not.toBe('auth_expired');
   });
 
   it('classifies Cloudflare errors', () => {
