@@ -121,11 +121,11 @@ export const deepResearchCommand = defineCommand({
           if (markdown.length > 0) {
             reportText = markdown;
           }
-        } catch {
+        } catch (error: unknown) {
           // Copy-content is optional; fall back to raw extracted text.
           // Failures include clipboard permission errors, selector
           // timeouts (locale mismatch), and frame detachment.
-          progress('Copy content failed, using raw text', quiet);
+          progress(`Copy content failed, using raw text: ${errorMessage(error)}`, quiet);
         }
       }
 
