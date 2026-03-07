@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 
-import type { DeepResearchExportFormat } from '../core/chatgpt-driver.js';
+import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -22,6 +22,144 @@ function defaultExportFilename(format: DeepResearchExportFormat): string {
   return `deep-research-report${EXPORT_EXTENSIONS[format]}`;
 }
 
+type RunMode =
+  | { kind: 'initial'; prompt: string; filePaths: string[] }
+  | { kind: 'followup'; chatId: string; prompt: string }
+  | { kind: 'refresh'; chatId: string };
+
+interface ValidatedArgs {
+  quiet: boolean;
+  mode: RunMode;
+  format: 'json' | 'text';
+  timeoutMs: number;
+  timeoutSec: number;
+  exportFormat: DeepResearchExportFormat | undefined;
+  exportPath: string | undefined;
+}
+
+function validateTimeout(raw: unknown): number | undefined {
+  const sec = raw !== undefined ? Number(raw) : DEFAULT_TIMEOUT_SEC;
+  if (!Number.isFinite(sec) || sec <= 0) {
+    fail(`--timeout must be a positive number, got "${String(raw)}"`);
+    return undefined;
+  }
+  return sec;
+}
+
+function validateExport(
+  rawExport: unknown,
+  rawExportPath: unknown,
+): { exportFormat: DeepResearchExportFormat | undefined; exportPath: string | undefined } | undefined {
+  const exportFormat = rawExport as DeepResearchExportFormat | undefined;
+  if (exportFormat !== undefined && !VALID_EXPORT_FORMATS.includes(exportFormat)) {
+    fail(`--export must be one of: ${VALID_EXPORT_FORMATS.join(', ')}. Got "${exportFormat}"`);
+    return undefined;
+  }
+  if (exportFormat === undefined && rawExportPath !== undefined) {
+    fail('--exportPath requires --export (e.g. --export markdown --exportPath report.md)');
+    return undefined;
+  }
+  return { exportFormat, exportPath: rawExportPath as string | undefined };
+}
+
+function resolveRunMode(args: Record<string, unknown>): RunMode | undefined {
+  const isFollowUp = args.chat !== undefined;
+  const isRefresh = args.refresh === true;
+  const chatId = args.chat as string;
+
+  if (isRefresh && !isFollowUp) {
+    fail('--refresh requires --chat (specify the DR session to refresh)');
+    return undefined;
+  }
+  if (isFollowUp && args.file !== undefined) {
+    fail('--file is not supported with --chat');
+    return undefined;
+  }
+  if (isRefresh && args.prompt !== undefined && args.prompt !== '') {
+    fail('--refresh re-runs the existing prompt; do not provide a new prompt');
+    return undefined;
+  }
+  if (!isRefresh && (args.prompt === undefined || args.prompt === '')) {
+    fail('A prompt is required (positional argument)');
+    return undefined;
+  }
+
+  if (isRefresh) {
+    return { kind: 'refresh', chatId };
+  }
+
+  let stdinData: string;
+  try {
+    stdinData = readStdin();
+  } catch (error: unknown) {
+    fail(errorMessage(error));
+    return undefined;
+  }
+  const prompt = buildPrompt(args.prompt as string, stdinData);
+
+  if (isFollowUp) {
+    return { kind: 'followup', chatId, prompt };
+  }
+
+  const filePaths = validateFileArgs();
+  if (filePaths === undefined) { return undefined; }
+  return { kind: 'initial', prompt, filePaths };
+}
+
+function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
+  const quiet = args.quiet === true;
+
+  const mode = resolveRunMode(args);
+  if (mode === undefined) { return undefined; }
+
+  const format = validateFormat(args.format as string);
+  if (format === undefined) { return undefined; }
+
+  const timeoutSec = validateTimeout(args.timeout);
+  if (timeoutSec === undefined) { return undefined; }
+
+  const exp = validateExport(args.export, args.exportPath);
+  if (exp === undefined) { return undefined; }
+
+  return {
+    quiet,
+    mode,
+    format,
+    timeoutMs: timeoutSec * 1000,
+    timeoutSec,
+    exportFormat: exp.exportFormat,
+    exportPath: exp.exportPath,
+  };
+}
+
+async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): Promise<void> {
+  switch (mode.kind) {
+    case 'refresh':
+      progress('Refreshing Deep Research session...', quiet);
+      await driver.refreshDeepResearch(mode.chatId, quiet);
+      break;
+    case 'followup':
+      progress('Sending Deep Research follow-up...', quiet);
+      await driver.sendDeepResearchFollowUp(mode.chatId, mode.prompt, quiet);
+      break;
+    case 'initial':
+      await driver.navigateToDeepResearch(quiet);
+      if (mode.filePaths.length > 0) {
+        await driver.attachFiles(mode.filePaths, quiet);
+      }
+      progress('Sending Deep Research query...', quiet);
+      await driver.sendDeepResearchMessage(mode.prompt);
+      break;
+  }
+}
+
+function resolveChatId(driver: ChatGPTDriver, mode: RunMode): string | undefined {
+  if (mode.kind === 'followup' || mode.kind === 'refresh') {
+    return mode.chatId;
+  }
+  return driver.extractChatId();
+}
+
 /**
  * `cavendish deep-research` — send a prompt to ChatGPT Deep Research and return the report.
  */
@@ -39,6 +177,10 @@ export const deepResearchCommand = defineCommand({
     chat: {
       type: 'string',
       description: 'Chat ID of an existing DR session to send a follow-up',
+    },
+    refresh: {
+      type: 'boolean',
+      description: 'Re-run the same prompt on an existing DR session (requires --chat)',
     },
     timeout: {
       type: 'string',
@@ -67,79 +209,24 @@ export const deepResearchCommand = defineCommand({
     },
   },
   async run({ args }): Promise<void> {
-    const quiet = args.quiet === true;
-    const isFollowUp = args.chat !== undefined;
+    const v = validateArgs(args);
+    if (v === undefined) { return; }
 
-    if (isFollowUp && args.file !== undefined) {
-      fail('--file is not supported with --chat (follow-up mode)');
-      return;
-    }
-
-    const format = validateFormat(args.format);
-    if (format === undefined) { return; }
-
-    // Prompt is required unless future --refresh is added
-    if (args.prompt === undefined || args.prompt === '') {
-      fail('A prompt is required (positional argument)');
-      return;
-    }
-
-    const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : DEFAULT_TIMEOUT_SEC;
-    if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-      fail(`--timeout must be a positive number, got "${String(args.timeout)}"`);
-      return;
-    }
-    const timeoutMs = timeoutSec * 1000;
-
-    const exportFormat = args.export as DeepResearchExportFormat | undefined;
-    if (exportFormat !== undefined && !VALID_EXPORT_FORMATS.includes(exportFormat)) {
-      fail(`--export must be one of: ${VALID_EXPORT_FORMATS.join(', ')}. Got "${exportFormat}"`);
-      return;
-    }
-
-    if (exportFormat === undefined && args.exportPath !== undefined) {
-      fail('--exportPath requires --export (e.g. --export markdown --exportPath report.md)');
-      return;
-    }
-
-    const filePaths = validateFileArgs();
-    if (filePaths === undefined) { return; }
-
-    let stdinData: string;
-    try {
-      stdinData = readStdin();
-    } catch (error: unknown) {
-      fail(errorMessage(error));
-      return;
-    }
-    const prompt = buildPrompt(args.prompt, stdinData);
+    const { quiet, mode, format, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
 
     await withDriver(quiet, async (driver) => {
-      if (isFollowUp) {
-        // Follow-up: navigate to existing chat and send follow-up
-        progress('Sending Deep Research follow-up...', quiet);
-        await driver.sendDeepResearchFollowUp(args.chat, prompt, quiet);
-      } else {
-        // Initial: navigate to /deep-research page
-        await driver.navigateToDeepResearch(quiet);
-
-        if (filePaths.length > 0) {
-          await driver.attachFiles(filePaths, quiet);
-        }
-
-        progress('Sending Deep Research query...', quiet);
-        await driver.sendDeepResearchMessage(prompt);
-      }
+      await sendQuery(driver, mode, quiet);
 
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
         quiet,
       });
 
-      // Extract chat ID for use in follow-up commands
-      const chatId = driver.extractChatId();
+      const chatId = resolveChatId(driver, mode);
       if (chatId !== undefined) {
         progress(`Chat ID: ${chatId}`, quiet);
+      } else {
+        progress('Warning: could not extract chat ID from URL', quiet);
       }
 
       // Get clean Markdown text via copy-content when available (best-effort)
@@ -151,9 +238,6 @@ export const deepResearchCommand = defineCommand({
             reportText = markdown;
           }
         } catch (error: unknown) {
-          // Copy-content is optional; fall back to raw extracted text.
-          // Failures include clipboard permission errors, selector
-          // timeouts (locale mismatch), and frame detachment.
           progress(`Copy content failed, using raw text: ${errorMessage(error)}`, quiet);
         }
       }
@@ -161,11 +245,11 @@ export const deepResearchCommand = defineCommand({
       // Export to file if requested (after copy, so export menu state is clean)
       if (exportFormat !== undefined) {
         if (!result.completed) {
-          const target = args.exportPath ?? defaultExportFilename(exportFormat);
+          const target = exportPath ?? defaultExportFilename(exportFormat);
           fail(`--export requested but report is incomplete; export to "${target}" aborted`);
           return;
         }
-        const savePath = resolve(args.exportPath ?? defaultExportFilename(exportFormat));
+        const savePath = resolve(exportPath ?? defaultExportFilename(exportFormat));
         await driver.exportDeepResearch(exportFormat, savePath, quiet);
       }
 

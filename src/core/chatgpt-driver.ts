@@ -194,6 +194,45 @@ export class ChatGPTDriver {
   }
 
   /**
+   * Navigate to an existing DR chat and click the "更新する" (Update) button
+   * to re-run the same prompt without new input.
+   * Uses Playwright locator (not native querySelector) because the selector
+   * contains Playwright-only `:has-text()` pseudo-selector.
+   * Uses `force: true` because `#thread-bottom-container` may overlay the button.
+   */
+  async refreshDeepResearch(
+    chatId: string,
+    quiet = false,
+  ): Promise<void> {
+    await this.navigateToChat(chatId, quiet);
+
+    // Poll for iframe — it may not be ready immediately after navigation
+    let contentFrame: Frame | undefined;
+    for (let i = 0; i < 15; i++) {
+      contentFrame = this.getDeepResearchContentFrame();
+      if (contentFrame) { break; }
+      await delay(POLL_INTERVAL_MS * 5);
+    }
+    if (!contentFrame) {
+      throw new Error('Deep Research iframe not found on the chat page');
+    }
+
+    const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
+    try {
+      await updateBtn.first().waitFor({ state: 'visible', timeout: 10_000 });
+    } catch (e: unknown) {
+      if (isTimeoutError(e)) {
+        throw new Error(
+          `Update button not found in DR iframe (selector: ${SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON})`,
+        );
+      }
+      throw e;
+    }
+    await updateBtn.first().scrollIntoViewIfNeeded();
+    await updateBtn.first().click({ force: true });
+  }
+
+  /**
    * Extract the chat ID from the current page URL.
    * Expected URL pattern: https://chatgpt.com/c/{chatId}
    */

@@ -158,6 +158,9 @@ export const SELECTORS = {
   /** "リサーチを停止" button inside DR iframe — visible during research phase */
   DEEP_RESEARCH_STOP_BUTTON: 'button:has-text("リサーチを停止"), button:has-text("Stop research")',
 
+  /** "更新する" button inside DR iframe — re-runs the same prompt without new input */
+  DEEP_RESEARCH_UPDATE_BUTTON: 'button:text-is("更新する"), button:text-is("Update")',
+
   /** Export button inside DR iframe header (opens export menu) */
   DEEP_RESEARCH_EXPORT_BUTTON:
     'button[aria-label="エクスポートする"], button[aria-label="Export"]',
