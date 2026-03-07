@@ -4,7 +4,7 @@ import { defineCommand } from 'citty';
 
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type ThinkingEffortLevel } from '../core/chatgpt-driver.js';
-import { extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
 import { errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
 
 const VALID_THINKING_EFFORTS: readonly ThinkingEffortLevel[] = [
@@ -245,6 +245,17 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 }
 
 /**
+ * Build the dry-run summary message for the ask command.
+ */
+function dryRunMessage(v: ValidatedArgs): string {
+  const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
+  if (v.filePaths.length > 0) {parts.push(`${String(v.filePaths.length)} file(s)`);}
+  if (v.gdriveFiles.length > 0) {parts.push(`${String(v.gdriveFiles.length)} Google Drive file(s)`);}
+  if (v.githubRepos.length > 0) {parts.push(`${String(v.githubRepos.length)} GitHub repo(s)`);}
+  return `[dry-run] Would send prompt to ChatGPT (${parts.join(', ')})`;
+}
+
+/**
  * Handle navigation based on --continue, --chat, and --project flags.
  */
 async function navigate(
@@ -291,15 +302,6 @@ export const askCommand = defineCommand({
       type: 'string',
       description: 'Response timeout in seconds (model-dependent; default: 120, Pro: 2400)',
     },
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
-    format: {
-      type: 'string',
-      description: 'Output format: json or text (default: json)',
-      default: 'json',
-    },
     model: {
       type: 'string',
       description: 'ChatGPT model to use (default: Pro)',
@@ -337,10 +339,17 @@ export const askCommand = defineCommand({
       type: 'boolean',
       description: 'Enable agent mode (code execution, file operations)',
     },
+    ...GLOBAL_ARGS,
+    ...FORMAT_ARG,
   },
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
     if (validated === undefined) {return;}
+
+    if (args.dryRun === true) {
+      progress(dryRunMessage(validated), false);
+      return;
+    }
 
     const {
       quiet, model, timeoutMs, timeoutSec, format,

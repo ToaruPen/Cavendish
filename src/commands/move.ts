@@ -1,5 +1,8 @@
 import { defineCommand } from 'citty';
 
+import { assertValidChatId } from '../constants/selectors.js';
+import { GLOBAL_ARGS } from '../core/cli-args.js';
+import { fail, progress } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /**
@@ -21,13 +24,22 @@ export const moveCommand = defineCommand({
       description: 'Target project name',
       required: true,
     },
-    quiet: {
-      type: 'boolean',
-      description: 'Suppress stderr progress messages',
-    },
+    ...GLOBAL_ARGS,
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+
+    try {
+      assertValidChatId(args.chatId);
+    } catch (error: unknown) {
+      fail(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
+    if (args.dryRun === true) {
+      progress(`[dry-run] Would move conversation ${args.chatId} to project "${args.project}"`, false);
+      return;
+    }
 
     await withDriver(quiet, async (driver) => {
       await driver.moveToProject(args.chatId, args.project, quiet);

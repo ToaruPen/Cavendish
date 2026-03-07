@@ -9,11 +9,11 @@ import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 
 import { progress } from './output-handler.js';
 
-const CAVENDISH_DIR = join(homedir(), '.cavendish');
-const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
+export const CAVENDISH_DIR = join(homedir(), '.cavendish');
+export const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
 const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
-const CDP_PORT = 9222;
-const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
+export const CDP_PORT = 9222;
+export const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
 
 const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
