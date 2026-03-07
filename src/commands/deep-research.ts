@@ -84,10 +84,6 @@ function resolveRunMode(args: Record<string, unknown>): RunMode | undefined {
     return undefined;
   }
 
-  if (isRefresh) {
-    return { kind: 'refresh', chatId };
-  }
-
   let stdinData: string;
   try {
     stdinData = readStdin();
@@ -95,6 +91,15 @@ function resolveRunMode(args: Record<string, unknown>): RunMode | undefined {
     fail(errorMessage(error));
     return undefined;
   }
+
+  if (isRefresh) {
+    if (stdinData.length > 0) {
+      fail('--refresh does not accept stdin input');
+      return undefined;
+    }
+    return { kind: 'refresh', chatId };
+  }
+
   const prompt = buildPrompt(args.prompt as string, stdinData);
 
   if (isFollowUp) {
@@ -157,7 +162,12 @@ function resolveChatId(driver: ChatGPTDriver, mode: RunMode): string | undefined
   if (mode.kind === 'followup' || mode.kind === 'refresh') {
     return mode.chatId;
   }
-  return driver.extractChatId();
+  // Initial mode: extract from URL after DR redirects to /c/{id}
+  const chatId = driver.extractChatId();
+  if (chatId === undefined) {
+    fail('Could not extract chat ID from URL after Deep Research completed. The page may not have navigated to /c/{id}.');
+  }
+  return chatId;
 }
 
 /**
@@ -223,11 +233,8 @@ export const deepResearchCommand = defineCommand({
       });
 
       const chatId = resolveChatId(driver, mode);
-      if (chatId !== undefined) {
-        progress(`Chat ID: ${chatId}`, quiet);
-      } else {
-        progress('Warning: could not extract chat ID from URL', quiet);
-      }
+      if (chatId === undefined) { return; }
+      progress(`Chat ID: ${chatId}`, quiet);
 
       // Get clean Markdown text via copy-content when available (best-effort)
       let reportText = result.text;
