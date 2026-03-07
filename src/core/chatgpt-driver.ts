@@ -185,7 +185,7 @@ export class ChatGPTDriver {
    * Navigate to an existing DR chat and click the "更新する" (Update) button
    * to re-run the same prompt without new input.
    * Uses Playwright locator (not native querySelector) because the selector
-   * contains Playwright-only `:has-text()` pseudo-selector.
+   * contains Playwright-only `:text-is()` pseudo-selector.
    * Uses `force: true` because `#thread-bottom-container` may overlay the button.
    */
   async refreshDeepResearch(
