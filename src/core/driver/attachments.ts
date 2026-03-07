@@ -67,7 +67,7 @@ export async function attachGitHubRepo(
   progress(`Attaching GitHub repo: ${repo}`, quiet);
 
   const githubPill = page.locator(SELECTORS.GITHUB_FOOTER_BUTTON);
-  const alreadyEnabled = await githubPill.isVisible().catch((): boolean => false);
+  const alreadyEnabled = await githubPill.isVisible();
 
   if (!alreadyEnabled) {
     await openComposerMenuItem(
@@ -115,7 +115,7 @@ export async function enableAgentMode(
   progress('Enabling agent mode...', quiet);
 
   const pill = page.locator(SELECTORS.AGENT_MODE_PILL);
-  const alreadyActive = await pill.isVisible().catch((): boolean => false);
+  const alreadyActive = await pill.isVisible();
   if (alreadyActive) {
     progress('Agent mode already active', quiet);
     return;
@@ -135,10 +135,11 @@ export async function enableAgentMode(
 export async function attachFiles(page: Page, filePaths: string[], quiet = false): Promise<void> {
   progress(`Attaching ${String(filePaths.length)} file(s)...`, quiet);
 
+  const tileCountBefore = await page.locator(SELECTORS.FILE_ATTACHMENT_TILE).count();
   const fileInput = page.locator(SELECTORS.FILE_INPUT_GENERIC);
   await fileInput.setInputFiles(filePaths);
 
-  await waitForAttachmentTiles(page, filePaths.length);
+  await waitForAttachmentTiles(page, tileCountBefore + filePaths.length);
   progress('Files attached', quiet);
 }
 

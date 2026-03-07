@@ -107,13 +107,11 @@ export async function getDeepResearchResponse(page: Page): Promise<string> {
   }
   try {
     return await contentFrame.evaluate(
-      () => {
-        const main = document.querySelector('main');
-        if (main) {
-          return main.textContent ? main.textContent.trim() : '';
-        }
-        return document.body.textContent ? document.body.textContent.trim() : '';
+      (selector: string) => {
+        const root = document.querySelector(selector);
+        return root?.textContent.trim() ?? '';
       },
+      SELECTORS.DEEP_RESEARCH_REPORT_ROOT,
     );
   } catch (error: unknown) {
     if (isFrameDetachedError(error)) { return ''; }
@@ -356,6 +354,8 @@ async function waitForDeepResearchReport(
 ): Promise<WaitForResponseResult> {
   const initialText = await getDeepResearchResponse(page);
 
+  // When seenStopButton is true, the research cycle (stop button appear → disappear) completed,
+  // so any non-empty text is the final report — preActionText comparison is intentionally skipped.
   if (seenStopButton && initialText.length > 0 && !await hasDeepResearchStopButton(page)) {
     progress('Response complete', quiet);
     return { text: initialText, completed: true };
