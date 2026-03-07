@@ -87,10 +87,10 @@ async function waitForLogin(
 }
 
 /**
- * Close any Chrome process listening on the CDP port via Playwright's
- * `connectOverCDP` + `browser.close()`.  This terminates the Chrome process
- * cleanly without relying on platform-specific shell commands or the
- * global WebSocket API (unavailable in Node 20).
+ * Close any Chrome process listening on the CDP port by sending the
+ * `Browser.close` CDP command, which actually terminates the Chrome
+ * process.  (`browser.close()` on a CDP connection only disconnects
+ * the client without stopping Chrome.)
  *
  * Needed after profile reset so that the stale Chrome process (still
  * using the old profile in memory) is terminated before re-launch.
@@ -100,7 +100,8 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
     const { chromium } = await import('playwright');
     progress('Stopping existing Chrome process...', quiet);
     const browser = await chromium.connectOverCDP(CDP_BASE_URL);
-    await browser.close();
+    const cdpSession = await browser.newBrowserCDPSession();
+    await cdpSession.send('Browser.close');
     // Give Chrome a moment to fully shut down
     await new Promise((r) => setTimeout(r, 1_000));
     progress('Chrome process stopped', quiet);
