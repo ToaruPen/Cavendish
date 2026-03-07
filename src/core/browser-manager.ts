@@ -7,6 +7,7 @@ import { type Browser, type BrowserContext, type Page, chromium } from 'playwrig
 
 import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 
+import { CavendishError } from './errors.js';
 import { progress } from './output-handler.js';
 
 export const CAVENDISH_DIR = join(homedir(), '.cavendish');
@@ -45,7 +46,10 @@ export class BrowserManager {
 
     const context = this.getContext();
     if (!context) {
-      throw new Error('Failed to connect to Chrome');
+      throw new CavendishError(
+        'Failed to connect to Chrome',
+        'cdp_unavailable',
+      );
     }
 
     // Grant clipboard permissions for DR copy-content feature
@@ -102,7 +106,10 @@ export class BrowserManager {
       });
       child.once('error', (err: Error) => {
         reject(
-          new Error(`Failed to launch Chrome at "${chromePath}": ${err.message}`),
+          new CavendishError(
+            `Failed to launch Chrome at "${chromePath}": ${err.message}`,
+            'chrome_not_found',
+          ),
         );
       });
     });
@@ -188,8 +195,9 @@ export class BrowserManager {
       process.platform === 'win32'
         ? `netstat -ano | findstr :${String(CDP_PORT)} then taskkill /PID <pid> /F`
         : `lsof -ti :${String(CDP_PORT)} | xargs kill`;
-    throw new Error(
+    throw new CavendishError(
       `Chrome did not respond on port ${String(CDP_PORT)} after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and the port is free (${portHint}).`,
+      'cdp_unavailable',
     );
   }
 
@@ -243,8 +251,9 @@ export class BrowserManager {
       return pathProbe;
     }
 
-    throw new Error(
+    throw new CavendishError(
       `Chrome not found. Searched: ${candidates.join(', ')} and PATH. Install Google Chrome and retry.`,
+      'chrome_not_found',
     );
   }
 

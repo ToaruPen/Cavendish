@@ -31,6 +31,6 @@ export const listCommand = defineCommand({
       const conversations = await driver.getConversationList(quiet);
       progress(`Found ${String(conversations.length)} conversation(s)`, quiet);
       outputList(conversations, format);
-    });
+    }, format);
   },
 });

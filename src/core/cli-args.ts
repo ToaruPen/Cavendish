@@ -31,6 +31,17 @@ export const FORMAT_ARG = {
 };
 
 /**
+ * Stream arg for commands that support NDJSON streaming output.
+ * When enabled, each chunk / state change is emitted as a single JSON line to stdout.
+ */
+export const STREAM_ARG = {
+  stream: {
+    type: 'boolean' as const,
+    description: 'Enable streaming output (NDJSON lines to stdout)',
+  },
+};
+
+/**
  * Extract repeatable string arguments from process.argv.
  * citty does not support array-type args, so we parse manually.
  * Supports both --flag <value> and --flag=<value> forms.

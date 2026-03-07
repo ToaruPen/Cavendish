@@ -73,6 +73,6 @@ export const readCommand = defineCommand({
         };
         jsonRaw(payload);
       }
-    });
+    }, format);
   },
 });

@@ -77,6 +77,6 @@ export const projectsCommand = defineCommand({
         progress(`Found ${String(projects.length)} project(s)`, quiet);
         outputList(projects, format);
       }
-    });
+    }, format);
   },
 });
