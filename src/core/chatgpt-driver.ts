@@ -208,13 +208,8 @@ export class ChatGPTDriver {
     const deadline = Date.now() + timeout;
 
     // Phase 1: Wait for plan iframe and click "開始する"
-    const started = await this.clickDeepResearchStart(deadline, quiet);
-
-    if (!started) {
-      const text = await this.getDeepResearchResponse();
-      progress('Research did not start', quiet);
-      return { text, completed: false };
-    }
+    // Throws if start is not detected within timeout.
+    await this.clickDeepResearchStart(deadline, quiet);
 
     // Phase 2: Wait for research to start (stop button appears in iframe)
     let researchStarted = false;
@@ -252,31 +247,45 @@ export class ChatGPTDriver {
     }
 
     // Phase 4: Wait for the final report to render
-    return this.waitForDeepResearchReport(deadline, timeout, quiet);
+    return this.waitForDeepResearchReport(deadline, timeout, quiet, researchStarted);
   }
 
   /**
    * Phase 4: Wait for the final report to render after research completes.
-   * If the report is already present when the stop button is gone, returns immediately.
+   *
+   * @param seenStopButton - Whether the stop button was observed during Phase 2/3.
+   *   When true, the stop button's disappearance is a reliable signal that
+   *   research finished. When false (button appeared and disappeared between
+   *   polls), we require text to change from the initial snapshot to distinguish
+   *   the final report from leftover plan text.
    */
   private async waitForDeepResearchReport(
     deadline: number,
     timeout: number,
     quiet: boolean,
+    seenStopButton: boolean,
   ): Promise<WaitForResponseResult> {
-    const currentText = await this.getDeepResearchResponse();
-    if (currentText.length > 0 && !await this.hasDeepResearchStopButton()) {
+    const initialText = await this.getDeepResearchResponse();
+
+    // If the stop button was observed and is now gone, non-empty text is the report.
+    if (seenStopButton && initialText.length > 0 && !await this.hasDeepResearchStopButton()) {
       progress('Response complete', quiet);
-      return { text: currentText, completed: true };
+      return { text: initialText, completed: true };
     }
+
     const reportDeadline = Math.min(deadline, Date.now() + 120_000);
     while (Date.now() < reportDeadline) {
       await delay(POLL_INTERVAL_MS * 5);
       const hasStop = await this.hasDeepResearchStopButton();
       const text = await this.getDeepResearchResponse();
+
       if (text.length > 0 && !hasStop) {
-        progress('Response complete', quiet);
-        return { text, completed: true };
+        // When the stop button was never observed, require the text to differ
+        // from the initial snapshot to avoid accepting leftover plan text.
+        if (seenStopButton || text !== initialText) {
+          progress('Response complete', quiet);
+          return { text, completed: true };
+        }
       }
     }
 
@@ -310,7 +319,7 @@ export class ChatGPTDriver {
   private async clickDeepResearchStart(
     deadline: number,
     quiet: boolean,
-  ): Promise<boolean> {
+  ): Promise<void> {
     // Cap at 120s so initialization failures are detected quickly,
     // but also respect the caller's deadline when it is shorter.
     const START_PHASE_MS = 120_000;
@@ -321,7 +330,7 @@ export class ChatGPTDriver {
       // Research may auto-start after countdown — detect early
       if (await this.hasDeepResearchStopButton()) {
         progress('Research already started (auto-start)', quiet);
-        return true;
+        return;
       }
 
       const contentFrame = this.getDeepResearchContentFrame();
@@ -334,15 +343,17 @@ export class ChatGPTDriver {
         if (await startBtn.count() > 0) {
           progress('Plan ready — starting research...', quiet);
           await startBtn.first().click();
-          return true;
+          return;
         }
       } catch (error: unknown) {
         if (!isFrameDetachedError(error)) { throw error; }
         // Frame not ready yet — retry
       }
     }
-    progress('Deep Research start not detected — check ChatGPT Pro status or selector changes', quiet);
-    return false;
+    throw new Error(
+      'Deep Research start not detected within timeout. ' +
+      'Check ChatGPT Pro status or selector changes.',
+    );
   }
 
   /**
