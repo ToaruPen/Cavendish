@@ -1,120 +1,17 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { defineCommand } from 'citty';
 
-import { CHATGPT_BASE_URL } from '../constants/selectors.js';
-import { CAVENDISH_DIR, CDP_BASE_URL, CDP_PORT, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { buildDoctorResult, collectDoctorChecks, formatTextOutput } from '../core/doctor.js';
 import { jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
-const CONFIG_FILE = join(CAVENDISH_DIR, 'config.json');
-
-interface StatusCheck {
-  ok: boolean;
-  detail: string;
-}
-
-interface StatusResult {
-  cdp: StatusCheck & { chrome?: string };
-  chatgpt: StatusCheck;
-  profile: StatusCheck & { path: string };
-  config: StatusCheck & { path: string };
-}
-
 /**
- * Check Chrome CDP connectivity and return version info.
- */
-async function checkCdp(): Promise<StatusResult['cdp']> {
-  try {
-    const res = await fetch(`${CDP_BASE_URL}/json/version`);
-    if (res.ok) {
-      const data = (await res.json()) as { Browser?: string };
-      const chrome = data.Browser ?? 'unknown';
-      return { ok: true, detail: `Connected (${chrome})`, chrome };
-    }
-    return { ok: false, detail: `HTTP ${String(res.status)}` };
-  } catch (error: unknown) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      detail: `Not running: ${reason} (start Chrome with --remote-debugging-port=${String(CDP_PORT)})`,
-    };
-  }
-}
-
-/**
- * Check if a ChatGPT tab is open and appears to be logged in.
- * Uses CDP /json/list to avoid a full Playwright connection.
- */
-async function checkChatGPT(): Promise<StatusCheck> {
-  try {
-    const res = await fetch(`${CDP_BASE_URL}/json/list`);
-    if (!res.ok) {
-      return { ok: false, detail: `Failed to query open tabs: HTTP ${String(res.status)}` };
-    }
-    const pages = (await res.json()) as { url: string }[];
-    const chatgptPages = pages.filter((p) => p.url.startsWith(CHATGPT_BASE_URL));
-    if (chatgptPages.length === 0) {
-      return { ok: true, detail: 'No ChatGPT tab open (login status unknown)' };
-    }
-    const authPages = chatgptPages.filter((p) => p.url.includes('/auth/'));
-    const nonAuthPages = chatgptPages.filter((p) => !p.url.includes('/auth/') && !p.url.includes('/share/'));
-    if (nonAuthPages.length > 0) {
-      return { ok: true, detail: 'Logged in' };
-    }
-    if (authPages.length > 0) {
-      return { ok: false, detail: 'Not logged in (login page detected)' };
-    }
-    return { ok: true, detail: 'No authenticated ChatGPT tab found (only shared links detected)' };
-  } catch (error: unknown) {
-    return {
-      ok: false,
-      detail: `Failed to check: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
-function chatgptIcon(cdpOk: boolean, chatgptOk: boolean): string {
-  if (!cdpOk) {return '-';}
-  return chatgptOk ? '✓' : '✗';
-}
-
-function formatTextOutput(result: StatusResult): string[] {
-  const cdpIcon = result.cdp.ok ? '✓' : '✗';
-  return [
-    `Chrome CDP:    ${cdpIcon} ${result.cdp.detail}`,
-    `ChatGPT:       ${chatgptIcon(result.cdp.ok, result.chatgpt.ok)} ${result.chatgpt.detail}`,
-    `Profile:       ${result.profile.path} (${result.profile.detail})`,
-    `Config:        ${result.config.path} (${result.config.detail})`,
-  ];
-}
-
-async function collectStatus(): Promise<StatusResult> {
-  const cdp = await checkCdp();
-
-  const chatgpt: StatusCheck = cdp.ok
-    ? await checkChatGPT()
-    : { ok: false, detail: 'skipped, no Chrome connection' };
-
-  const profileExists = existsSync(CHROME_PROFILE_DIR);
-  const configExists = existsSync(CONFIG_FILE);
-
-  return {
-    cdp,
-    chatgpt,
-    profile: { ok: profileExists, detail: profileExists ? 'found' : 'not found', path: CHROME_PROFILE_DIR },
-    config: { ok: configExists, detail: configExists ? 'found' : 'not found', path: CONFIG_FILE },
-  };
-}
-
-/**
- * `cavendish status` — check CLI prerequisites and environment status.
+ * `cavendish status` — doctor-style health check for CLI prerequisites,
+ * ChatGPT authentication, and DOM selector availability.
  */
 export const statusCommand = defineCommand({
   meta: {
     name: 'status',
-    description: 'Check CLI prerequisites and environment status',
+    description: 'Doctor-style health check for CLI prerequisites and ChatGPT environment',
   },
   args: {
     ...GLOBAL_ARGS,
@@ -125,11 +22,13 @@ export const statusCommand = defineCommand({
     if (format === undefined) {return;}
 
     if (args.dryRun === true) {
-      progress('[dry-run] Would check CLI prerequisites and environment status', false);
+      progress('[dry-run] Would run doctor checks on CLI prerequisites and ChatGPT environment', false);
       return;
     }
 
-    const result = await collectStatus();
+    const quiet = args.quiet === true;
+    const checks = await collectDoctorChecks(quiet);
+    const result = buildDoctorResult(checks);
 
     if (format === 'json') {
       jsonRaw(result);
@@ -139,7 +38,7 @@ export const statusCommand = defineCommand({
       }
     }
 
-    if (!result.cdp.ok || !result.chatgpt.ok || !result.profile.ok) {
+    if (result.summary.fail > 0) {
       process.exitCode = 1;
     }
   },

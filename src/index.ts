@@ -4,6 +4,8 @@ import { archiveCommand } from './commands/archive.js';
 import { askCommand } from './commands/ask.js';
 import { deepResearchCommand } from './commands/deep-research.js';
 import { deleteCommand } from './commands/delete.js';
+import { doctorCommand } from './commands/doctor.js';
+import { initCommand } from './commands/init.js';
 import { listCommand } from './commands/list.js';
 import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
@@ -22,6 +24,8 @@ const main = defineCommand({
     ask: askCommand,
     'deep-research': deepResearchCommand,
     delete: deleteCommand,
+    doctor: doctorCommand,
+    init: initCommand,
     list: listCommand,
     move: moveCommand,
     projects: projectsCommand,
