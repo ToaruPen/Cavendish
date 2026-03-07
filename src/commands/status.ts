@@ -6,7 +6,7 @@ import { defineCommand } from 'citty';
 import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 import { CAVENDISH_DIR, CDP_BASE_URL, CDP_PORT, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
-import { jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
+import { jsonRaw, progress, validateFormat } from '../core/output-handler.js';
 
 const CONFIG_FILE = join(CAVENDISH_DIR, 'config.json');
 
@@ -50,7 +50,7 @@ async function checkChatGPT(): Promise<StatusCheck> {
   try {
     const res = await fetch(`${CDP_BASE_URL}/json/list`);
     if (!res.ok) {
-      return { ok: false, detail: 'Failed to query open tabs' };
+      return { ok: false, detail: `Failed to query open tabs: HTTP ${String(res.status)}` };
     }
     const pages = (await res.json()) as { url: string }[];
     const chatgptPages = pages.filter((p) => p.url.startsWith(CHATGPT_BASE_URL));
@@ -61,8 +61,11 @@ async function checkChatGPT(): Promise<StatusCheck> {
     return loggedIn
       ? { ok: true, detail: 'Logged in' }
       : { ok: false, detail: 'Not logged in (login page detected)' };
-  } catch {
-    return { ok: false, detail: 'Failed to check' };
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      detail: `Failed to check: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -125,12 +128,10 @@ export const statusCommand = defineCommand({
     if (format === 'json') {
       jsonRaw(result);
     } else {
-      for (const line of formatTextOutput(result)) {
-        text(line);
-      }
+      process.stderr.write(`${formatTextOutput(result).join('\n')}\n`);
     }
 
-    if (!result.cdp.ok || !result.chatgpt.ok || !result.profile.ok) {
+    if (!result.cdp.ok || !result.chatgpt.ok || !result.profile.ok || !result.config.ok) {
       process.exitCode = 1;
     }
   },
