@@ -168,9 +168,10 @@ export class ChatGPTDriver {
     chatId: string,
     text: string,
     quiet = false,
+    deadline?: number,
   ): Promise<void> {
     await this.navigateToChat(chatId, quiet);
-    await this.waitForDeepResearchFrame(chatId);
+    await this.waitForDeepResearchFrame(chatId, deadline);
 
     const input = this.page.locator(SELECTORS.PROMPT_INPUT);
     await input.fill(text);
@@ -201,9 +202,10 @@ export class ChatGPTDriver {
   async refreshDeepResearch(
     chatId: string,
     quiet = false,
+    deadline?: number,
   ): Promise<void> {
     await this.navigateToChat(chatId, quiet);
-    const contentFrame = await this.waitForDeepResearchFrame(chatId);
+    const contentFrame = await this.waitForDeepResearchFrame(chatId, deadline);
 
     const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
     try {
@@ -476,16 +478,19 @@ export class ChatGPTDriver {
    * Poll for the Deep Research iframe to appear after navigation.
    * Returns the content frame or throws with diagnostic details.
    */
-  private async waitForDeepResearchFrame(chatId: string): Promise<Frame> {
-    const maxAttempts = 15;
+  private async waitForDeepResearchFrame(chatId: string, deadline?: number): Promise<Frame> {
     const pollInterval = POLL_INTERVAL_MS * 5;
-    for (let i = 0; i < maxAttempts; i++) {
+    const defaultDeadline = Date.now() + 15_000;
+    const effectiveDeadline = deadline !== undefined ? Math.max(deadline, defaultDeadline) : defaultDeadline;
+    let attempts = 0;
+    while (Date.now() < effectiveDeadline) {
       const frame = this.getDeepResearchContentFrame();
       if (frame) { return frame; }
+      attempts++;
       await delay(pollInterval);
     }
     throw new Error(
-      `Deep Research iframe not found after polling ${String(maxAttempts)} times `
+      `Deep Research iframe not found after ${String(attempts)} attempts `
       + `(interval: ${String(pollInterval)}ms, chatId: ${chatId}, `
       + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
     );

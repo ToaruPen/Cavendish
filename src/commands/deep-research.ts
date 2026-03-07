@@ -170,15 +170,16 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   };
 }
 
-async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): Promise<void> {
+async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   switch (mode.kind) {
     case 'refresh':
       progress('Refreshing Deep Research session...', quiet);
-      await driver.refreshDeepResearch(mode.chatId, quiet);
+      await driver.refreshDeepResearch(mode.chatId, quiet, deadline);
       break;
     case 'followup':
       progress('Sending Deep Research follow-up...', quiet);
-      await driver.sendDeepResearchFollowUp(mode.chatId, mode.prompt, quiet);
+      await driver.sendDeepResearchFollowUp(mode.chatId, mode.prompt, quiet, deadline);
       break;
     case 'initial':
       await driver.navigateToDeepResearch(quiet);
@@ -263,7 +264,7 @@ export const deepResearchCommand = defineCommand({
     const { quiet, mode, format, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
 
     await withDriver(quiet, async (driver) => {
-      await sendQuery(driver, mode, quiet);
+      await sendQuery(driver, mode, quiet, timeoutMs);
 
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
