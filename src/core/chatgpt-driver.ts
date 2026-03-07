@@ -408,24 +408,31 @@ export class ChatGPTDriver {
       throw new Error('Deep Research content frame not found');
     }
 
-    // Clear clipboard before copy so we can verify the write succeeded
-    await this.page.evaluate(() => navigator.clipboard.writeText(''));
+    try {
+      // Clear clipboard before copy so we can verify the write succeeded
+      await this.page.evaluate(() => navigator.clipboard.writeText(''));
 
-    await this.openDeepResearchExportMenu(contentFrame);
+      await this.openDeepResearchExportMenu(contentFrame);
 
-    // Click "コンテンツをコピーする"
-    const copyBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_COPY_CONTENT);
-    await copyBtn.click();
-    await delay(POLL_INTERVAL_MS * 5);
+      // Click "コンテンツをコピーする"
+      const copyBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_COPY_CONTENT);
+      await copyBtn.click();
+      await delay(POLL_INTERVAL_MS * 5);
 
-    // Read from clipboard and verify it was actually updated
-    const copied = await this.page.evaluate(
-      () => navigator.clipboard.readText(),
-    );
-    if (copied.length === 0) {
-      throw new Error('Clipboard was not updated after copy-content click');
+      // Read from clipboard and verify it was actually updated
+      const copied = await this.page.evaluate(
+        () => navigator.clipboard.readText(),
+      );
+      if (copied.length === 0) {
+        throw new Error('Clipboard was not updated after copy-content click');
+      }
+      return copied;
+    } catch (error: unknown) {
+      if (isFrameDetachedError(error)) {
+        throw new Error('Deep Research iframe was replaced during copy. Try again.');
+      }
+      throw error;
     }
-    return copied;
   }
 
   /**
