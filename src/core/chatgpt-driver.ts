@@ -187,7 +187,9 @@ export class ChatGPTDriver {
       return false;
     }, SELECTORS.SEND_BUTTON);
     if (!clicked) {
-      throw new Error('Send button not found after entering follow-up text');
+      throw new Error(
+        `Send button not found after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON})`,
+      );
     }
   }
 

@@ -70,6 +70,11 @@ export const deepResearchCommand = defineCommand({
     const quiet = args.quiet === true;
     const isFollowUp = args.chat !== undefined;
 
+    if (isFollowUp && args.file !== undefined) {
+      fail('--file is not supported with --chat (follow-up mode)');
+      return;
+    }
+
     const format = validateFormat(args.format);
     if (format === undefined) { return; }
 
@@ -99,11 +104,6 @@ export const deepResearchCommand = defineCommand({
 
     const filePaths = validateFileArgs();
     if (filePaths === undefined) { return; }
-
-    if (isFollowUp && filePaths.length > 0) {
-      fail('--file is not supported with --chat (follow-up mode)');
-      return;
-    }
 
     let stdinData: string;
     try {
