@@ -228,23 +228,26 @@ export class ChatGPTDriver {
     }
 
     if (!researchStarted) {
-      const text = await this.getDeepResearchResponse();
-      progress('Research did not start', quiet);
-      return { text, completed: false };
+      // The stop button may have appeared and disappeared between polls
+      // (fast/auto-finish runs). Fall through to Phase 4 to check for
+      // an already-completed report instead of returning partial.
+      progress('Stop button not observed, checking for report...', quiet);
     }
 
     // Phase 3: Wait for research to complete (stop button disappears)
-    let lastLoggedAt = Date.now();
-    while (Date.now() < deadline) {
-      await delay(POLL_INTERVAL_MS * 5);
-      if (!await this.hasDeepResearchStopButton()) {
-        progress('Research phase complete, waiting for report...', quiet);
-        break;
-      }
-      const now = Date.now();
-      if (now - lastLoggedAt > 30_000) {
-        progress('Still researching...', quiet);
-        lastLoggedAt = now;
+    if (researchStarted) {
+      let lastLoggedAt = Date.now();
+      while (Date.now() < deadline) {
+        await delay(POLL_INTERVAL_MS * 5);
+        if (!await this.hasDeepResearchStopButton()) {
+          progress('Research phase complete, waiting for report...', quiet);
+          break;
+        }
+        const now = Date.now();
+        if (now - lastLoggedAt > 30_000) {
+          progress('Still researching...', quiet);
+          lastLoggedAt = now;
+        }
       }
     }
 
@@ -377,6 +380,9 @@ export class ChatGPTDriver {
     }
 
     try {
+      // Clear clipboard before copy so we can verify the write succeeded
+      await this.page.evaluate(() => navigator.clipboard.writeText(''));
+
       await this.openDeepResearchExportMenu(contentFrame);
 
       // Click "コンテンツをコピーする"
@@ -384,10 +390,14 @@ export class ChatGPTDriver {
       await copyBtn.click();
       await delay(POLL_INTERVAL_MS * 5);
 
-      // Read from clipboard
-      return await this.page.evaluate(
+      // Read from clipboard and verify it was actually updated
+      const copied = await this.page.evaluate(
         () => navigator.clipboard.readText(),
       );
+      if (copied.length === 0) {
+        return await this.getDeepResearchResponse();
+      }
+      return copied;
     } catch (error: unknown) {
       if (isFrameDetachedError(error)) {
         return this.getDeepResearchResponse();
