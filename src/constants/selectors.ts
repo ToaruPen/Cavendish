@@ -66,6 +66,9 @@ export const SELECTORS = {
   /** Links to existing conversations in the sidebar (scoped to #history) */
   CONVERSATION_LINK: '#history a[href^="/c/"]',
 
+  /** Most-recent conversation link (broad match for both regular and project chats) */
+  MOST_RECENT_CONVERSATION_LINK: '#history a[href*="/c/"]',
+
   /** New chat button */
   NEW_CHAT_LINK: 'a[href="/"]',
 

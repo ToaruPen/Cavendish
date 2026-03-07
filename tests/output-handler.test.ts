@@ -56,6 +56,66 @@ describe('OutputHandler', () => {
 
       expect(parsed).toMatchObject({ partial: false });
     });
+
+    it('includes chatId in metadata when provided', () => {
+      json('response', { chatId: '6820abc1-def2-3456-7890-abcdef123456', partial: false });
+
+      const parsed: unknown = JSON.parse(writeCalls[0] ?? '');
+
+      expect(parsed).toMatchObject({
+        content: 'response',
+        chatId: '6820abc1-def2-3456-7890-abcdef123456',
+        partial: false,
+      });
+    });
+
+    it('includes url in metadata when provided', () => {
+      json('response', { url: 'https://chatgpt.com/c/abc123', partial: false });
+
+      const parsed: unknown = JSON.parse(writeCalls[0] ?? '');
+
+      expect(parsed).toMatchObject({
+        content: 'response',
+        url: 'https://chatgpt.com/c/abc123',
+        partial: false,
+      });
+    });
+
+    it('includes project in metadata when provided', () => {
+      json('response', { project: 'My Project', partial: false });
+
+      const parsed: unknown = JSON.parse(writeCalls[0] ?? '');
+
+      expect(parsed).toMatchObject({
+        content: 'response',
+        project: 'My Project',
+        partial: false,
+      });
+    });
+
+    it('includes all metadata fields together', () => {
+      json('response', {
+        model: 'gpt-4o',
+        chatId: '6820abc1-def2-3456-7890-abcdef123456',
+        url: 'https://chatgpt.com/c/6820abc1-def2-3456-7890-abcdef123456',
+        project: 'Dev Project',
+        partial: true,
+        timeoutSec: 120,
+      });
+
+      const parsed: unknown = JSON.parse(writeCalls[0] ?? '');
+
+      expect(parsed).toMatchObject({
+        content: 'response',
+        model: 'gpt-4o',
+        chatId: '6820abc1-def2-3456-7890-abcdef123456',
+        url: 'https://chatgpt.com/c/6820abc1-def2-3456-7890-abcdef123456',
+        project: 'Dev Project',
+        partial: true,
+        timeoutSec: 120,
+      });
+      expect(parsed).toHaveProperty('timestamp');
+    });
   });
 
   describe('text()', () => {

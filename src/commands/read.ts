@@ -6,6 +6,14 @@ import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { fail, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
+/** Structured output for the read command in JSON mode. */
+interface ReadPayload {
+  chatId: string;
+  url: string;
+  messages: readonly ConversationMessage[];
+  timestamp: string;
+}
+
 /**
  * Format conversation messages as human-readable text.
  * Each message is prefixed with its role label.
@@ -52,11 +60,18 @@ export const readCommand = defineCommand({
 
     await withDriver(quiet, async (driver) => {
       const messages = await driver.readConversation(args.chatId, quiet);
+      const chatId: string = args.chatId;
 
       if (format === 'text') {
         text(formatAsText(messages));
       } else {
-        jsonRaw(messages);
+        const payload: ReadPayload = {
+          chatId,
+          url: driver.getCurrentUrl(),
+          messages,
+          timestamp: new Date().toISOString(),
+        };
+        jsonRaw(payload);
       }
     });
   },

@@ -313,12 +313,15 @@ export const deepResearchCommand = defineCommand({
         }
       }
 
+      const url = driver.getCurrentUrl();
+
       if (format === 'text') {
         text(reportText);
       } else {
         json(reportText, {
           model: 'deep-research',
           chatId,
+          url,
           partial: !result.completed,
           timeoutSec,
         });

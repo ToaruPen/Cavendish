@@ -655,6 +655,37 @@ export class ChatGPTDriver {
   }
 
   /**
+   * Get the most recent conversation ID from the sidebar.
+   * Returns undefined when the sidebar is empty.
+   *
+   * Uses a broad selector (`href*="/c/"`) to match both regular (`/c/{id}`)
+   * and project (`/g/.../c/{id}`) conversation links.  The sidebar orders
+   * items by recency, so the first match is the most recent chat.
+   */
+  async getMostRecentChatId(quiet = false): Promise<string | undefined> {
+    await this.waitForSidebarContainer(quiet);
+    const links = this.page.locator(SELECTORS.MOST_RECENT_CONVERSATION_LINK);
+    if (await links.count() === 0) {
+      return undefined;
+    }
+
+    const href = await links.first().getAttribute('href');
+    if (!href) {
+      throw new Error(
+        `Recent conversation link is missing href (selector: ${SELECTORS.MOST_RECENT_CONVERSATION_LINK})`,
+      );
+    }
+
+    const match = /\/c\/([^/?#]+)$/.exec(href);
+    if (!match) {
+      throw new Error(
+        `Unexpected recent conversation href format: "${href}" (selector: ${SELECTORS.MOST_RECENT_CONVERSATION_LINK})`,
+      );
+    }
+    return match[1];
+  }
+
+  /**
    * Delete a conversation by ID via the sidebar context menu.
    */
   async deleteConversation(id: string, quiet = false): Promise<void> {
