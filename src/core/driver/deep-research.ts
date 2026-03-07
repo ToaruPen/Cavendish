@@ -109,7 +109,10 @@ export async function getDeepResearchResponse(page: Page): Promise<string> {
     return await contentFrame.evaluate(
       (selector: string) => {
         const root = document.querySelector(selector);
-        return root?.textContent.trim() ?? '';
+        if (root) {
+          return root.textContent.trim();
+        }
+        return document.body.textContent.trim();
       },
       SELECTORS.DEEP_RESEARCH_REPORT_ROOT,
     );
