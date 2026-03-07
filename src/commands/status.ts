@@ -55,7 +55,7 @@ async function checkChatGPT(): Promise<StatusCheck> {
     const pages = (await res.json()) as { url: string }[];
     const chatgptPages = pages.filter((p) => p.url.startsWith(CHATGPT_BASE_URL));
     if (chatgptPages.length === 0) {
-      return { ok: false, detail: 'No ChatGPT tab open' };
+      return { ok: true, detail: 'No ChatGPT tab open (login status unknown)' };
     }
     const authPages = chatgptPages.filter((p) => p.url.includes('/auth/'));
     const nonAuthPages = chatgptPages.filter((p) => !p.url.includes('/auth/') && !p.url.includes('/share/'));
