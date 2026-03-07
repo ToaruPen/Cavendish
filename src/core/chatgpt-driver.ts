@@ -444,30 +444,24 @@ export class ChatGPTDriver {
     await searchInput.fill(fileName);
     await searchInput.press('Enter');
 
-    // Find the first visible result whose text exactly matches fileName
-    const allResults = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM);
-    let clickedResult = false;
-    const resultDeadline = Date.now() + 10_000;
-    while (Date.now() < resultDeadline) {
-      const resultCount = await allResults.count();
-      for (let j = 0; j < resultCount; j++) {
-        const result = allResults.nth(j);
-        if (!(await result.isVisible().catch((): boolean => false))) { continue; }
-        const resultText = await result.innerText().catch((): string => '');
-        if (resultText.trim() === fileName) {
-          await result.click();
-          clickedResult = true;
-          break;
-        }
+    // Wait for search results to load, then click the matching result.
+    // Note: isVisible() is unreliable in cross-origin iframes, so we use
+    // hasText filter + waitFor instead of manual visibility polling.
+    const firstMatch = pickerFrame
+      .locator(SELECTORS.GDRIVE_PICKER_RESULT_ITEM)
+      .filter({ hasText: fileName })
+      .first();
+    try {
+      await firstMatch.waitFor({ state: 'attached', timeout: 15_000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(
+          `Google Drive file "${fileName}" not found in Picker search results.`,
+        );
       }
-      if (clickedResult) { break; }
-      await delay(500);
+      throw error;
     }
-    if (!clickedResult) {
-      throw new Error(
-        `Google Drive file "${fileName}" not found in Picker search results.`,
-      );
-    }
+    await firstMatch.click();
 
     // Click the select button in the Picker (use first() to avoid strict mode with duplicate buttons)
     const selectButton = pickerFrame.locator(SELECTORS.GDRIVE_PICKER_SELECT_BUTTON).first();

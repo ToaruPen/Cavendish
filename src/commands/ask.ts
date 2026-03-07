@@ -25,6 +25,15 @@ function allowedThinkingEfforts(model: string): readonly ThinkingEffortLevel[] |
   return undefined;
 }
 
+/**
+ * Check whether a model supports GitHub integration in standard chat.
+ * Only Thinking (Agent Mode) supports GitHub; Deep Research has its own path.
+ */
+function supportsGitHub(model: string): boolean {
+  const lower = model.toLowerCase();
+  return lower.includes('thinking');
+}
+
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
 const PRO_TIMEOUT_SEC = 2400;
@@ -196,7 +205,7 @@ function validateThinkingEffort(
 }
 
 /** Extract a repeatable arg or fail with an error message. */
-function extractArgsOrFail(flag: string): string[] | undefined {
+export function extractArgsOrFail(flag: string): string[] | undefined {
   try {
     return extractRepeatableArgs(process.argv, flag);
   } catch (error: unknown) {
@@ -284,6 +293,12 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const chatOptions = validateChatOptions(args);
   if (chatOptions === undefined) {return undefined;}
+
+  // Skip GitHub model check when continuing — the chat already has its model.
+  if (githubRepos.length > 0 && !chatOptions.continueChat && !supportsGitHub(model)) {
+    fail(`--github requires a model with GitHub support (e.g. Thinking). Model "${model}" does not support GitHub in standard chat.`);
+    return undefined;
+  }
 
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
   if (thinkingEffort !== undefined && chatOptions.continueChat) {
