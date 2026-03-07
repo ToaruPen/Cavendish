@@ -8,6 +8,7 @@
 export interface ResponsePayload {
   content: string;
   model?: string;
+  chatId?: string;
   timeoutSec?: number;
   timestamp: string;
   partial: boolean;
@@ -18,11 +19,12 @@ export interface ResponsePayload {
  */
 export function json(
   content: string,
-  metadata?: { model?: string; partial?: boolean; timeoutSec?: number },
+  metadata?: { model?: string; chatId?: string; partial?: boolean; timeoutSec?: number },
 ): void {
   const payload: ResponsePayload = {
     content,
     model: metadata?.model,
+    chatId: metadata?.chatId,
     timeoutSec: metadata?.timeoutSec,
     timestamp: new Date().toISOString(),
     partial: metadata?.partial ?? false,

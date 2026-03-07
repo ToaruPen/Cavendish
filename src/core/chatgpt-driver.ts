@@ -160,6 +160,87 @@ export class ChatGPTDriver {
   }
 
   /**
+   * Navigate to an existing DR chat and send a follow-up message.
+   * Returns the pre-action report text snapshot for stale-content detection.
+   */
+  async sendDeepResearchFollowUp(
+    chatId: string,
+    text: string,
+    quiet = false,
+    deadline?: number,
+  ): Promise<string> {
+    await this.navigateToChat(chatId, quiet);
+    await this.waitForDeepResearchFrame(chatId, deadline);
+
+    // Snapshot before sending so stale-content detection works correctly
+    const preActionText = await this.getDeepResearchResponse();
+
+    const input = this.page.locator(SELECTORS.PROMPT_INPUT);
+    await input.fill(text);
+
+    // Wait for the send button to become visible AND enabled before clicking.
+    // Use force: true because the sticky page-header intercepts normal clicks.
+    const sendBtn = this.page.locator(SELECTORS.SEND_BUTTON_ENABLED);
+    try {
+      await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    } catch (e: unknown) {
+      if (isTimeoutError(e)) {
+        throw new Error(
+          `Send button not ready after entering follow-up text (selector: ${SELECTORS.SEND_BUTTON_ENABLED})`,
+        );
+      }
+      throw e;
+    }
+    await sendBtn.click({ force: true });
+    return preActionText;
+  }
+
+  /**
+   * Navigate to an existing DR chat and click the "更新する" (Update) button.
+   * Returns the pre-action report text snapshot for stale-content detection.
+   */
+  async refreshDeepResearch(
+    chatId: string,
+    quiet = false,
+    deadline?: number,
+  ): Promise<string> {
+    await this.navigateToChat(chatId, quiet);
+    const contentFrame = await this.waitForDeepResearchFrame(chatId, deadline);
+
+    // Snapshot before clicking so stale-content detection works correctly
+    const preActionText = await this.getDeepResearchResponse();
+
+    const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
+    try {
+      await updateBtn.first().waitFor({ state: 'visible', timeout: 10_000 });
+    } catch (e: unknown) {
+      if (isTimeoutError(e)) {
+        throw new Error(
+          `Update button not found in DR iframe (selector: ${SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON})`,
+        );
+      }
+      throw e;
+    }
+    await updateBtn.first().scrollIntoViewIfNeeded();
+    await updateBtn.first().click({ force: true });
+    return preActionText;
+  }
+
+  /** Return the current page URL (for diagnostics / error messages). */
+  getCurrentUrl(): string {
+    return this.page.url();
+  }
+
+  /**
+   * Extract the chat ID from the current page URL.
+   * Expected URL pattern: https://chatgpt.com/c/{chatId}
+   */
+  extractChatId(): string | undefined {
+    const match = /\/c\/([^/?#]+)/.exec(this.page.url());
+    return match?.[1];
+  }
+
+  /**
    * Extract the Deep Research response text from the nested iframe.
    *
    * DR responses are rendered inside a sandboxed iframe
@@ -199,17 +280,24 @@ export class ChatGPTDriver {
   async waitForDeepResearchResponse(options: {
     timeout?: number;
     quiet?: boolean;
+    /** Skip Phase 1 (plan/start) — use for refresh/follow-up runs that bypass the plan phase. */
+    skipStartPhase?: boolean;
+    /** Report text captured BEFORE the action (send/refresh) to detect stale content. */
+    preActionText?: string;
   }): Promise<WaitForResponseResult> {
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const quiet = options.quiet ?? false;
+    const preActionText = options.preActionText ?? '';
 
     progress('Waiting for Deep Research response...', quiet);
 
     const deadline = Date.now() + timeout;
 
     // Phase 1: Wait for plan iframe and click "開始する"
-    // Throws if start is not detected within timeout.
-    await this.clickDeepResearchStart(deadline, quiet);
+    // Skipped for refresh/follow-up runs that go straight to research.
+    if (!options.skipStartPhase) {
+      await this.clickDeepResearchStart(deadline, quiet);
+    }
 
     // Phase 2: Wait for research to start (stop button appears in iframe).
     // Cap at 60s so fast/auto-finish runs and selector misses fall through
@@ -251,7 +339,7 @@ export class ChatGPTDriver {
     }
 
     // Phase 4: Wait for the final report to render
-    return this.waitForDeepResearchReport(deadline, timeout, quiet, researchStarted);
+    return this.waitForDeepResearchReport(deadline, timeout, quiet, researchStarted, preActionText);
   }
 
   /**
@@ -262,28 +350,45 @@ export class ChatGPTDriver {
    *   research finished. When false (button appeared and disappeared between
    *   polls), we require text to change from the initial snapshot to distinguish
    *   the final report from leftover plan text.
+   * @param preActionText - Snapshot of report text taken before the action
+   *   (follow-up send / refresh click). Used to detect stale content from a
+   *   prior turn that should not be treated as a new report.
    */
   private async waitForDeepResearchReport(
     deadline: number,
     timeout: number,
     quiet: boolean,
     seenStopButton: boolean,
+    preActionText = '',
   ): Promise<WaitForResponseResult> {
     const initialText = await this.getDeepResearchResponse();
 
     // If the stop button was observed and is now gone, non-empty text is the report.
+    // No preActionText check here: stop-button disappearance is a reliable completion
+    // signal, even if the regenerated text is identical (e.g. refresh same prompt).
     if (seenStopButton && initialText.length > 0 && !await this.hasDeepResearchStopButton()) {
       progress('Response complete', quiet);
       return { text: initialText, completed: true };
     }
 
-    // When the stop button was never observed, we require evidence that the
-    // text is the final report rather than leftover plan text.  Two signals:
-    //   (a) text changed from the initial snapshot, OR
-    //   (b) text has been stable (non-empty, no stop button) for several polls,
-    //       meaning the report was already rendered before Phase 4 began.
+    return this.pollForDeepResearchReport(deadline, timeout, quiet, seenStopButton, initialText, preActionText);
+  }
+
+  /** Poll until the DR report stabilizes or changes from the initial snapshot. */
+  private async pollForDeepResearchReport(
+    deadline: number,
+    timeout: number,
+    quiet: boolean,
+    seenStopButton: boolean,
+    initialText: string,
+    preActionText: string,
+  ): Promise<WaitForResponseResult> {
     const STABLE_THRESHOLD = 3;
     let stableCount = 0;
+    // Track whether a transition was observed (text went empty, changed, or
+    // stop button appeared). Once true, identical text is no longer stale —
+    // it's a regenerated report that happens to match the prior turn.
+    let sawTransition = false;
 
     const reportDeadline = Math.min(deadline, Date.now() + 120_000);
     while (Date.now() < reportDeadline) {
@@ -291,19 +396,27 @@ export class ChatGPTDriver {
       const hasStop = await this.hasDeepResearchStopButton();
       const text = await this.getDeepResearchResponse();
 
-      if (text.length > 0 && !hasStop) {
-        if (seenStopButton || text !== initialText) {
-          progress('Response complete', quiet);
-          return { text, completed: true };
-        }
-        // Text unchanged from initial — count consecutive stable polls
-        stableCount++;
-        if (stableCount >= STABLE_THRESHOLD) {
-          progress('Response complete (stable)', quiet);
-          return { text, completed: true };
-        }
-      } else {
+      if (text.length === 0 || hasStop) {
+        sawTransition = true;
         stableCount = 0;
+        continue;
+      }
+      if (text !== preActionText) {
+        sawTransition = true;
+      }
+      // Before any transition, identical text is likely stale prior-turn content.
+      if (!seenStopButton && !sawTransition && text === preActionText) {
+        stableCount = 0;
+        continue;
+      }
+      if (seenStopButton || text !== initialText) {
+        progress('Response complete', quiet);
+        return { text, completed: true };
+      }
+      stableCount++;
+      if (stableCount >= STABLE_THRESHOLD) {
+        progress('Response complete (stable)', quiet);
+        return { text, completed: true };
       }
     }
 
@@ -378,16 +491,41 @@ export class ChatGPTDriver {
    * Get the inner content frame of the DR iframe.
    * The DR response is rendered inside a double-nested iframe:
    * page → iframe[title="internal://deep-research"] → iframe#root (about:blank)
+   *
+   * Uses the LAST matching frame so that follow-up responses (which add
+   * a new iframe per turn) pick up the latest report, not the old one.
    */
   private getDeepResearchContentFrame(): Frame | undefined {
-    const drFrame = this.page.frames().find(
+    const drFrames = this.page.frames().filter(
       (f) => f.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL),
     );
-    if (!drFrame) {
+    if (drFrames.length === 0) {
       return undefined;
     }
-    const nested = drFrame.childFrames();
+    const nested = drFrames[drFrames.length - 1].childFrames();
     return nested[0];
+  }
+
+  /**
+   * Poll for the Deep Research iframe to appear after navigation.
+   * Returns the content frame or throws with diagnostic details.
+   */
+  private async waitForDeepResearchFrame(chatId: string, deadline?: number): Promise<Frame> {
+    const pollInterval = POLL_INTERVAL_MS * 5;
+    const defaultDeadline = Date.now() + 15_000;
+    const effectiveDeadline = deadline !== undefined ? Math.min(deadline, defaultDeadline) : defaultDeadline;
+    let attempts = 0;
+    while (Date.now() < effectiveDeadline) {
+      const frame = this.getDeepResearchContentFrame();
+      if (frame) { return frame; }
+      attempts++;
+      await delay(pollInterval);
+    }
+    throw new Error(
+      `Deep Research iframe not found after ${String(attempts)} attempts `
+      + `(interval: ${String(pollInterval)}ms, chatId: ${chatId}, `
+      + `selector: ${SELECTORS.DEEP_RESEARCH_FRAME_URL})`,
+    );
   }
 
   /**
