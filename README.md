@@ -253,6 +253,33 @@ cavendish/
     └── live-test.md
 ```
 
+## Security
+
+Cavendish is designed for **single-user, local-machine use**. The security model assumes you are the only user on the machine.
+
+### CDP Binding
+
+Chrome's remote debugging port (9222) is explicitly bound to **127.0.0.1 only** (`--remote-debugging-address=127.0.0.1`). This means:
+
+- Only processes on the local machine can connect to the CDP endpoint.
+- The port is **not** exposed to the network — remote hosts cannot reach it.
+
+### Chrome Profile Directory
+
+The Chrome profile (`~/.cavendish/chrome-profile`) contains your ChatGPT session cookies. It is created and maintained with **0o700 permissions** (owner-only read/write/execute), so other users on the same machine cannot read it.
+
+### Clipboard Permissions
+
+Cavendish grants `clipboard-read` and `clipboard-write` permissions to `chatgpt.com` via the Playwright browser context. This is required for the Deep Research "copy content" feature, which reads the report from the system clipboard after clicking the export button inside an iframe.
+
+### Multi-user Environments
+
+If you run Cavendish on a shared machine:
+
+- Verify that `~/.cavendish/` has `drwx------` permissions (`ls -ld ~/.cavendish`).
+- Ensure no other local user/process can access port 9222. Binding to `127.0.0.1` prevents remote access, but it does not isolate the CDP endpoint from other users on the same machine.
+- Do **not** share your `~/.cavendish/chrome-profile` directory — it contains active session data.
+
 ## License
 
 ISC
