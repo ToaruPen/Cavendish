@@ -54,7 +54,7 @@ export class ChatGPTDriver {
     const currentUrl = this.page.url();
     if (currentUrl.startsWith(CHATGPT_BASE_URL)) {
       // Use SPA navigation to preserve latest model picker state
-      await this.page.locator(SELECTORS.NEW_CHAT_LINK).last().click();
+      await this.page.locator(SELECTORS.NEW_CHAT_LINK).first().click();
     } else {
       await this.page.goto(CHATGPT_BASE_URL, {
         waitUntil: 'domcontentloaded',
