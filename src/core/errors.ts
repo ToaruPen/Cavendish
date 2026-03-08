@@ -9,6 +9,7 @@
 export type ErrorCategory =
   | 'cdp_unavailable'
   | 'chrome_not_found'
+  | 'chrome_launch_failed'
   | 'auth_expired'
   | 'cloudflare_blocked'
   | 'selector_miss'
@@ -24,6 +25,7 @@ export const EXIT_CODES: Readonly<Record<ErrorCategory, number>> = {
   cloudflare_blocked: 5,
   selector_miss: 6,
   timeout: 7,
+  chrome_launch_failed: 8,
 };
 
 /** Suggested user actions per error category. */
@@ -32,6 +34,8 @@ const DEFAULT_ACTIONS: Readonly<Record<ErrorCategory, string>> = {
     'Start Chrome with --remote-debugging-port=9222 or run "cavendish status" to check.',
   chrome_not_found:
     'Install Google Chrome and ensure it is in your PATH.',
+  chrome_launch_failed:
+    'Check Chrome permissions and ensure no other process is blocking the launch.',
   auth_expired:
     'Open Chrome and log in to ChatGPT, then retry.',
   cloudflare_blocked:
@@ -110,9 +114,17 @@ export function classifyError(error: unknown): CavendishError {
   // Chrome not installed
   if (
     lower.includes('chrome not found') ||
-    lower.includes('failed to launch chrome')
+    lower.includes('chrome binary not found')
   ) {
     return new CavendishError(message, 'chrome_not_found');
+  }
+
+  // Chrome launch failure (permission denied, other spawn errors)
+  if (
+    lower.includes('failed to launch chrome') ||
+    lower.includes('permission denied launching chrome')
+  ) {
+    return new CavendishError(message, 'chrome_launch_failed');
   }
 
   // Auth / login detection — use specific phrases to avoid false positives

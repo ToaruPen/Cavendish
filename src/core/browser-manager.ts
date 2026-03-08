@@ -104,13 +104,31 @@ export class BrowserManager {
       child.once('spawn', () => {
         resolve();
       });
-      child.once('error', (err: Error) => {
-        reject(
-          new CavendishError(
-            `Failed to launch Chrome at "${chromePath}": ${err.message}`,
-            'chrome_not_found',
-          ),
-        );
+      child.once('error', (err: NodeJS.ErrnoException) => {
+        const code = err.code;
+        if (code === 'ENOENT') {
+          reject(
+            new CavendishError(
+              `Chrome binary not found at "${chromePath}": ${err.message}`,
+              'chrome_not_found',
+            ),
+          );
+        } else if (code === 'EACCES') {
+          reject(
+            new CavendishError(
+              `Permission denied launching Chrome at "${chromePath}": ${err.message}`,
+              'chrome_launch_failed',
+              'Check file permissions on the Chrome binary and retry.',
+            ),
+          );
+        } else {
+          reject(
+            new CavendishError(
+              `Failed to launch Chrome at "${chromePath}" (${code ?? 'unknown'}): ${err.message}`,
+              'chrome_launch_failed',
+            ),
+          );
+        }
       });
     });
 

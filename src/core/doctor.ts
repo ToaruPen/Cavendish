@@ -48,7 +48,9 @@ export interface DoctorResult {
 
 async function checkCdp(): Promise<DoctorCheck> {
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/version`);
+    const res = await fetch(`${CDP_BASE_URL}/json/version`, {
+      signal: AbortSignal.timeout(DOCTOR_CHECK_TIMEOUT_MS),
+    });
     if (res.ok) {
       const data = (await res.json()) as { Browser?: string };
       const chrome = data.Browser ?? 'unknown';

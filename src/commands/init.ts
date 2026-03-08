@@ -33,7 +33,9 @@ interface InitResult {
  */
 async function isLoggedInViaCdp(): Promise<boolean> {
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/list`);
+    const res = await fetch(`${CDP_BASE_URL}/json/list`, {
+      signal: AbortSignal.timeout(5_000),
+    });
     if (!res.ok) {
       return false;
     }
