@@ -17,7 +17,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ToaruPen/Cavendish.git"
+    "url": "git+https://github.com/ToaruPen/Cavendish.git"
   },
   "bugs": {
     "url": "https://github.com/ToaruPen/Cavendish/issues"
