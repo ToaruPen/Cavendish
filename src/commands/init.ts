@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
-import { errors } from 'playwright';
+import { type Page, errors } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
@@ -13,6 +13,12 @@ const LOGIN_POLL_INTERVAL_MS = 3_000;
 
 /** Maximum time (ms) to wait for the user to log in before giving up. */
 const LOGIN_TIMEOUT_MS = 300_000; // 5 minutes
+
+/** Timeout (ms) for detecting the login button on the ChatGPT landing page. */
+const LOGIN_BUTTON_TIMEOUT_MS = 10_000;
+
+/** Timeout (ms) for detecting the "Continue with Google" button on the auth page. */
+const GOOGLE_BUTTON_TIMEOUT_MS = 10_000;
 
 interface InitResult {
   status: 'ready';
@@ -87,6 +93,77 @@ async function waitForLogin(
 }
 
 /**
+ * Check whether the user is already logged in by looking for the prompt textarea.
+ * Returns true if the prompt input is visible (user is logged in).
+ */
+async function isAlreadyLoggedIn(page: Page): Promise<boolean> {
+  try {
+    const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
+    await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
+    return true;
+  } catch (e: unknown) {
+    if (e instanceof errors.TimeoutError) {
+      return false;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Navigate to the Google login screen for new users.
+ *
+ * Flow:
+ * 1. Detect if the user is already logged in — if so, skip
+ * 2. Click the "Log in" button on ChatGPT's landing page
+ * 3. Click "Continue with Google" on the auth page
+ * 4. Present the Google login screen to the user (credentials are the user's responsibility)
+ *
+ * Gracefully falls back to manual login if any step fails (button not found, etc.)
+ */
+async function navigateToGoogleLogin(page: Page, quiet: boolean): Promise<void> {
+  // Step 1: Check if already logged in
+  if (await isAlreadyLoggedIn(page)) {
+    progress('Already logged in to ChatGPT', quiet);
+    return;
+  }
+
+  // Step 2: Click "Log in" button
+  progress('Detecting login button...', quiet);
+  const loginButton = page.locator(SELECTORS.LOGIN_BUTTON);
+  try {
+    await loginButton.waitFor({ state: 'visible', timeout: LOGIN_BUTTON_TIMEOUT_MS });
+  } catch (e: unknown) {
+    if (e instanceof errors.TimeoutError) {
+      progress('Login button not found — please log in manually in the browser', quiet);
+      return;
+    }
+    throw e;
+  }
+
+  progress('Clicking "Log in"...', quiet);
+  await loginButton.click();
+  await page.waitForLoadState('domcontentloaded');
+
+  // Step 3: Wait for auth page and click "Continue with Google"
+  progress('Waiting for auth page...', quiet);
+  const googleButton = page.locator(SELECTORS.CONTINUE_WITH_GOOGLE).first();
+  try {
+    await googleButton.waitFor({ state: 'visible', timeout: GOOGLE_BUTTON_TIMEOUT_MS });
+  } catch (e: unknown) {
+    if (e instanceof errors.TimeoutError) {
+      progress('"Continue with Google" button not found — please choose a login method manually', quiet);
+      return;
+    }
+    throw e;
+  }
+
+  progress('Clicking "Continue with Google"...', quiet);
+  await googleButton.click();
+
+  progress('Google login page presented — please enter your credentials in the browser', quiet);
+}
+
+/**
  * Close any Chrome process listening on the CDP port by sending the
  * `Browser.close` CDP command, which actually terminates the Chrome
  * process.  (`browser.close()` on a CDP connection only disconnects
@@ -139,15 +216,19 @@ function reportProfileStatus(quiet: boolean): void {
 }
 
 /**
- * Connect to Chrome, verify login, and return the init result.
+ * Connect to Chrome, optionally navigate to Google login, verify login, and return the init result.
  */
-async function setupAndVerify(quiet: boolean): Promise<InitResult> {
+async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitResult> {
   const browser = new BrowserManager();
 
   try {
     progress('Connecting to Chrome...', quiet);
-    await browser.getPage(quiet);
+    const page = await browser.getPage(quiet);
     progress('Chrome is ready', quiet);
+
+    if (!skipLogin) {
+      await navigateToGoogleLogin(page, quiet);
+    }
 
     const loggedIn = await waitForLogin(browser, quiet);
 
@@ -200,6 +281,10 @@ export const initCommand = defineCommand({
       type: 'boolean',
       description: 'Delete and recreate the Chrome profile directory',
     },
+    skipLogin: {
+      type: 'boolean',
+      description: 'Skip auto-navigation to Google login (manual login only)',
+    },
     ...GLOBAL_ARGS,
     ...FORMAT_ARG,
   },
@@ -210,9 +295,14 @@ export const initCommand = defineCommand({
       return;
     }
 
+    const skipLogin = args.skipLogin === true;
+
     if (args.dryRun === true) {
+      const steps = skipLogin
+        ? ['check_profile', 'connect_chrome', 'verify_login']
+        : ['check_profile', 'connect_chrome', 'navigate_google_login', 'verify_login'];
       if (format === 'json') {
-        jsonRaw({ dryRun: true, steps: ['check_profile', 'connect_chrome', 'verify_login'] });
+        jsonRaw({ dryRun: true, steps });
       } else {
         const action = args.reset === true ? 'reset and reinitialize' : 'initialize';
         progress(`[dry-run] Would ${action} Chrome profile at ${CHROME_PROFILE_DIR}`, quiet);
@@ -227,7 +317,7 @@ export const initCommand = defineCommand({
       }
 
       reportProfileStatus(quiet);
-      const result = await setupAndVerify(quiet);
+      const result = await setupAndVerify(quiet, skipLogin);
       outputResult(result, format);
 
       if (!result.loggedIn) {
