@@ -73,6 +73,7 @@ async function waitForLogin(
   quiet: boolean,
 ): Promise<boolean> {
   progress('Waiting for ChatGPT login (open the browser and log in)...', quiet);
+  cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
 
