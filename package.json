@@ -4,9 +4,25 @@
   "description": "A Playwright-based CLI tool that automates ChatGPT's Web UI, enabling coding agents to query ChatGPT Pro models via a single shell command",
   "main": "dist/index.mjs",
   "type": "module",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "bin": {
     "cavendish": "./dist/index.mjs"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ToaruPen/Cavendish.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ToaruPen/Cavendish/issues"
+  },
+  "homepage": "https://github.com/ToaruPen/Cavendish#readme",
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -23,7 +39,7 @@
     "automation",
     "ai"
   ],
-  "author": "",
+  "author": "ToaruPen",
   "license": "ISC",
   "dependencies": {
     "citty": "^0.2.1",
