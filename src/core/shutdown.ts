@@ -17,9 +17,11 @@ const SIGTERM_EXIT_CODE = 143;
  * Must be called exactly once (Node does NOT deduplicate listeners).
  *
  * The handlers log a shutdown message to stderr and exit with the
- * POSIX-conventional exit code. `BrowserManager.close()` runs via
- * the try/finally in `withDriver()` when the process receives a signal
- * during a command, so no explicit cleanup is needed here.
+ * POSIX-conventional exit code. `process.exit()` bypasses any pending
+ * async finally blocks (e.g. `withDriver()`'s `browser.close()`), but
+ * this is acceptable: `close()` only tears down the Playwright CDP
+ * websocket — Chrome persists as a detached process by design, and
+ * the OS reclaims the socket on process exit.
  */
 export function registerSignalHandlers(): void {
   process.on('SIGINT', handleSigint);
