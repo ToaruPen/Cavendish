@@ -142,6 +142,7 @@ async function navigateToGoogleLogin(page: Page, quiet: boolean): Promise<void> 
 
   progress('Clicking "Log in"...', quiet);
   await loginButton.click();
+  await page.waitForLoadState('domcontentloaded');
 
   // Step 3: Wait for auth page and click "Continue with Google"
   progress('Waiting for auth page...', quiet);
