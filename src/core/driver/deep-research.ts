@@ -380,11 +380,10 @@ async function pollForDeepResearchReport(
   let stableCount = 0;
   let sawTransition = false;
 
-  // Use the overall deadline from the user's --timeout.
+  // Use the overall deadline from the user's --timeout directly.
   // Previously a 120s hard cap was applied here, which could cut off
   // the report wait well before the user's timeout (e.g. --timeout 1800).
-  const reportDeadline = deadline;
-  while (Date.now() < reportDeadline) {
+  while (Date.now() < deadline) {
     await delay(POLL_INTERVAL_MS * 5);
     const hasStop = await hasDeepResearchStopButton(page);
     if (hasStop) {
