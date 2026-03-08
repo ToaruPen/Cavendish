@@ -79,10 +79,18 @@ export class BrowserManager {
   async launch(quiet = false): Promise<void> {
     progress('Launching Chrome with persistent profile...', quiet);
 
-    mkdirSync(CHROME_PROFILE_DIR, { recursive: true, mode: 0o700 });
-    // Ensure correct permissions on pre-existing directories
-    chmodSync(CAVENDISH_DIR, 0o700);
-    chmodSync(CHROME_PROFILE_DIR, 0o700);
+    try {
+      mkdirSync(CHROME_PROFILE_DIR, { recursive: true, mode: 0o700 });
+      // Ensure correct permissions on pre-existing directories
+      chmodSync(CAVENDISH_DIR, 0o700);
+      chmodSync(CHROME_PROFILE_DIR, 0o700);
+    } catch (err: unknown) {
+      throw new CavendishError(
+        `Failed to set up Chrome profile directory at "${CHROME_PROFILE_DIR}": ${err instanceof Error ? err.message : String(err)}`,
+        'chrome_launch_failed',
+        `Check file permissions on "${CAVENDISH_DIR}" and retry, or run "cavendish init" to reinitialize.`,
+      );
+    }
 
     const chromePath = this.findChromePath();
     const args = [
