@@ -86,11 +86,11 @@ cavendish init
 # プロファイルリセット＋再認証
 cavendish init --reset
 
-# 統合診断
+# 統合診断（status は doctor と同等の診断を実行）
 cavendish doctor
 cavendish doctor --json
 
-# ログイン状態の確認
+# 統合診断（doctor のエイリアス）
 cavendish status
 ```
 
@@ -222,13 +222,13 @@ cavendish projects --name "For-Agents" --chats
 
 責務：Chromeの起動・接続・プロファイル管理
 
-- `launch()`: 専用プロファイルでChromeをheadedモードで起動（detached spawn + CDP connect）
-- `connect()`: CDP経由で起動済みChromeに接続
-- `waitForCdp()`: CDP応答を最大3回リトライで待機（`launch()` 内部で使用）
-- `getPage()`: ChatGPTのタブを取得、なければ新規作成
+- `getPage()`: ChatGPTのタブを取得、なければ新規作成。内部で `ensureConnected()` を呼び出す
+- `launch()`: 専用プロファイルでChromeをheadedモードで起動（detached spawn）。起動後 `waitForCdp()` → `connect()` の順で接続
+- `connect()`: CDP経由で起動済みChromeに接続（リトライなし、単発接続）
+- `waitForCdp()`: CDPエンドポイントへのHTTP fetch を最大3回リトライで待機（`launch()` 内部で使用。Chrome起動直後のCDP準備待ち用）
 - `close()`: Playwright接続を終了（Chromeプロセスは常駐のまま）
 
-設計方針：CLIの呼び出しごとにChromeを起動・終了するとオーバーヘッドが大きいため、Chromeプロセスを常駐させ（detached spawn）、以降は `connect()` でCDP経由で接続する。
+設計方針：CLIの呼び出しごとにChromeを起動・終了するとオーバーヘッドが大きいため、Chromeプロセスを常駐させ（detached spawn）、以降は `connect()` でCDP経由で接続する。接続失敗時は `ensureConnected()` が自動的に `launch()` にフォールバックする。
 
 - Chromeプロファイル: `~/.cavendish/chrome-profile/`
 - CDPエンドポイント: `~/.cavendish/cdp-endpoint.json`
@@ -245,6 +245,7 @@ cavendish projects --name "For-Agents" --chats
 - `selectModel(model)`: モデルセレクターで指定モデルを選択
 - `setThinkingEffort(level, model)`: Thinking effort levelを設定
 - `sendMessage(text)`: メッセージ入力・送信
+- `waitForReady(timeout)`: プロンプト入力欄の表示を待機（ページ読み込み完了の判定に使用）
 - `waitForResponse(options)`: 応答完了をポーリングで待機
 - `getLastResponse()`: 最新のアシスタント応答を取得
 - `getAssistantMessageCount()`: アシスタントメッセージ数を取得
@@ -280,6 +281,7 @@ cavendish projects --name "For-Agents" --chats
 
 - `text(response)`: プレーンテキスト出力
 - `json(response, metadata)`: 構造化出力（model, chatId, url, project, timeoutSec, partial, timestamp）
+  - ※ `--continue` 使用時、model はJSON出力に含まれない（既存チャットのモデルを変更しないため意図的な仕様）
 - `emitChunk(content)`: NDJSONチャンクイベント
 - `emitState(state)`: NDJSONステートイベント
 - `emitFinal(content, metadata)`: NDJSON最終イベント
@@ -313,7 +315,7 @@ cavendish projects --name "For-Agents" --chats
 
 すべてのセレクタは `src/constants/selectors.ts` に集約管理されている。ChatGPTのUI更新で変更される可能性があるため、インラインでのセレクタ記述は禁止。
 
-現在60以上のセレクタ（+ 4つのメニューラベル定義）が14カテゴリに分類されている：
+現在60のセレクタ（+ 4つのメニューラベル定義）が14カテゴリに分類されている：
 
 - **Input**: プロンプト入力欄、送信ボタン
 - **Model Selection**: モデルセレクター、メニュー項目
@@ -385,7 +387,7 @@ cavendish projects --name "For-Agents" --chats
 
 - `init` コマンド（Chrome セットアップ/再認証）
 - `doctor` コマンド（統合診断 + `--json`）
-- `status` コマンドの doctor 化
+- `status` コマンドの doctor 化（status は doctor と完全に同じ診断ロジックに委譲）
 - ストリーミング出力（`--stream` / NDJSON）
 - 構造化エラー出力（エラーカテゴリ・終了コード）
 - `ask` の JSON 出力に chatId、url、project メタデータ追加
@@ -429,7 +431,7 @@ cavendish/
 │   │   ├── errors.ts           # 構造化エラー型
 │   │   └── with-driver.ts      # ドライバーライフサイクル
 │   └── constants/
-│       └── selectors.ts        # セレクタ定義（60+）
+│       └── selectors.ts        # セレクタ定義（60 + 4メニューラベル）
 ├── tests/
 │   ├── errors.test.ts
 │   ├── output-handler.test.ts
@@ -437,7 +439,8 @@ cavendish/
 │   ├── ask-stdin.test.ts
 │   └── ask-chat-options.test.ts
 └── docs/
-    └── plan.md
+    ├── plan.md
+    └── live-test.md
 ```
 
 ---
@@ -453,7 +456,7 @@ cavendish/
 
 ## 付録: 検証で確認済みの技術的事実
 
-以下は2026年2月28日時点でのChatGPT Web UIに対する実機検証の結果に基づく。セレクタは `src/constants/selectors.ts` に60以上のエントリとして管理されており、継続的に検証・更新されている。
+以下は2026年2月28日時点でのChatGPT Web UIに対する実機検証の結果に基づく。セレクタは `src/constants/selectors.ts` に60エントリ（+ 4メニューラベル定義）として管理されており、継続的に検証・更新されている。
 
 ### DOM構造
 
