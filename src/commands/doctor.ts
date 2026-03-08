@@ -7,7 +7,7 @@ import { jsonRaw, progress, text } from '../core/output-handler.js';
 /**
  * `cavendish doctor` — run all diagnostic checks and report results.
  *
- * Checks CDP connectivity, Chrome profile, config file, Cloudflare status,
+ * Checks CDP connectivity, Chrome profile, CDP endpoint file, Cloudflare status,
  * authentication, prompt textarea, model picker, Google Drive, and GitHub
  * integration. Each check returns pass/fail/skip with actionable suggestions.
  *
