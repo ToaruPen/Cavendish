@@ -94,7 +94,8 @@ export class BrowserManager {
     // Reuse existing chatgpt.com tab
     for (const page of context.pages()) {
       if (page.url().startsWith(CHATGPT_BASE_URL)) {
-        verbose(`Reusing existing ChatGPT tab: ${page.url()}`, isVerbose);
+        const tabUrl = new URL(page.url());
+        verbose(`Reusing existing ChatGPT tab: ${tabUrl.origin}${tabUrl.pathname}`, isVerbose);
         return page;
       }
     }
