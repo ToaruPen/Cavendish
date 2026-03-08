@@ -101,8 +101,11 @@ async function isAlreadyLoggedIn(page: Page): Promise<boolean> {
     const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
     await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
     return true;
-  } catch {
-    return false;
+  } catch (e: unknown) {
+    if (e instanceof errors.TimeoutError) {
+      return false;
+    }
+    throw e;
   }
 }
 
