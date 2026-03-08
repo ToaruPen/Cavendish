@@ -9,10 +9,10 @@ describe('computeIframeWaitDeadline', () => {
   const now = 1_000_000;
   const defaultMs = 15_000;
 
-  it('uses caller deadline when provided', () => {
+  it('caps at defaultMs when caller deadline is far away', () => {
     const callerDeadline = now + 1_800_000; // --timeout 1800s
     const result = computeIframeWaitDeadline(now, callerDeadline, defaultMs);
-    expect(result).toBe(callerDeadline);
+    expect(result).toBe(now + defaultMs);
   });
 
   it('falls back to default when no caller deadline', () => {
@@ -26,10 +26,10 @@ describe('computeIframeWaitDeadline', () => {
     expect(result).toBe(shortDeadline);
   });
 
-  it('respects caller deadline when much longer than default', () => {
+  it('caps at defaultMs when caller deadline is much longer', () => {
     const longDeadline = now + 3_600_000; // 1 hour
     const result = computeIframeWaitDeadline(now, longDeadline, defaultMs);
-    expect(result).toBe(longDeadline);
+    expect(result).toBe(now + defaultMs);
   });
 });
 

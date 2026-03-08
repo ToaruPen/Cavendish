@@ -33,16 +33,21 @@ export function isFrameDetachedError(error: unknown): boolean {
 /**
  * Compute effective deadline for iframe wait.
  *
- * When a caller-provided deadline exists (derived from --timeout), use it
- * so the user's timeout is respected.  Fall back to a short default
- * when no deadline is given (standalone / ad-hoc calls).
+ * When a caller-provided deadline exists (derived from --timeout), cap the
+ * wait at the shorter of `defaultMs` and the remaining caller time.  This
+ * prevents a broken iframe from hanging for the full user timeout (e.g. 30m)
+ * while still respecting a very short caller deadline.
+ * Fall back to `defaultMs` when no caller deadline is given.
  */
 export function computeIframeWaitDeadline(
   now: number,
   callerDeadline: number | undefined,
   defaultMs: number,
 ): number {
-  return callerDeadline ?? (now + defaultMs);
+  const defaultDeadline = now + defaultMs;
+  return callerDeadline !== undefined
+    ? Math.min(callerDeadline, defaultDeadline)
+    : defaultDeadline;
 }
 
 /**
