@@ -317,8 +317,7 @@ export const deepResearchCommand = defineCommand({
       return;
     }
 
-    // Deep Research needs clipboard permissions to copy the report via
-    // "コンテンツをコピーする" → navigator.clipboard.readText().
+    /** Permissions required for the copy-content clipboard operation. */
     const permissions = ['clipboard-read', 'clipboard-write'];
 
     await withDriver(quiet, async (driver) => {

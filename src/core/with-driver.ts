@@ -2,7 +2,7 @@ import { BrowserManager } from './browser-manager.js';
 import { ChatGPTDriver } from './chatgpt-driver.js';
 import { failStructured } from './output-handler.js';
 
-interface WithDriverOptions {
+export interface WithDriverOptions {
   /** Browser permissions to grant for the ChatGPT origin (default: none). */
   permissions?: string[];
 }
