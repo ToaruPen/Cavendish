@@ -1,3 +1,5 @@
+import { writeSync } from 'node:fs';
+
 /**
  * Graceful shutdown handling for SIGINT and SIGTERM.
  *
@@ -29,11 +31,13 @@ export function registerSignalHandlers(): void {
 }
 
 function handleSigint(): void {
-  process.stderr.write('\n[cavendish] Shutting down (SIGINT)...\n');
+  // Use writeSync so the message is guaranteed to flush even when stderr
+  // is piped (process.stderr.write is async on POSIX pipes).
+  writeSync(2, '\n[cavendish] Shutting down (SIGINT)...\n');
   process.exit(SIGINT_EXIT_CODE);
 }
 
 function handleSigterm(): void {
-  process.stderr.write('[cavendish] Shutting down (SIGTERM)...\n');
+  writeSync(2, '[cavendish] Shutting down (SIGTERM)...\n');
   process.exit(SIGTERM_EXIT_CODE);
 }

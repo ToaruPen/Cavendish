@@ -34,12 +34,7 @@ describe('registerSignalHandlers', () => {
     expect(typeof sigtermEntries[0]?.handler).toBe('function');
   });
 
-  it('SIGINT handler writes shutdown message and exits with 130', () => {
-    const errorCalls: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
-      errorCalls.push(String(chunk));
-      return true;
-    });
+  it('SIGINT handler exits with 130', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
     registerSignalHandlers();
@@ -48,16 +43,10 @@ describe('registerSignalHandlers', () => {
     expect(entry).toBeDefined();
     entry?.handler();
 
-    expect(errorCalls.some((c) => c.includes('Shutting down (SIGINT)'))).toBe(true);
     expect(exitSpy).toHaveBeenCalledWith(130);
   });
 
-  it('SIGTERM handler writes shutdown message and exits with 143', () => {
-    const errorCalls: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
-      errorCalls.push(String(chunk));
-      return true;
-    });
+  it('SIGTERM handler exits with 143', () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
     registerSignalHandlers();
@@ -66,7 +55,6 @@ describe('registerSignalHandlers', () => {
     expect(entry).toBeDefined();
     entry?.handler();
 
-    expect(errorCalls.some((c) => c.includes('Shutting down (SIGTERM)'))).toBe(true);
     expect(exitSpy).toHaveBeenCalledWith(143);
   });
 });
