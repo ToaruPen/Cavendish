@@ -14,7 +14,7 @@ Playwright-based CLI tool that automates ChatGPT's Web UI, enabling coding agent
 
 - **Node.js** >= 20
 - **Google Chrome** (stable channel)
-- **OS**: macOS or Linux
+- **OS**: macOS, Linux, or Windows
 
 ## Installation
 
