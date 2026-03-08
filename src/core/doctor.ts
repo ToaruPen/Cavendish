@@ -7,16 +7,13 @@
  */
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 
 import type { Page } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 
-import { BrowserManager, CAVENDISH_DIR, CDP_BASE_URL, CHROME_PROFILE_DIR } from './browser-manager.js';
+import { BrowserManager, CDP_BASE_URL, CDP_ENDPOINT_FILE, CHROME_PROFILE_DIR } from './browser-manager.js';
 import { errorMessage, progress } from './output-handler.js';
-
-const CONFIG_FILE = join(CAVENDISH_DIR, 'config.json');
 
 /** Timeout for individual doctor checks (ms). */
 const DOCTOR_CHECK_TIMEOUT_MS = 5_000;
@@ -83,11 +80,11 @@ function checkProfile(): DoctorCheck {
 }
 
 function checkConfig(): DoctorCheck {
-  const exists = existsSync(CONFIG_FILE);
+  const exists = existsSync(CDP_ENDPOINT_FILE);
   return {
-    name: 'config_file',
+    name: 'cdp_endpoint',
     status: exists ? 'pass' : 'skip',
-    detail: exists ? CONFIG_FILE : 'not found (optional)',
+    detail: exists ? CDP_ENDPOINT_FILE : 'not found (optional — created after first Chrome launch)',
   };
 }
 

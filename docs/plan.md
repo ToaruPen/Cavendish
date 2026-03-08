@@ -222,10 +222,11 @@ cavendish projects --name "For-Agents" --chats
 
 責務：Chromeの起動・接続・プロファイル管理
 
-- `spawn()`: 専用プロファイルでChromeをheadedモードで起動（detached spawn + CDP connect）
-- `connect()`: CDP経由で起動済みChromeに接続（最大3回リトライ）
+- `launch()`: 専用プロファイルでChromeをheadedモードで起動（detached spawn + CDP connect）
+- `connect()`: CDP経由で起動済みChromeに接続
+- `waitForCdp()`: CDP応答を最大3回リトライで待機（`launch()` 内部で使用）
 - `getPage()`: ChatGPTのタブを取得、なければ新規作成
-- `close()`: ブラウザを終了
+- `close()`: Playwright接続を終了（Chromeプロセスは常駐のまま）
 
 設計方針：CLIの呼び出しごとにChromeを起動・終了するとオーバーヘッドが大きいため、Chromeプロセスを常駐させ（detached spawn）、以降は `connect()` でCDP経由で接続する。
 
@@ -236,23 +237,40 @@ cavendish projects --name "For-Agents" --chats
 
 責務：ChatGPTのDOM操作全般
 
+- `navigateToChat(chatId)`: 指定チャットに遷移
 - `navigateToNewChat()`: 新規チャット画面に遷移
 - `navigateToProject(name)`: プロジェクトページに遷移
+- `getCurrentUrl()`: 現在のページURLを取得
+- `extractChatId()`: URLからチャットIDを抽出
 - `selectModel(model)`: モデルセレクターで指定モデルを選択
-- `attachFiles(paths)`: DataTransfer APIでファイルを添付
+- `setThinkingEffort(level, model)`: Thinking effort levelを設定
 - `sendMessage(text)`: メッセージ入力・送信
-- `waitForResponse(timeout)`: 応答完了をポーリングで待機
+- `waitForResponse(options)`: 応答完了をポーリングで待機
 - `getLastResponse()`: 最新のアシスタント応答を取得
-- `getConversationList()`: サイドバーからチャット一覧を取得
-- `deleteConversation(id)`: チャットを削除
+- `getAssistantMessageCount()`: アシスタントメッセージ数を取得
+- `attachFiles(paths)`: DataTransfer APIでファイルを添付
 - `attachGoogleDriveFile(name)`: Google DriveファイルをPicker経由で添付
 - `attachGitHubRepo(repo)`: GitHubリポジトリを連携
 - `enableAgentMode()`: エージェントモードを有効化
-- `setThinkingEffort(level)`: Thinking effort levelを設定
+- `openComposerMenuItem(labelPath)`: コンポーザーメニューのサブメニューを辿って開く
+- `getConversationList()`: サイドバーからチャット一覧を取得
 - `getMostRecentChatId()`: 最新のチャットIDを取得
-- `clickDeepResearchStart()`: Deep Research開始ボタンをクリック
-- `waitForDeepResearchReport()`: Deep Researchレポート完了を待機
-- `exportDeepResearch(method)`: Deep Researchレポートをエクスポート
+- `deleteConversation(id)`: チャットを削除
+- `archiveConversation(id)`: チャットをアーカイブ
+- `readConversation(chatId)`: チャットの全メッセージを読み取り
+- `getProjectList()`: プロジェクト一覧を取得
+- `getProjectConversationList()`: プロジェクト内チャット一覧を取得
+- `deleteProjectConversation(id)`: プロジェクトチャットを削除
+- `createProject(name)`: プロジェクトを作成
+- `moveToProject(chatId, projectName)`: チャットをプロジェクトに移動
+- `navigateToDeepResearch()`: Deep Researchページに遷移
+- `sendDeepResearchMessage(text)`: Deep Researchクエリを送信
+- `sendDeepResearchFollowUp(chatId, text)`: Deep Researchフォローアップを送信
+- `refreshDeepResearch(chatId)`: Deep Researchを再実行
+- `getDeepResearchResponse()`: Deep Researchレスポンスを取得
+- `waitForDeepResearchResponse(options)`: Deep Researchレポート完了を待機
+- `copyDeepResearchContent()`: Deep Researchレポートをクリップボード経由でコピー
+- `exportDeepResearch(format, savePath)`: Deep Researchレポートをファイルにエクスポート
 
 すべての操作はセレクタベースで行い、スクリーンショットは使用しない。
 
@@ -276,7 +294,7 @@ cavendish projects --name "For-Agents" --chats
 
 責務：構造化エラーハンドリング
 
-- エラーカテゴリ: `cdp_unavailable`(2), `chrome_not_found`(3), `auth_expired`(4), `cloudflare_blocked`(5), `selector_miss`(6), `timeout`(7), `unknown`(1)
+- エラーカテゴリ: `cdp_unavailable`(2), `chrome_not_found`(3), `chrome_launch_failed`(8), `auth_expired`(4), `cloudflare_blocked`(5), `selector_miss`(6), `timeout`(7), `unknown`(1)
 - `CavendishError`: カテゴリ・終了コード・推奨アクション付きエラー
 - `classifyError()`: 汎用Errorをカテゴリに自動分類
 - `--format json`時: stderrに構造化JSONエラーを出力
@@ -285,7 +303,7 @@ cavendish projects --name "For-Agents" --chats
 
 責務：統合診断
 
-- 9つの診断項目: `chrome_cdp`, `profile_dir`, `config_file`, `browser_connect`, `cloudflare`, `auth_status`, `prompt_textarea`, `model_picker`, `gdrive_picker`
+- 9つの診断項目: `chrome_cdp`, `profile_dir`, `cdp_endpoint`, `cloudflare`, `auth_status`, `prompt_textarea`, `model_picker`, `gdrive_picker`, `github_picker`（接続失敗時は追加で `browser_connect` が報告される）
 - pass/fail/skip ステータス
 - `--json`で機械可読な診断結果出力
 
@@ -295,7 +313,7 @@ cavendish projects --name "For-Agents" --chats
 
 すべてのセレクタは `src/constants/selectors.ts` に集約管理されている。ChatGPTのUI更新で変更される可能性があるため、インラインでのセレクタ記述は禁止。
 
-現在70以上のセレクタが14カテゴリに分類されている：
+現在60以上のセレクタ（+ 4つのメニューラベル定義）が14カテゴリに分類されている：
 
 - **Input**: プロンプト入力欄、送信ボタン
 - **Model Selection**: モデルセレクター、メニュー項目
@@ -322,6 +340,7 @@ cavendish projects --name "For-Agents" --chats
 |---|---|---|
 | `cdp_unavailable` | 2 | `cavendish init` を案内 |
 | `chrome_not_found` | 3 | Chrome のインストールを案内 |
+| `chrome_launch_failed` | 8 | Chrome権限確認・`cavendish init` を案内 |
 | `auth_expired` | 4 | ChatGPTへの再ログインを案内 |
 | `cloudflare_blocked` | 5 | 手動でCloudflareチャレンジ解決を案内 |
 | `selector_miss` | 6 | UI変更の可能性。`cavendish doctor` を案内 |
@@ -396,14 +415,21 @@ cavendish/
 │   │   └── projects.ts       # projects コマンド
 │   ├── core/
 │   │   ├── browser-manager.ts  # Chrome起動/CDP接続管理
-│   │   ├── chatgpt-driver.ts   # DOM操作
+│   │   ├── chatgpt-driver.ts   # DOM操作ファサード
+│   │   ├── driver/             # ChatGPTDriverのサブモジュール
+│   │   │   ├── attachments.ts  # Google Drive/GitHub/Agent Mode/ファイル添付
+│   │   │   ├── deep-research.ts # Deep Research操作
+│   │   │   ├── helpers.ts      # 共通ヘルパー (delay, isTimeoutError)
+│   │   │   └── response-handler.ts # 応答検知・ストリーミング
+│   │   ├── chatgpt-types.ts    # ChatGPTDriver用の型定義
+│   │   ├── model-config.ts     # モデル分類・Thinking effort設定
 │   │   ├── output-handler.ts   # 出力フォーマット
 │   │   ├── cli-args.ts         # 共有CLI引数定義
 │   │   ├── doctor.ts           # 診断ロジック
 │   │   ├── errors.ts           # 構造化エラー型
 │   │   └── with-driver.ts      # ドライバーライフサイクル
 │   └── constants/
-│       └── selectors.ts        # セレクタ定義（70+）
+│       └── selectors.ts        # セレクタ定義（60+）
 ├── tests/
 │   ├── errors.test.ts
 │   ├── output-handler.test.ts
@@ -427,7 +453,7 @@ cavendish/
 
 ## 付録: 検証で確認済みの技術的事実
 
-以下は2026年2月28日時点でのChatGPT Web UIに対する実機検証の結果に基づく。セレクタは `src/constants/selectors.ts` に70以上のエントリとして管理されており、継続的に検証・更新されている。
+以下は2026年2月28日時点でのChatGPT Web UIに対する実機検証の結果に基づく。セレクタは `src/constants/selectors.ts` に60以上のエントリとして管理されており、継続的に検証・更新されている。
 
 ### DOM構造
 

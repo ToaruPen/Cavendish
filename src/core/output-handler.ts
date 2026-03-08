@@ -5,7 +5,7 @@
  * - stderr: progress / log messages / structured errors (JSON mode)
  */
 
-import { type CavendishError, EXIT_CODES, classifyError } from './errors.js';
+import { CavendishError, EXIT_CODES, classifyError } from './errors.js';
 
 export interface ResponsePayload {
   content: string;
@@ -198,6 +198,25 @@ export function failStructured(error: unknown, format?: 'json' | 'text'): undefi
   }
 
   process.exitCode = exitCode;
+  return undefined;
+}
+
+/**
+ * Report a validation error using the appropriate output mode.
+ *
+ * When `format` is `'json'`, emits a structured JSON error to stderr.
+ * When `format` is `'text'` (or undefined), falls back to plain-text `fail()`.
+ *
+ * Returns undefined for convenient early-return chaining.
+ */
+export function failValidation(message: string, format?: 'json' | 'text'): undefined {
+  if (format === 'json') {
+    const err = new CavendishError(message, 'unknown');
+    process.stderr.write(`${JSON.stringify(err.toPayload())}\n`);
+    process.exitCode = EXIT_CODES.unknown;
+  } else {
+    fail(message);
+  }
   return undefined;
 }
 

@@ -1,5 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,7 +12,7 @@ import { progress } from './output-handler.js';
 
 export const CAVENDISH_DIR = join(homedir(), '.cavendish');
 export const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
-const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
+export const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
 export const CDP_PORT = 9222;
 export const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
 
@@ -79,7 +79,10 @@ export class BrowserManager {
   async launch(quiet = false): Promise<void> {
     progress('Launching Chrome with persistent profile...', quiet);
 
-    mkdirSync(CHROME_PROFILE_DIR, { recursive: true });
+    mkdirSync(CHROME_PROFILE_DIR, { recursive: true, mode: 0o700 });
+    // Ensure correct permissions on pre-existing directories
+    chmodSync(CAVENDISH_DIR, 0o700);
+    chmodSync(CHROME_PROFILE_DIR, 0o700);
 
     const chromePath = this.findChromePath();
     const args = [

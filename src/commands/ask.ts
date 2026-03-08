@@ -7,7 +7,7 @@ import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
-import { emitChunk, emitFinal, errorMessage, fail, failStructured, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat } from '../core/output-handler.js';
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -102,12 +102,12 @@ function validateThinkingEffort(
 }
 
 /** Validate file-related args (--file). Returns file paths or undefined on error. */
-export function validateFileArgs(): string[] | undefined {
+export function validateFileArgs(format?: 'json' | 'text'): string[] | undefined {
   let filePaths: string[];
   try {
     filePaths = extractFileArgs(process.argv);
   } catch (error: unknown) {
-    fail(errorMessage(error));
+    failValidation(errorMessage(error), format);
     return undefined;
   }
 
@@ -115,11 +115,11 @@ export function validateFileArgs(): string[] | undefined {
   try {
     missingFile = findMissingFile(filePaths);
   } catch (error: unknown) {
-    fail(errorMessage(error));
+    failValidation(errorMessage(error), format);
     return undefined;
   }
   if (missingFile !== undefined) {
-    fail(`file not found or not a regular file: ${missingFile}`);
+    failValidation(`file not found or not a regular file: ${missingFile}`, format);
     return undefined;
   }
 
@@ -135,6 +135,7 @@ export function validateFileArgs(): string[] | undefined {
  */
 function validateChatOptions(
   args: Record<string, unknown>,
+  format: 'json' | 'text',
 ): { continueChat: boolean; chatId: string | undefined; project: string | undefined } | undefined {
   const chatId = args.chat as string | undefined;
   const project = args.project as string | undefined;
@@ -142,23 +143,23 @@ function validateChatOptions(
   const continueChat = args.continue === true || chatId !== undefined;
 
   if (chatId !== undefined && chatId === '') {
-    fail('--chat cannot be empty. Use: --chat <id>');
+    failValidation('--chat cannot be empty. Use: --chat <id>', format);
     return undefined;
   }
   if (chatId !== undefined) {
     try {
       assertValidChatId(chatId);
     } catch (error: unknown) {
-      fail(errorMessage(error));
+      failValidation(errorMessage(error), format);
       return undefined;
     }
   }
   if (project !== undefined && project === '') {
-    fail('--project cannot be empty. Use: --project <name>');
+    failValidation('--project cannot be empty. Use: --project <name>', format);
     return undefined;
   }
   if (continueChat && project !== undefined) {
-    fail('--continue/--chat and --project cannot be used together.');
+    failValidation('--continue/--chat and --project cannot be used together.', format);
     return undefined;
   }
   return { continueChat, chatId, project };
@@ -171,30 +172,32 @@ function validateChatOptions(
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
   const model = args.model as string;
-  const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
 
-  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-    fail(`--timeout must be a positive number, got "${String(args.timeout)}"`); return;
-  }
-
+  // Resolve format first so all subsequent validation errors respect --format json
   const format = validateFormat(args.format as string);
   if (format === undefined) {return undefined;}
 
-  const filePaths = validateFileArgs();
+  const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
+
+  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
+    failValidation(`--timeout must be a positive number, got "${String(args.timeout)}"`, format); return;
+  }
+
+  const filePaths = validateFileArgs(format);
   if (filePaths === undefined) {return undefined;}
 
-  const gdriveFiles = extractArgsOrFail('gdrive');
+  const gdriveFiles = extractArgsOrFail('gdrive', format);
   if (gdriveFiles === undefined) {return undefined;}
 
-  const githubRepos = extractArgsOrFail('github');
+  const githubRepos = extractArgsOrFail('github', format);
   if (githubRepos === undefined) {return undefined;}
 
-  const chatOptions = validateChatOptions(args);
+  const chatOptions = validateChatOptions(args, format);
   if (chatOptions === undefined) {return undefined;}
 
   // Skip GitHub model check when continuing — the chat already has its model.
   if (githubRepos.length > 0 && !chatOptions.continueChat && !supportsGitHub(model)) {
-    fail(`--github requires a model with GitHub support (e.g. Thinking). Model "${model}" does not support GitHub in standard chat.`);
+    failValidation(`--github requires a model with GitHub support (e.g. Thinking). Model "${model}" does not support GitHub in standard chat.`, format);
     return undefined;
   }
 
@@ -202,16 +205,16 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
   if (thinkingEffort !== undefined && chatOptions.continueChat) {
-    fail('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.'); return;
+    failValidation('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.', format); return;
   }
   const effortError = validateThinkingEffort(thinkingEffort, model);
-  if (effortError !== undefined) {fail(effortError); return;}
+  if (effortError !== undefined) {failValidation(effortError, format); return;}
 
   let stdinData: string;
   try {
     stdinData = readStdin();
   } catch (error: unknown) {
-    fail(errorMessage(error)); return;
+    failValidation(errorMessage(error), format); return;
   }
   const prompt = buildPrompt(args.prompt as string, stdinData);
   const stream = args.stream === true;

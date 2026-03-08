@@ -5,7 +5,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG } from '../core/cli-args.js';
-import { emitFinal, emitState, errorMessage, fail, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 import { buildPrompt, readStdin, validateFileArgs } from './ask.js';
@@ -40,10 +40,10 @@ interface ValidatedArgs {
   exportPath: string | undefined;
 }
 
-function validateTimeout(raw: unknown): number | undefined {
+function validateTimeout(raw: unknown, format: 'json' | 'text'): number | undefined {
   const sec = raw !== undefined ? Number(raw) : DEFAULT_TIMEOUT_SEC;
   if (!Number.isFinite(sec) || sec <= 0) {
-    fail(`--timeout must be a positive number, got "${String(raw)}"`);
+    failValidation(`--timeout must be a positive number, got "${String(raw)}"`, format);
     return undefined;
   }
   return sec;
@@ -52,33 +52,34 @@ function validateTimeout(raw: unknown): number | undefined {
 function validateExport(
   rawExport: unknown,
   rawExportPath: unknown,
+  format: 'json' | 'text',
 ): { exportFormat: DeepResearchExportFormat | undefined; exportPath: string | undefined } | undefined {
   const exportFormat = rawExport as DeepResearchExportFormat | undefined;
   if (exportFormat !== undefined && !VALID_EXPORT_FORMATS.includes(exportFormat)) {
-    fail(`--export must be one of: ${VALID_EXPORT_FORMATS.join(', ')}. Got "${exportFormat}"`);
+    failValidation(`--export must be one of: ${VALID_EXPORT_FORMATS.join(', ')}. Got "${exportFormat}"`, format);
     return undefined;
   }
   if (exportFormat === undefined && rawExportPath !== undefined) {
-    fail('--exportPath requires --export (e.g. --export markdown --exportPath report.md)');
+    failValidation('--exportPath requires --export (e.g. --export markdown --exportPath report.md)', format);
     return undefined;
   }
   return { exportFormat, exportPath: rawExportPath as string | undefined };
 }
 
-function validateFlagConflicts(args: Record<string, unknown>): boolean {
+function validateFlagConflicts(args: Record<string, unknown>, format: 'json' | 'text'): boolean {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
 
   if (isRefresh && !isFollowUp) {
-    fail('--refresh requires --chat (specify the DR session to refresh)');
+    failValidation('--refresh requires --chat (specify the DR session to refresh)', format);
     return false;
   }
   if (isFollowUp && args.file !== undefined) {
-    fail('--file is not supported with --chat');
+    failValidation('--file is not supported with --chat', format);
     return false;
   }
   if (isRefresh && args.prompt !== undefined && args.prompt !== '') {
-    fail('--refresh re-runs the existing prompt; do not provide a new prompt');
+    failValidation('--refresh re-runs the existing prompt; do not provide a new prompt', format);
     return false;
   }
   return true;
@@ -88,6 +89,7 @@ function resolveRunMode(
   args: Record<string, unknown>,
   stdinData: string,
   filePaths: string[],
+  format: 'json' | 'text',
 ): RunMode | undefined {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
@@ -95,7 +97,7 @@ function resolveRunMode(
 
   if (isRefresh) {
     if (stdinData.length > 0) {
-      fail('--refresh does not accept stdin input');
+      failValidation('--refresh does not accept stdin input', format);
       return undefined;
     }
     return { kind: 'refresh', chatId };
@@ -105,7 +107,7 @@ function resolveRunMode(
   // Require at least one source.
   const prompt = buildPrompt(args.prompt as string | undefined ?? '', stdinData);
   if (prompt.length === 0) {
-    fail('A prompt is required (positional argument or stdin)');
+    failValidation('A prompt is required (positional argument or stdin)', format);
     return undefined;
   }
 
@@ -119,17 +121,18 @@ function resolveRunMode(
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
 
-  // Validate flags, format, timeout, export, and file args BEFORE reading
-  // stdin so obviously invalid invocations fail fast without blocking on EOF.
-  if (!validateFlagConflicts(args)) { return undefined; }
-
+  // Resolve format first so all subsequent validation errors respect --format json
   const format = validateFormat(args.format as string);
   if (format === undefined) { return undefined; }
 
-  const timeoutSec = validateTimeout(args.timeout);
+  // Validate flags, timeout, export, and file args BEFORE reading
+  // stdin so obviously invalid invocations fail fast without blocking on EOF.
+  if (!validateFlagConflicts(args, format)) { return undefined; }
+
+  const timeoutSec = validateTimeout(args.timeout, format);
   if (timeoutSec === undefined) { return undefined; }
 
-  const exp = validateExport(args.export, args.exportPath);
+  const exp = validateExport(args.export, args.exportPath, format);
   if (exp === undefined) { return undefined; }
 
   // Validate chatId format early to fail fast on invalid characters
@@ -137,7 +140,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     try {
       assertValidChatId(args.chat as string);
     } catch (error: unknown) {
-      fail(errorMessage(error));
+      failValidation(errorMessage(error), format);
       return undefined;
     }
   }
@@ -145,7 +148,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   // Validate file args before stdin (--file missing.txt should fail fast)
   let filePaths: string[] = [];
   if (args.chat === undefined) {
-    const validated = validateFileArgs();
+    const validated = validateFileArgs(format);
     if (validated === undefined) { return undefined; }
     filePaths = validated;
   }
@@ -154,11 +157,11 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   try {
     stdinData = readStdin();
   } catch (error: unknown) {
-    fail(errorMessage(error));
+    failValidation(errorMessage(error), format);
     return undefined;
   }
 
-  const mode = resolveRunMode(args, stdinData, filePaths);
+  const mode = resolveRunMode(args, stdinData, filePaths, format);
   if (mode === undefined) { return undefined; }
 
   const stream = args.stream === true;
