@@ -227,7 +227,14 @@ cavendish/
 │   │   └── projects.ts       # projects command
 │   ├── core/
 │   │   ├── browser-manager.ts  # Chrome process management
-│   │   ├── chatgpt-driver.ts   # DOM operations
+│   │   ├── chatgpt-driver.ts   # DOM operations (facade)
+│   │   ├── driver/             # ChatGPTDriver sub-modules
+│   │   │   ├── attachments.ts  # Google Drive/GitHub/file attach
+│   │   │   ├── deep-research.ts # Deep Research operations
+│   │   │   ├── helpers.ts      # Shared helpers (delay, isTimeoutError)
+│   │   │   └── response-handler.ts # Response detection and streaming
+│   │   ├── chatgpt-types.ts    # Type definitions for ChatGPTDriver
+│   │   ├── model-config.ts     # Model classification and thinking effort
 │   │   ├── output-handler.ts   # Response formatting
 │   │   ├── cli-args.ts         # Shared CLI argument definitions
 │   │   ├── doctor.ts           # Health check logic

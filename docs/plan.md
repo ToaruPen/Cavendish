@@ -439,7 +439,8 @@ cavendish/
 │   ├── ask-stdin.test.ts
 │   └── ask-chat-options.test.ts
 └── docs/
-    └── plan.md
+    ├── plan.md
+    └── live-test.md
 ```
 
 ---
