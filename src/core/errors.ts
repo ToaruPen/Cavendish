@@ -35,7 +35,7 @@ const DEFAULT_ACTIONS: Readonly<Record<ErrorCategory, string>> = {
   chrome_not_found:
     'Install Google Chrome and ensure it is in your PATH.',
   chrome_launch_failed:
-    'Check Chrome permissions and ensure no other process is blocking the launch.',
+    'Check Chrome permissions and ensure no other process is blocking the launch. Run "cavendish init" to re-detect Chrome settings.',
   auth_expired:
     'Open Chrome and log in to ChatGPT, then retry.',
   cloudflare_blocked:
