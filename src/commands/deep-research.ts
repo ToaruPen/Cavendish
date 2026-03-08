@@ -5,7 +5,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG } from '../core/cli-args.js';
-import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 import { buildPrompt, readStdin, validateFileArgs } from './ask.js';
@@ -31,6 +31,7 @@ type RunMode =
 
 interface ValidatedArgs {
   quiet: boolean;
+  isVerbose: boolean;
   mode: RunMode;
   format: 'json' | 'text';
   stream: boolean;
@@ -120,6 +121,7 @@ function resolveRunMode(
 
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
+  const isVerbose = args.verbose === true;
 
   // Resolve format first so all subsequent validation errors respect --format json
   const format = validateFormat(args.format as string);
@@ -168,6 +170,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   return {
     quiet,
+    isVerbose,
     mode,
     format,
     stream,
@@ -304,7 +307,7 @@ export const deepResearchCommand = defineCommand({
     const v = validateArgs(args);
     if (v === undefined) { return; }
 
-    const { quiet, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
+    const { quiet, isVerbose, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
 
     if (args.dryRun === true) {
       const parts = [`mode: ${mode.kind}`, `format: ${format}`, `timeout: ${String(timeoutSec)}s`];
@@ -317,14 +320,22 @@ export const deepResearchCommand = defineCommand({
       return;
     }
 
+    verbose(`Mode: ${mode.kind}, timeout: ${String(timeoutSec)}s, format: ${format}`, isVerbose);
+    if (exportFormat !== undefined) {
+      const exportTarget = exportPath !== undefined ? ` → ${exportPath}` : '';
+      verbose(`Export: ${exportFormat}${exportTarget}`, isVerbose);
+    }
+
     /** Permissions required for the copy-content clipboard operation. */
     const permissions = ['clipboard-read', 'clipboard-write'];
 
     await withDriver(quiet, async (driver) => {
       if (stream) { emitState('sending'); }
+      verbose('Sending Deep Research query...', isVerbose);
       const preActionText = await sendQuery(driver, mode, quiet, timeoutMs);
 
       if (stream) { emitState('researching'); }
+      verbose('Waiting for Deep Research response...', isVerbose);
       const isFollowUpOrRefresh = mode.kind === 'refresh' || mode.kind === 'followup';
       const result = await driver.waitForDeepResearchResponse({
         timeout: timeoutMs,
@@ -339,6 +350,7 @@ export const deepResearchCommand = defineCommand({
       }
 
       if (stream) { emitState('generating'); }
+      verbose(`Research completed: ${result.completed ? 'full' : 'partial'}`, isVerbose);
 
       // Get clean Markdown text via copy-content when available (best-effort)
       let reportText = result.text;
@@ -375,6 +387,6 @@ export const deepResearchCommand = defineCommand({
         partial: !result.completed,
         timeoutSec,
       });
-    }, format, { permissions });
+    }, format, { permissions, verbose: isVerbose });
   },
 });

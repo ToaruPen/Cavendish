@@ -161,6 +161,17 @@ export function progress(message: string, quiet = false): void {
 }
 
 /**
+ * Write a verbose diagnostic message to stderr.
+ * Only emitted when `enabled` is true — intended for `--verbose` troubleshooting.
+ */
+export function verbose(message: string, enabled: boolean): void {
+  if (!enabled) {
+    return;
+  }
+  process.stderr.write(`[cavendish:verbose] ${message}\n`);
+}
+
+/**
  * Extract a human-readable message from an unknown error value.
  */
 export function errorMessage(error: unknown): string {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CavendishError, EXIT_CODES } from '../src/core/errors.js';
-import { emitChunk, emitFinal, emitState, fail, failStructured, failValidation, json, ndjsonChunk, progress, text, validateFormat } from '../src/core/output-handler.js';
+import { emitChunk, emitFinal, emitState, fail, failStructured, failValidation, json, ndjsonChunk, progress, text, validateFormat, verbose } from '../src/core/output-handler.js';
 
 describe('OutputHandler', () => {
   const writeCalls: string[] = [];
@@ -391,5 +391,28 @@ describe('OutputHandler', () => {
       expect(process.exitCode).toBe(1);
     });
 
+  });
+
+  describe('verbose()', () => {
+    it('writes to stderr with verbose prefix when enabled', () => {
+      verbose('CDP endpoint: http://127.0.0.1:9222', true);
+
+      expect(errorCalls).toEqual([
+        '[cavendish:verbose] CDP endpoint: http://127.0.0.1:9222\n',
+      ]);
+    });
+
+    it('suppresses output when enabled is false', () => {
+      verbose('should not appear', false);
+
+      expect(errorCalls).toHaveLength(0);
+    });
+
+    it('does not write to stdout', () => {
+      verbose('diagnostic info', true);
+
+      expect(writeCalls).toHaveLength(0);
+      expect(errorCalls).toHaveLength(1);
+    });
   });
 });

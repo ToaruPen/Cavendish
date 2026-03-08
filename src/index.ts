@@ -11,8 +11,11 @@ import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
 import { readCommand } from './commands/read.js';
 import { statusCommand } from './commands/status.js';
+import { registerSignalHandlers } from './core/shutdown.js';
 
 declare const __VERSION__: string;
+
+registerSignalHandlers();
 
 const main = defineCommand({
   meta: {
