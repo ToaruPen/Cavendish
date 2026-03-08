@@ -1,7 +1,7 @@
 import { defineCommand } from 'citty';
 
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
-import { fail, outputList, progress, validateFormat } from '../core/output-handler.js';
+import { failValidation, outputList, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /**
@@ -37,12 +37,12 @@ export const projectsCommand = defineCommand({
     const createProject = args.create === true;
 
     if (showChats && projectName === undefined) {
-      fail('--chats requires --name. Use: cavendish projects --name "Project" --chats');
+      failValidation('--chats requires --name. Use: cavendish projects --name "Project" --chats', format);
       return;
     }
 
     if (createProject && projectName === undefined) {
-      fail('--create requires --name. Use: cavendish projects --create --name "Project"');
+      failValidation('--create requires --name. Use: cavendish projects --create --name "Project"', format);
       return;
     }
 

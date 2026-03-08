@@ -3,7 +3,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ConversationMessage } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
-import { fail, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
+import { errorMessage, failValidation, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /** Structured output for the read command in JSON mode. */
@@ -49,7 +49,7 @@ export const readCommand = defineCommand({
     try {
       assertValidChatId(args.chatId);
     } catch (error: unknown) {
-      fail(error instanceof Error ? error.message : String(error));
+      failValidation(errorMessage(error), format);
       return;
     }
 
