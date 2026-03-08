@@ -317,6 +317,9 @@ export const deepResearchCommand = defineCommand({
       return;
     }
 
+    /** Permissions required for the copy-content clipboard operation. */
+    const permissions = ['clipboard-read', 'clipboard-write'];
+
     await withDriver(quiet, async (driver) => {
       if (stream) { emitState('sending'); }
       const preActionText = await sendQuery(driver, mode, quiet, timeoutMs);
@@ -372,6 +375,6 @@ export const deepResearchCommand = defineCommand({
         partial: !result.completed,
         timeoutSec,
       });
-    }, format);
+    }, format, { permissions });
   },
 });

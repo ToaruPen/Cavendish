@@ -58,8 +58,13 @@ export class BrowserManager {
   /**
    * Get a Page navigated to chatgpt.com.
    * Connects to an existing Chrome or launches a new one.
+   *
+   * @param quiet - Suppress progress output when true.
+   * @param permissions - Browser permissions to grant for the ChatGPT origin
+   *   (e.g. `['clipboard-read', 'clipboard-write']`). Empty by default so
+   *   commands only opt in to the permissions they actually need.
    */
-  async getPage(quiet = false): Promise<Page> {
+  async getPage(quiet = false, permissions: string[] = []): Promise<Page> {
     if (!this.browser) {
       await this.ensureConnected(quiet);
     }
@@ -72,15 +77,17 @@ export class BrowserManager {
       );
     }
 
-    // Grant clipboard permissions so the Deep Research copy-content feature
-    // can read the report from the system clipboard. The DR report lives in a
-    // double-nested iframe whose content is not directly accessible via DOM;
-    // clicking "コンテンツをコピーする" writes clean Markdown to the clipboard,
-    // which we then read back via navigator.clipboard.readText().
-    await context.grantPermissions(
-      ['clipboard-read', 'clipboard-write'],
-      { origin: CHATGPT_BASE_URL },
-    );
+    // Grant browser permissions only when explicitly requested by the caller.
+    // We intentionally do NOT call clearPermissions() here: the CDP context is
+    // shared across all concurrent CLI processes, so clearing would revoke
+    // permissions that a long-running command (e.g. Deep Research) still needs.
+    // Stale permissions from a prior command are harmless — no non-DR command
+    // uses clipboard APIs, so leftover grants have no observable effect.
+    if (permissions.length > 0) {
+      await context.grantPermissions(permissions, {
+        origin: CHATGPT_BASE_URL,
+      });
+    }
 
     // Reuse existing chatgpt.com tab
     for (const page of context.pages()) {
