@@ -214,6 +214,12 @@ export const SELECTORS = {
 
   /** ChatGPT login button (visible on auth/login pages) */
   LOGIN_BUTTON: '[data-testid="login-button"]',
+
+  // ── Google OAuth login ────────────────────────────────────
+  /** "Continue with Google" button on the auth0/OpenID login page (auth.openai.com).
+   *  Matches social login buttons with Google branding. */
+  CONTINUE_WITH_GOOGLE:
+    'button:has-text("Continue with Google"), button:has-text("Google で続行"), a:has-text("Continue with Google"), a:has-text("Google で続行"), [data-provider="google"]',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
