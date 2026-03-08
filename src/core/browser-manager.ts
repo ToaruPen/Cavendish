@@ -77,9 +77,11 @@ export class BrowserManager {
       );
     }
 
-    // Grant browser permissions only when explicitly requested by the caller.
-    // For example, Deep Research needs clipboard-read/clipboard-write to copy
-    // the report from the system clipboard via navigator.clipboard.readText().
+    // Reset permissions every time so stale grants from a previous command
+    // (e.g. clipboard-read from Deep Research) don't leak into later calls.
+    await context.clearPermissions();
+
+    // Then grant only the permissions explicitly requested by the caller.
     if (permissions.length > 0) {
       await context.grantPermissions(permissions, {
         origin: CHATGPT_BASE_URL,
