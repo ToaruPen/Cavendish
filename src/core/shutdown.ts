@@ -14,9 +14,12 @@ const SIGINT_EXIT_CODE = 130;
 /** SIGTERM exit code per POSIX convention (128 + 15). */
 const SIGTERM_EXIT_CODE = 143;
 
+/** Guard against duplicate registration (Node does NOT deduplicate listeners). */
+let registered = false;
+
 /**
  * Register process-level signal handlers for graceful shutdown.
- * Must be called exactly once (Node does NOT deduplicate listeners).
+ * Idempotent — safe to call more than once; subsequent calls are no-ops.
  *
  * The handlers log a shutdown message to stderr and exit with the
  * POSIX-conventional exit code. `process.exit()` bypasses any pending
@@ -26,6 +29,10 @@ const SIGTERM_EXIT_CODE = 143;
  * the OS reclaims the socket on process exit.
  */
 export function registerSignalHandlers(): void {
+  if (registered) {
+    return;
+  }
+  registered = true;
   process.on('SIGINT', handleSigint);
   process.on('SIGTERM', handleSigterm);
 }
