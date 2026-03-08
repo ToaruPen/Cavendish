@@ -27,8 +27,8 @@ Cavendish uses a **dedicated Chrome profile** stored in `~/.cavendish/chrome-pro
 Verify the setup:
 
 ```bash
-cavendish status        # Health check (alias for doctor)
-cavendish doctor        # Full diagnostic report (same as status)
+cavendish status        # Health diagnostics (alias for doctor)
+cavendish doctor        # Health diagnostics (same checks as status)
 ```
 
 > **Note**: The dedicated Chrome profile avoids conflicts with your browser extensions and protects your main profile from corruption. Chrome stays running as a background process between commands for fast reconnection via CDP (port 9222).
@@ -44,11 +44,11 @@ cavendish init
 # Reset profile and re-authenticate
 cavendish init --reset
 
-# Check system health (full diagnostics)
+# Run health diagnostics (CDP, auth, selectors, integrations)
 cavendish doctor
 cavendish doctor --json
 
-# Health check (equivalent to doctor — status delegates to doctor)
+# Same diagnostics as doctor (status delegates to the same logic)
 cavendish status
 ```
 
@@ -164,7 +164,7 @@ cavendish projects --create --name "New Project"
 --dry-run                # Validate args without executing
 ```
 
-> **Note**: citty accepts both kebab-case (`--dry-run`) and camelCase (`--dryRun`) for multi-word flags. Both forms are equivalent.
+> **Note**: citty accepts both kebab-case (`--dry-run`) and camelCase (`--dryRun`) for multi-word flags. Both forms are equivalent. The `--help` output displays the camelCase form (e.g. `--dryRun`, `--thinkingEffort`, `--exportPath`) due to citty's internal convention.
 
 ### Options for ask / deep-research
 
