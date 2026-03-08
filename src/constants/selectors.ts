@@ -21,8 +21,8 @@ export const SELECTORS = {
   /** Model picker dropdown menu */
   MODEL_MENU: '[role="menu"]',
 
-  /** Individual model option inside the menu */
-  MODEL_MENUITEM: '[role="menuitem"]',
+  /** Individual model option (excludes submenu triggers like Legacy models) */
+  MODEL_MENUITEM: '[role="menuitem"]:not([data-has-submenu])',
 
   // ── File attachment ──────────────────────────────────────
   /** Hidden file input (no id attribute) */
@@ -70,7 +70,7 @@ export const SELECTORS = {
   MOST_RECENT_CONVERSATION_LINK: '#history a[href*="/c/"]',
 
   /** New chat button */
-  NEW_CHAT_LINK: 'a[href="/"]',
+  NEW_CHAT_LINK: 'a[data-testid="create-new-chat-button"]',
 
   /** Three-dot menu button on a conversation item (visible on hover) */
   CONVERSATION_MENU_BUTTON: '[data-testid$="-options"]',

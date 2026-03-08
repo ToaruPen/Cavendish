@@ -51,9 +51,15 @@ export class ChatGPTDriver {
 
   async navigateToNewChat(quiet = false): Promise<void> {
     progress('Opening new chat...', quiet);
-    await this.page.goto(CHATGPT_BASE_URL, {
-      waitUntil: 'domcontentloaded',
-    });
+    const currentUrl = this.page.url();
+    if (currentUrl.startsWith(CHATGPT_BASE_URL)) {
+      // Use SPA navigation to preserve latest model picker state
+      await this.page.locator(SELECTORS.NEW_CHAT_LINK).last().click();
+    } else {
+      await this.page.goto(CHATGPT_BASE_URL, {
+        waitUntil: 'domcontentloaded',
+      });
+    }
     await this.waitForReady();
   }
 
@@ -438,6 +444,8 @@ export class ChatGPTDriver {
     await this.page.locator(SELECTORS.MODEL_MENU).waitFor({ state: 'visible' });
 
     const item = this.page
+      .locator(SELECTORS.MODEL_MENU)
+      .first()
       .locator(SELECTORS.MODEL_MENUITEM)
       .filter({ hasText: model });
 
