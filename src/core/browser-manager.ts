@@ -16,6 +16,26 @@ export const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
 export const CDP_PORT = 9222;
 export const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
 
+/** Restrictive permission mask: owner-only read/write/execute. */
+const DIR_MODE = 0o700;
+
+/**
+ * Ensure `~/.cavendish/` and `chrome-profile` exist with 0o700 permissions.
+ *
+ * - New directories are created with `mode: 0o700`.
+ * - Pre-existing directories are `chmod`-ed to `0o700` to tighten
+ *   permissions for users who already have the dirs at 0o755.
+ *
+ * @throws {Error} when directory creation or permission change fails.
+ *   Callers (e.g. `launch()`) should catch and wrap as CavendishError.
+ */
+export function ensureProfileDirectories(): void {
+  mkdirSync(CHROME_PROFILE_DIR, { recursive: true, mode: DIR_MODE });
+  // Ensure correct permissions on pre-existing directories
+  chmodSync(CAVENDISH_DIR, DIR_MODE);
+  chmodSync(CHROME_PROFILE_DIR, DIR_MODE);
+}
+
 const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
 
@@ -80,10 +100,7 @@ export class BrowserManager {
     progress('Launching Chrome with persistent profile...', quiet);
 
     try {
-      mkdirSync(CHROME_PROFILE_DIR, { recursive: true, mode: 0o700 });
-      // Ensure correct permissions on pre-existing directories
-      chmodSync(CAVENDISH_DIR, 0o700);
-      chmodSync(CHROME_PROFILE_DIR, 0o700);
+      ensureProfileDirectories();
     } catch (err: unknown) {
       throw new CavendishError(
         `Failed to set up Chrome profile directory at "${CHROME_PROFILE_DIR}": ${err instanceof Error ? err.message : String(err)}`,
