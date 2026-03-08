@@ -12,10 +12,12 @@ import { projectsCommand } from './commands/projects.js';
 import { readCommand } from './commands/read.js';
 import { statusCommand } from './commands/status.js';
 
+declare const __VERSION__: string;
+
 const main = defineCommand({
   meta: {
     name: 'cavendish',
-    version: '0.1.0',
+    version: __VERSION__,
     description:
       'Playwright-based CLI that automates ChatGPT Web UI for coding agents',
   },
