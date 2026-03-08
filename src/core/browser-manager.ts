@@ -72,7 +72,11 @@ export class BrowserManager {
       );
     }
 
-    // Grant clipboard permissions for DR copy-content feature
+    // Grant clipboard permissions so the Deep Research copy-content feature
+    // can read the report from the system clipboard. The DR report lives in a
+    // double-nested iframe whose content is not directly accessible via DOM;
+    // clicking "コンテンツをコピーする" writes clean Markdown to the clipboard,
+    // which we then read back via navigator.clipboard.readText().
     await context.grantPermissions(
       ['clipboard-read', 'clipboard-write'],
       { origin: CHATGPT_BASE_URL },
