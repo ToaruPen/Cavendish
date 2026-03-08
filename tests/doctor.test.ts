@@ -62,8 +62,8 @@ describe('formatTextOutput', () => {
     expect(lines[0]).toContain('chrome_cdp');
     expect(lines[0]).toContain('Connected');
 
-    // Skip line uses dash
-    expect(lines[1]).toContain('-');
+    // Skip line uses dash (start-of-line match to distinguish from name content)
+    expect(lines[1]).toMatch(/^-/);
     expect(lines[1]).toContain('cdp_endpoint');
 
     // Fail line uses ballot x and includes action
@@ -72,7 +72,7 @@ describe('formatTextOutput', () => {
     expect(lines[2]).toContain('-> Fix it');
 
     // Summary line
-    const summaryLine = lines[lines.length - 1] ?? '';
+    const summaryLine = lines[lines.length - 1];
     expect(summaryLine).toContain('Total: 3');
     expect(summaryLine).toContain('Pass: 1');
     expect(summaryLine).toContain('Fail: 1');
