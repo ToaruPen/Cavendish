@@ -10,6 +10,12 @@ Playwright-based CLI tool that automates ChatGPT's Web UI, enabling coding agent
 - **CLI Framework**: citty (UnJS)
 - **Build Tool**: tsup
 
+## Prerequisites
+
+- **Node.js** >= 20
+- **Google Chrome** (stable channel)
+- **OS**: macOS or Linux
+
 ## Installation
 
 ```bash
@@ -245,6 +251,8 @@ cavendish/
 ├── tests/
 │   ├── errors.test.ts
 │   ├── output-handler.test.ts
+│   ├── doctor.test.ts
+│   ├── profile-directories.test.ts
 │   ├── ask-file.test.ts
 │   ├── ask-stdin.test.ts
 │   └── ask-chat-options.test.ts
