@@ -12,6 +12,10 @@ export const GLOBAL_ARGS = {
     type: 'boolean' as const,
     description: 'Suppress stderr progress messages',
   },
+  verbose: {
+    type: 'boolean' as const,
+    description: 'Enable verbose output for troubleshooting',
+  },
   dryRun: {
     type: 'boolean' as const,
     description: 'Validate args and show planned action without executing',

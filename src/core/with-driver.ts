@@ -1,10 +1,12 @@
 import { BrowserManager } from './browser-manager.js';
 import { ChatGPTDriver } from './chatgpt-driver.js';
-import { failStructured } from './output-handler.js';
+import { failStructured, verbose } from './output-handler.js';
 
 export interface WithDriverOptions {
   /** Browser permissions to grant for the ChatGPT origin (default: none). */
   permissions?: string[];
+  /** Enable verbose diagnostic output (default: false). */
+  verbose?: boolean;
 }
 
 /**
@@ -20,15 +22,21 @@ export async function withDriver(
   format?: 'json' | 'text',
   options?: WithDriverOptions,
 ): Promise<void> {
+  const isVerbose = options?.verbose ?? false;
   const browser = new BrowserManager();
 
   try {
-    const page = await browser.getPage(quiet, options?.permissions ?? []);
+    verbose('Acquiring browser page...', isVerbose);
+    const page = await browser.getPage(quiet, options?.permissions ?? [], isVerbose);
+    verbose('Creating ChatGPTDriver...', isVerbose);
     const driver = new ChatGPTDriver(page);
+    verbose('Driver ready, executing command action...', isVerbose);
     await action(driver);
   } catch (error: unknown) {
     failStructured(error, format);
   } finally {
+    verbose('Closing Playwright connection...', isVerbose);
     await browser.close();
+    verbose('Cleanup complete', isVerbose);
   }
 }

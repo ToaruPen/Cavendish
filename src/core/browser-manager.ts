@@ -8,7 +8,7 @@ import { type Browser, type BrowserContext, type Page, chromium } from 'playwrig
 import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 
 import { CavendishError } from './errors.js';
-import { progress } from './output-handler.js';
+import { progress, verbose } from './output-handler.js';
 
 export const CAVENDISH_DIR = join(homedir(), '.cavendish');
 export const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
@@ -63,9 +63,11 @@ export class BrowserManager {
    * @param permissions - Browser permissions to grant for the ChatGPT origin
    *   (e.g. `['clipboard-read', 'clipboard-write']`). Empty by default so
    *   commands only opt in to the permissions they actually need.
+   * @param isVerbose - Enable verbose diagnostic output.
    */
-  async getPage(quiet = false, permissions: string[] = []): Promise<Page> {
+  async getPage(quiet = false, permissions: string[] = [], isVerbose = false): Promise<Page> {
     if (!this.browser) {
+      verbose(`CDP endpoint: ${CDP_BASE_URL}`, isVerbose);
       await this.ensureConnected(quiet);
     }
 
@@ -92,11 +94,14 @@ export class BrowserManager {
     // Reuse existing chatgpt.com tab
     for (const page of context.pages()) {
       if (page.url().startsWith(CHATGPT_BASE_URL)) {
+        const tabUrl = new URL(page.url());
+        verbose(`Reusing existing ChatGPT tab: ${tabUrl.origin}${tabUrl.pathname}`, isVerbose);
         return page;
       }
     }
 
     // No chatgpt.com tab found — open one
+    verbose('No ChatGPT tab found, opening new tab...', isVerbose);
     const page = await context.newPage();
     await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
     return page;

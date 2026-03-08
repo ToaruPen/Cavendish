@@ -28,6 +28,7 @@ export const deleteCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isVerbose = args.verbose === true;
     const projectName = args.project;
 
     try {
@@ -52,6 +53,6 @@ export const deleteCommand = defineCommand({
       } else {
         await driver.deleteConversation(args.chatId, quiet);
       }
-    });
+    }, undefined, { verbose: isVerbose });
   },
 });

@@ -7,7 +7,7 @@ import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
-import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat } from '../core/output-handler.js';
+import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -64,6 +64,7 @@ function resolveTimeoutSec(
 
 interface ValidatedArgs {
   quiet: boolean;
+  isVerbose: boolean;
   model: string;
   timeoutMs: number;
   timeoutSec: number;
@@ -174,6 +175,7 @@ function validateChatOptions(
  */
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
+  const isVerbose = args.verbose === true;
   const model = args.model as string;
 
   // Resolve format first so all subsequent validation errors respect --format json
@@ -228,6 +230,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   return {
     quiet,
+    isVerbose,
     model,
     timeoutMs: timeoutSec * 1000,
     timeoutSec,
@@ -398,21 +401,28 @@ export const askCommand = defineCommand({
     }
 
     const {
-      quiet, model, timeoutMs, timeoutSec, format, stream,
+      quiet, isVerbose, model, timeoutMs, timeoutSec, format, stream,
       filePaths, gdriveFiles, githubRepos, agentMode, thinkingEffort, prompt, continueChat,
       project,
     } = validated;
 
+    verbose(`Model: ${model}, timeout: ${String(timeoutSec)}s, format: ${format}`, isVerbose);
+    if (validated.chatId !== undefined) {
+      verbose(`Target chat: ${validated.chatId}`, isVerbose);
+    }
+
     const browser = new BrowserManager();
 
     try {
-      const page = await browser.getPage(quiet);
+      const page = await browser.getPage(quiet, [], isVerbose);
       const driver = new ChatGPTDriver(page);
 
+      verbose('Navigating...', isVerbose);
       await navigate(driver, validated);
 
       // Skip model selection when continuing an existing chat
       if (!continueChat) {
+        verbose(`Selecting model: ${model}`, isVerbose);
         await driver.selectModel(model, quiet);
       }
 
@@ -437,9 +447,11 @@ export const askCommand = defineCommand({
       }
 
       progress('Sending message...', quiet);
+      verbose(`Sending message (prompt length: ${String(prompt.length)} chars)...`, isVerbose);
       const initialMsgCount = await driver.getAssistantMessageCount();
       await driver.sendMessage(prompt);
 
+      verbose(`Waiting for response (timeout: ${String(timeoutSec)}s, initialMsgCount: ${String(initialMsgCount)})...`, isVerbose);
       const onChunk = stream ? (chunk: string): void => { emitChunk(chunk); } : undefined;
 
       const result = await driver.waitForResponse({
