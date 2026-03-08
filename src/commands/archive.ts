@@ -23,6 +23,7 @@ export const archiveCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isVerbose = args.verbose === true;
 
     try {
       assertValidChatId(args.chatId);
@@ -38,6 +39,6 @@ export const archiveCommand = defineCommand({
 
     await withDriver(quiet, async (driver) => {
       await driver.archiveConversation(args.chatId, quiet);
-    });
+    }, undefined, { verbose: isVerbose });
   },
 });

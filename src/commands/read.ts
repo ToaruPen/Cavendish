@@ -43,6 +43,7 @@ export const readCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
 
@@ -73,6 +74,6 @@ export const readCommand = defineCommand({
         };
         jsonRaw(payload);
       }
-    }, format);
+    }, format, { verbose: isVerbose });
   },
 });

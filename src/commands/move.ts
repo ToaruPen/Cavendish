@@ -28,6 +28,7 @@ export const moveCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isVerbose = args.verbose === true;
 
     try {
       assertValidChatId(args.chatId);
@@ -43,6 +44,6 @@ export const moveCommand = defineCommand({
 
     await withDriver(quiet, async (driver) => {
       await driver.moveToProject(args.chatId, args.project, quiet);
-    });
+    }, undefined, { verbose: isVerbose });
   },
 });

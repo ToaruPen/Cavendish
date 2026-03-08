@@ -18,6 +18,7 @@ export const listCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
 
@@ -31,6 +32,6 @@ export const listCommand = defineCommand({
       const conversations = await driver.getConversationList(quiet);
       progress(`Found ${String(conversations.length)} conversation(s)`, quiet);
       outputList(conversations, format);
-    }, format);
+    }, format, { verbose: isVerbose });
   },
 });

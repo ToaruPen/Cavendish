@@ -30,6 +30,7 @@ export const projectsCommand = defineCommand({
   },
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
+    const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
     const projectName = args.name;
@@ -77,6 +78,6 @@ export const projectsCommand = defineCommand({
         progress(`Found ${String(projects.length)} project(s)`, quiet);
         outputList(projects, format);
       }
-    }, format);
+    }, format, { verbose: isVerbose });
   },
 });
