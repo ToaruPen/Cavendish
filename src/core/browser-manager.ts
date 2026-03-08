@@ -26,7 +26,8 @@ const DIR_MODE = 0o700;
  * - Pre-existing directories are `chmod`-ed to `0o700` to tighten
  *   permissions for users who already have the dirs at 0o755.
  *
- * @throws CavendishError when directory creation or permission change fails.
+ * @throws {Error} when directory creation or permission change fails.
+ *   Callers (e.g. `launch()`) should catch and wrap as CavendishError.
  */
 export function ensureProfileDirectories(): void {
   mkdirSync(CHROME_PROFILE_DIR, { recursive: true, mode: DIR_MODE });
