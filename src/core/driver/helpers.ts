@@ -27,3 +27,36 @@ export function isFrameDetachedError(error: unknown): boolean {
   return msg.includes('frame was detached') ||
     msg.includes('Execution context was destroyed');
 }
+
+// ── Deadline helpers ────────────────────────────────────────
+
+/**
+ * Compute effective deadline for iframe wait.
+ *
+ * When a caller-provided deadline exists (derived from --timeout), use it
+ * so the user's timeout is respected.  Fall back to a short default
+ * when no deadline is given (standalone / ad-hoc calls).
+ */
+export function computeIframeWaitDeadline(
+  now: number,
+  callerDeadline: number | undefined,
+  defaultMs: number,
+): number {
+  return callerDeadline ?? (now + defaultMs);
+}
+
+/**
+ * Compute effective deadline for a sub-phase of a larger operation.
+ *
+ * The sub-phase is capped at `phaseMaxMs` but must not exceed the
+ * overall `deadline`.  This is used for phases where a bounded wait
+ * is appropriate (e.g. plan/start detection) but the user's timeout
+ * still takes precedence if it is shorter.
+ */
+export function computePhaseDeadline(
+  now: number,
+  deadline: number,
+  phaseMaxMs: number,
+): number {
+  return Math.min(deadline, now + phaseMaxMs);
+}
