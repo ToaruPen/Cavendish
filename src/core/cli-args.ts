@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { errorMessage, fail } from './output-handler.js';
+import { errorMessage, failValidation } from './output-handler.js';
 
 /**
  * Global args shared across all commands.
@@ -120,11 +120,11 @@ export function findMissingFile(filePaths: string[]): string | undefined {
 }
 
 /** Extract a repeatable arg or fail with an error message. */
-export function extractArgsOrFail(flag: string): string[] | undefined {
+export function extractArgsOrFail(flag: string, format?: 'json' | 'text'): string[] | undefined {
   try {
     return extractRepeatableArgs(process.argv, flag);
   } catch (error: unknown) {
-    fail(errorMessage(error));
+    failValidation(errorMessage(error), format);
     return undefined;
   }
 }

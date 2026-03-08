@@ -27,8 +27,8 @@ Cavendish uses a **dedicated Chrome profile** stored in `~/.cavendish/chrome-pro
 Verify the setup:
 
 ```bash
-cavendish status        # Quick health check
-cavendish doctor        # Full diagnostic report
+cavendish status        # Health check (alias for doctor)
+cavendish doctor        # Full diagnostic report (same as status)
 ```
 
 > **Note**: The dedicated Chrome profile avoids conflicts with your browser extensions and protects your main profile from corruption. Chrome stays running as a background process between commands for fast reconnection via CDP (port 9222).
@@ -48,7 +48,7 @@ cavendish init --reset
 cavendish doctor
 cavendish doctor --json
 
-# Quick health check
+# Health check (equivalent to doctor — status delegates to doctor)
 cavendish status
 ```
 
@@ -92,6 +92,7 @@ cavendish ask --model thinking --thinking-effort extended "Hard problem"
 cavendish ask --stream "Your question here"
 
 # JSON output with metadata (chatId, url, model, timeoutSec)
+# Note: model is omitted in JSON output when using --continue (intentional)
 cavendish ask --format json "Your question here"
 
 # Dry run (validate args without executing)
@@ -162,6 +163,8 @@ cavendish projects --create --name "New Project"
 --quiet                  # Suppress progress output
 --dry-run                # Validate args without executing
 ```
+
+> **Note**: citty accepts both kebab-case (`--dry-run`) and camelCase (`--dryRun`) for multi-word flags. Both forms are equivalent.
 
 ### Options for ask / deep-research
 
