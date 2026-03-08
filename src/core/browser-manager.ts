@@ -77,11 +77,12 @@ export class BrowserManager {
       );
     }
 
-    // Reset permissions every time so stale grants from a previous command
-    // (e.g. clipboard-read from Deep Research) don't leak into later calls.
-    await context.clearPermissions();
-
-    // Then grant only the permissions explicitly requested by the caller.
+    // Grant browser permissions only when explicitly requested by the caller.
+    // We intentionally do NOT call clearPermissions() here: the CDP context is
+    // shared across all concurrent CLI processes, so clearing would revoke
+    // permissions that a long-running command (e.g. Deep Research) still needs.
+    // Stale permissions from a prior command are harmless — no non-DR command
+    // uses clipboard APIs, so leftover grants have no observable effect.
     if (permissions.length > 0) {
       await context.grantPermissions(permissions, {
         origin: CHATGPT_BASE_URL,
