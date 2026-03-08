@@ -277,7 +277,7 @@ Cavendish grants `clipboard-read` and `clipboard-write` permissions to `chatgpt.
 If you run Cavendish on a shared machine:
 
 - Verify that `~/.cavendish/` has `drwx------` permissions (`ls -ld ~/.cavendish`).
-- Ensure no other user can access port 9222 via local socket (the default `127.0.0.1` binding already prevents remote access, but local users with sufficient privileges could still connect).
+- Ensure no other local user/process can access port 9222. Binding to `127.0.0.1` prevents remote access, but it does not isolate the CDP endpoint from other users on the same machine.
 - Do **not** share your `~/.cavendish/chrome-profile` directory — it contains active session data.
 
 ## License
