@@ -435,6 +435,8 @@ cavendish/
 ├── tests/
 │   ├── errors.test.ts
 │   ├── output-handler.test.ts
+│   ├── doctor.test.ts
+│   ├── profile-directories.test.ts
 │   ├── ask-file.test.ts
 │   ├── ask-stdin.test.ts
 │   └── ask-chat-options.test.ts
