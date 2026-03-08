@@ -6,7 +6,7 @@ import { type Page, errors } from 'playwright';
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
-import { errorMessage, fail, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
+import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
 /** Polling interval (ms) while waiting for user to log in. */
 const LOGIN_POLL_INTERVAL_MS = 3_000;
@@ -333,7 +333,7 @@ export const initCommand = defineCommand({
         process.exitCode = 1;
       }
     } catch (error: unknown) {
-      fail(`Chrome setup failed: ${errorMessage(error)}. Ensure Chrome is installed and port 9222 is free.`);
+      failStructured(error, format);
     }
   },
 });

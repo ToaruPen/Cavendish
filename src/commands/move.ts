@@ -2,7 +2,7 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import { GLOBAL_ARGS } from '../core/cli-args.js';
-import { fail, progress } from '../core/output-handler.js';
+import { errorMessage, fail, progress } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /**
@@ -32,7 +32,7 @@ export const moveCommand = defineCommand({
     try {
       assertValidChatId(args.chatId);
     } catch (error: unknown) {
-      fail(error instanceof Error ? error.message : String(error));
+      fail(errorMessage(error));
       return;
     }
 
