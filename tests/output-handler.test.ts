@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CavendishError, EXIT_CODES } from '../src/core/errors.js';
-import { emitChunk, emitFinal, emitState, failStructured, json, ndjsonChunk, progress, text } from '../src/core/output-handler.js';
+import { emitChunk, emitFinal, emitState, fail, failStructured, failValidation, json, ndjsonChunk, progress, text, validateFormat } from '../src/core/output-handler.js';
 
 describe('OutputHandler', () => {
   const writeCalls: string[] = [];
@@ -301,5 +301,95 @@ describe('OutputHandler', () => {
       expect(writeCalls).toHaveLength(0);
       expect(errorCalls.length).toBeGreaterThan(0);
     });
+  });
+
+  describe('failValidation()', () => {
+    afterEach(() => {
+      process.exitCode = undefined;
+    });
+
+    it('writes structured JSON error to stderr when format is json', () => {
+      failValidation('--timeout must be a positive number', 'json');
+
+      expect(errorCalls).toHaveLength(1);
+      const parsed: unknown = JSON.parse(errorCalls[0] ?? '');
+      expect(parsed).toMatchObject({
+        error: true,
+        category: 'unknown',
+        message: '--timeout must be a positive number',
+        exitCode: EXIT_CODES.unknown,
+      });
+      expect(parsed).toHaveProperty('action');
+    });
+
+    it('writes plain-text error to stderr when format is text', () => {
+      failValidation('--chats requires --name', 'text');
+
+      expect(errorCalls).toHaveLength(1);
+      expect(errorCalls[0]).toContain('--chats requires --name');
+      expect(() => JSON.parse(errorCalls[0] ?? '') as unknown).toThrow();
+    });
+
+    it('defaults to text output when format is omitted', () => {
+      failValidation('some validation error');
+
+      expect(errorCalls).toHaveLength(1);
+      expect(errorCalls[0]).toContain('some validation error');
+      expect(() => JSON.parse(errorCalls[0] ?? '') as unknown).toThrow();
+    });
+
+    it('sets exit code to 1 (unknown category)', () => {
+      failValidation('bad arg', 'json');
+      expect(process.exitCode).toBe(EXIT_CODES.unknown);
+    });
+
+    it('does not write to stdout', () => {
+      failValidation('error msg', 'json');
+
+      expect(writeCalls).toHaveLength(0);
+      expect(errorCalls.length).toBeGreaterThan(0);
+    });
+
+  });
+
+  describe('validateFormat()', () => {
+    afterEach(() => {
+      process.exitCode = undefined;
+    });
+
+    it('returns "json" for valid json input', () => {
+      expect(validateFormat('json')).toBe('json');
+    });
+
+    it('returns "text" for valid text input', () => {
+      expect(validateFormat('text')).toBe('text');
+    });
+
+    it('returns undefined and sets exitCode for invalid format', () => {
+      const result = validateFormat('xml');
+
+      expect(result).toBeUndefined();
+      expect(process.exitCode).toBe(1);
+      expect(errorCalls.some((c) => c.includes('--format must be'))).toBe(true);
+    });
+  });
+
+  describe('fail()', () => {
+    afterEach(() => {
+      process.exitCode = undefined;
+    });
+
+    it('writes plain-text error to stderr', () => {
+      fail('something went wrong');
+
+      expect(errorCalls).toHaveLength(1);
+      expect(errorCalls[0]).toContain('something went wrong');
+    });
+
+    it('sets exit code to 1', () => {
+      fail('error');
+      expect(process.exitCode).toBe(1);
+    });
+
   });
 });
