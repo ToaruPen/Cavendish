@@ -274,7 +274,7 @@ Chrome's remote debugging port (9222) is explicitly bound to **127.0.0.1 only** 
 
 ### Chrome Profile Directory
 
-The Chrome profile (`~/.cavendish/chrome-profile`) contains your ChatGPT session cookies. It is created and maintained with **0o700 permissions** (owner-only read/write/execute), so other users on the same machine cannot read it.
+The Chrome profile (`~/.cavendish/chrome-profile`) contains your ChatGPT session cookies. It is created and maintained with **0o700 permissions** (owner-only read/write/execute) on macOS and Linux, so other users on the same machine cannot read it. On Windows, `chmod` only affects the read-only flag, so the directory inherits NTFS ACLs from the user's home directory instead.
 
 ### Clipboard Permissions
 
@@ -284,7 +284,8 @@ Cavendish grants `clipboard-read` and `clipboard-write` permissions to `chatgpt.
 
 If you run Cavendish on a shared machine:
 
-- Verify that `~/.cavendish/` has `drwx------` permissions (`ls -ld ~/.cavendish`).
+- **macOS/Linux**: Verify that `~/.cavendish/` has `drwx------` permissions (`ls -ld ~/.cavendish`).
+- **Windows**: Verify that `%USERPROFILE%\.cavendish\` inherits appropriate NTFS ACLs restricting access to your user account.
 - Ensure no other local user/process can access port 9222. Binding to `127.0.0.1` prevents remote access, but it does not isolate the CDP endpoint from other users on the same machine.
 - Do **not** share your `~/.cavendish/chrome-profile` directory — it contains active session data.
 
