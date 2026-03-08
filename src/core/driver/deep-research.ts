@@ -11,7 +11,7 @@ import { CHATGPT_BASE_URL, SELECTORS } from '../../constants/selectors.js';
 import type { DeepResearchExportFormat, WaitForResponseResult } from '../chatgpt-types.js';
 import { progress } from '../output-handler.js';
 
-import { DEFAULT_TIMEOUT_MS, delay, isFrameDetachedError, isTimeoutError, POLL_INTERVAL_MS } from './helpers.js';
+import { DEFAULT_TIMEOUT_MS, computeIframeWaitDeadline, computePhaseDeadline, delay, isFrameDetachedError, isTimeoutError, POLL_INTERVAL_MS } from './helpers.js';
 
 // ── Navigation ──────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ export async function waitForDeepResearchResponse(
 
   // Phase 2: Wait for research to start (stop button appears in iframe).
   const STOP_DETECT_MS = 60_000;
-  const stopDetectDeadline = Math.min(deadline, Date.now() + STOP_DETECT_MS);
+  const stopDetectDeadline = computePhaseDeadline(Date.now(), deadline, STOP_DETECT_MS);
   let researchStarted = false;
   while (Date.now() < stopDetectDeadline) {
     await delay(POLL_INTERVAL_MS * 5);
@@ -271,8 +271,8 @@ export function getDeepResearchContentFrame(page: Page): Frame | undefined {
 
 export async function waitForDeepResearchFrame(page: Page, deadline?: number): Promise<Frame> {
   const pollInterval = POLL_INTERVAL_MS * 5;
-  const defaultDeadline = Date.now() + 15_000;
-  const effectiveDeadline = deadline !== undefined ? Math.min(deadline, defaultDeadline) : defaultDeadline;
+  const IFRAME_WAIT_DEFAULT_MS = 15_000;
+  const effectiveDeadline = computeIframeWaitDeadline(Date.now(), deadline, IFRAME_WAIT_DEFAULT_MS);
   let attempts = 0;
   while (Date.now() < effectiveDeadline) {
     const frame = getDeepResearchContentFrame(page);
@@ -309,7 +309,7 @@ async function clickDeepResearchStart(
   quiet: boolean,
 ): Promise<void> {
   const START_PHASE_MS = 120_000;
-  const startDeadline = Math.min(deadline, Date.now() + START_PHASE_MS);
+  const startDeadline = computePhaseDeadline(Date.now(), deadline, START_PHASE_MS);
   while (Date.now() < startDeadline) {
     await delay(POLL_INTERVAL_MS * 5);
 
@@ -380,8 +380,10 @@ async function pollForDeepResearchReport(
   let stableCount = 0;
   let sawTransition = false;
 
-  const reportDeadline = Math.min(deadline, Date.now() + 120_000);
-  while (Date.now() < reportDeadline) {
+  // Use the overall deadline from the user's --timeout directly.
+  // Previously a 120s hard cap was applied here, which could cut off
+  // the report wait well before the user's timeout (e.g. --timeout 1800).
+  while (Date.now() < deadline) {
     await delay(POLL_INTERVAL_MS * 5);
     const hasStop = await hasDeepResearchStopButton(page);
     if (hasStop) {
