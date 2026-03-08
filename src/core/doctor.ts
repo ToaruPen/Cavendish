@@ -79,7 +79,7 @@ function checkProfile(): DoctorCheck {
   };
 }
 
-function checkConfig(): DoctorCheck {
+function checkCdpEndpoint(): DoctorCheck {
   const exists = existsSync(CDP_ENDPOINT_FILE);
   return {
     name: 'cdp_endpoint',
@@ -313,7 +313,7 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
   const cdp = await checkCdp();
   checks.push(cdp);
   checks.push(checkProfile());
-  checks.push(checkConfig());
+  checks.push(checkCdpEndpoint());
 
   // If CDP is not connected, skip Playwright checks
   if (cdp.status !== 'pass') {
