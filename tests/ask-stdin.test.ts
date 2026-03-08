@@ -19,4 +19,12 @@ describe('buildPrompt()', () => {
       'line1\nline2\nline3\n\nsummarize',
     );
   });
+
+  it('returns stdinData alone when prompt is empty (stdin-only pipe)', () => {
+    expect(buildPrompt('', 'piped input')).toBe('piped input');
+  });
+
+  it('returns empty string when both prompt and stdinData are empty', () => {
+    expect(buildPrompt('', '')).toBe('');
+  });
 });

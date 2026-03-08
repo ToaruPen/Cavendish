@@ -42,6 +42,9 @@ export function buildPrompt(prompt: string, stdinData: string): string {
   if (stdinData.length === 0) {
     return prompt;
   }
+  if (prompt.length === 0) {
+    return stdinData;
+  }
   return `${stdinData}\n\n${prompt}`;
 }
 
@@ -216,7 +219,11 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   } catch (error: unknown) {
     failValidation(errorMessage(error), format); return;
   }
-  const prompt = buildPrompt(args.prompt as string, stdinData);
+  const rawPrompt = (args.prompt as string | undefined) ?? '';
+  if (rawPrompt.length === 0 && stdinData.length === 0) {
+    failValidation('Prompt is required. Provide as argument or pipe via stdin.', format); return;
+  }
+  const prompt = buildPrompt(rawPrompt, stdinData);
   const stream = args.stream === true;
 
   return {
@@ -320,13 +327,21 @@ async function navigate(
 export const askCommand = defineCommand({
   meta: {
     name: 'ask',
-    description: 'Send a prompt to ChatGPT and return the response',
+    description:
+      'Send a prompt to ChatGPT and return the response.\n\n'
+      + 'Usage:\n'
+      + '  cavendish ask "Explain closures in JS"\n'
+      + '  echo "hello" | cavendish ask "Summarize this"\n'
+      + '  cat file.ts | cavendish ask "Review this code"\n'
+      + '  cavendish ask "Fix the bug" --model Thinking --file src/app.ts\n'
+      + '  cavendish ask "Continue" --continue\n'
+      + '  cavendish ask "Follow up" --chat <id>',
   },
   args: {
     prompt: {
       type: 'positional',
-      description: 'The prompt to send to ChatGPT',
-      required: true,
+      description: 'The prompt to send to ChatGPT (can also be provided via stdin pipe)',
+      required: false,
     },
     timeout: {
       type: 'string',

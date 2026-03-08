@@ -257,7 +257,14 @@ function resolveChatId(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): st
 export const deepResearchCommand = defineCommand({
   meta: {
     name: 'deep-research',
-    description: 'Send a prompt to ChatGPT Deep Research and return the report',
+    description:
+      'Send a prompt to ChatGPT Deep Research and return the report.\n\n'
+      + 'Usage:\n'
+      + '  cavendish deep-research "Compare React vs Vue in 2025"\n'
+      + '  echo "topic" | cavendish deep-research "Analyze this"\n'
+      + '  cavendish deep-research "Follow up" --chat <id>\n'
+      + '  cavendish deep-research --chat <id> --refresh\n'
+      + '  cavendish deep-research "Query" --export markdown --exportPath report.md',
   },
   args: {
     prompt: {
