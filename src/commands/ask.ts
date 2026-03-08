@@ -296,14 +296,14 @@ async function navigate(
   if (chatId !== undefined) {
     await driver.navigateToChat(chatId, quiet);
   } else if (continueChat) {
-    const recentId = await driver.getMostRecentChatId(quiet);
-    if (recentId === undefined) {
+    const recent = await driver.getMostRecentChatId(quiet);
+    if (recent === undefined) {
       throw new Error(
         'No conversations found in sidebar. Cannot continue — start a new chat first.',
       );
     }
-    progress(`Continuing most recent chat: ${recentId}`, quiet);
-    await driver.navigateToChat(recentId, quiet);
+    progress(`Continuing most recent chat: ${recent.chatId}`, quiet);
+    await driver.navigateToChat(recent.chatId, quiet, recent.href);
   } else if (project !== undefined) {
     await driver.navigateToProject(project, quiet);
   } else {

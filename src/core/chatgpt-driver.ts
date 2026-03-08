@@ -37,10 +37,13 @@ export class ChatGPTDriver {
 
   // ── Navigation ────────────────────────────────────────────
 
-  async navigateToChat(chatId: string, quiet = false): Promise<void> {
+  async navigateToChat(chatId: string, quiet = false, href?: string): Promise<void> {
     assertValidChatId(chatId);
     progress(`Navigating to chat: ${chatId}`, quiet);
-    await this.page.goto(`${CHATGPT_BASE_URL}/c/${chatId}`, {
+    const url = href
+      ? `${CHATGPT_BASE_URL}${href}`
+      : `${CHATGPT_BASE_URL}/c/${chatId}`;
+    await this.page.goto(url, {
       waitUntil: 'domcontentloaded',
     });
     await this.waitForReady();
@@ -48,9 +51,15 @@ export class ChatGPTDriver {
 
   async navigateToNewChat(quiet = false): Promise<void> {
     progress('Opening new chat...', quiet);
-    await this.page.goto(CHATGPT_BASE_URL, {
-      waitUntil: 'domcontentloaded',
-    });
+    const currentUrl = this.page.url();
+    if (currentUrl.startsWith(CHATGPT_BASE_URL)) {
+      // Use SPA navigation to preserve latest model picker state
+      await this.page.locator(SELECTORS.NEW_CHAT_LINK).first().click();
+    } else {
+      await this.page.goto(CHATGPT_BASE_URL, {
+        waitUntil: 'domcontentloaded',
+      });
+    }
     await this.waitForReady();
   }
 
@@ -162,7 +171,7 @@ export class ChatGPTDriver {
     SELECTORS.CONVERSATION_LINK);
   }
 
-  async getMostRecentChatId(quiet = false): Promise<string | undefined> {
+  async getMostRecentChatId(quiet = false): Promise<{ chatId: string; href: string } | undefined> {
     await this.waitForSidebarContainer(quiet);
     const links = this.page.locator(SELECTORS.MOST_RECENT_CONVERSATION_LINK);
     if (await links.count() === 0) {
@@ -182,7 +191,7 @@ export class ChatGPTDriver {
         `Unexpected recent conversation href format: "${href}" (selector: ${SELECTORS.MOST_RECENT_CONVERSATION_LINK})`,
       );
     }
-    return match[1];
+    return { chatId: match[1], href };
   }
 
   async deleteConversation(id: string, quiet = false): Promise<void> {
@@ -435,6 +444,8 @@ export class ChatGPTDriver {
     await this.page.locator(SELECTORS.MODEL_MENU).waitFor({ state: 'visible' });
 
     const item = this.page
+      .locator(SELECTORS.MODEL_MENU)
+      .first()
       .locator(SELECTORS.MODEL_MENUITEM)
       .filter({ hasText: model });
 

@@ -31,9 +31,14 @@ interface InitResult {
  * Check whether a ChatGPT tab appears logged in by querying CDP /json/list.
  * Returns true if at least one non-auth ChatGPT page is found.
  */
-async function isLoggedInViaCdp(): Promise<boolean> {
+/** Whether a CDP probe error has already been logged (suppress duplicates during polling). */
+let cdpErrorLogged = false;
+
+async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/list`);
+    const res = await fetch(`${CDP_BASE_URL}/json/list`, {
+      signal: AbortSignal.timeout(5_000),
+    });
     if (!res.ok) {
       return false;
     }
@@ -49,8 +54,11 @@ async function isLoggedInViaCdp(): Promise<boolean> {
     );
     return nonAuthPages.length > 0;
   } catch (error: unknown) {
-    // CDP query failed — Chrome not running or not reachable; log and return false
-    console.error(`[cavendish] CDP probe failed: ${errorMessage(error)}`);
+    // CDP query failed — log once (suppress duplicates during waitForLogin polling)
+    if (!quiet && !cdpErrorLogged) {
+      console.error(`[cavendish] CDP probe failed: ${errorMessage(error)}`);
+      cdpErrorLogged = true;
+    }
     return false;
   }
 }
@@ -65,6 +73,7 @@ async function waitForLogin(
   quiet: boolean,
 ): Promise<boolean> {
   progress('Waiting for ChatGPT login (open the browser and log in)...', quiet);
+  cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
 
@@ -81,7 +90,7 @@ async function waitForLogin(
         throw error;
       }
       // Fall back to CDP heuristic (non-auth tab means logged in).
-      if (await isLoggedInViaCdp()) {
+      if (await isLoggedInViaCdp(quiet)) {
         return true;
       }
     }

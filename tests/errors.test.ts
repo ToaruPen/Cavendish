@@ -20,6 +20,11 @@ describe('CavendishError', () => {
     expect(err.action).toContain('Start Chrome');
   });
 
+  it('uses default action for chrome_launch_failed', () => {
+    const err = new CavendishError('test', 'chrome_launch_failed');
+    expect(err.action).toContain('Check Chrome permissions');
+  });
+
   it('accepts custom action', () => {
     const err = new CavendishError('test', 'timeout', 'custom action');
     expect(err.action).toBe('custom action');
@@ -56,10 +61,15 @@ describe('EXIT_CODES', () => {
     expect(EXIT_CODES.unknown).toBe(1);
   });
 
+  it('uses code 8 for chrome_launch_failed', () => {
+    expect(EXIT_CODES.chrome_launch_failed).toBe(8);
+  });
+
   it('covers all categories', () => {
     const categories: ErrorCategory[] = [
       'cdp_unavailable',
       'chrome_not_found',
+      'chrome_launch_failed',
       'auth_expired',
       'cloudflare_blocked',
       'selector_miss',
@@ -99,9 +109,19 @@ describe('classifyError', () => {
     expect(classifyError(err).category).toBe('chrome_not_found');
   });
 
-  it('classifies Chrome launch failure', () => {
+  it('classifies Chrome launch failure as chrome_launch_failed', () => {
     const err = new Error('Failed to launch Chrome at "/usr/bin/google-chrome"');
+    expect(classifyError(err).category).toBe('chrome_launch_failed');
+  });
+
+  it('classifies Chrome binary not found as chrome_not_found', () => {
+    const err = new Error('Chrome binary not found at "/usr/bin/google-chrome"');
     expect(classifyError(err).category).toBe('chrome_not_found');
+  });
+
+  it('classifies permission denied launching Chrome as chrome_launch_failed', () => {
+    const err = new Error('Permission denied launching Chrome at "/usr/bin/google-chrome"');
+    expect(classifyError(err).category).toBe('chrome_launch_failed');
   });
 
   it('classifies auth errors (not logged in)', () => {
