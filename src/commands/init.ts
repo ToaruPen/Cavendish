@@ -97,7 +97,7 @@ function isBrowserConnected(page: Page): boolean {
 function findAlternateTab(closedPage: Page): Page | null {
   try {
     for (const p of closedPage.context().pages()) {
-      if (p !== closedPage && !p.isClosed()) {
+      if (p !== closedPage && !p.isClosed() && p.url().startsWith(CHATGPT_BASE_URL)) {
         return p;
       }
     }
