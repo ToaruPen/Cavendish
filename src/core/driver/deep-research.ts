@@ -201,6 +201,7 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   // Clipboard API failures (e.g. permission denied) are caught separately
   // and logged as warnings — the copy operation proceeds without restore.
   let originalClipboard: string | null = null;
+  let snapshotSucceeded = false;
 
   try {
     try {
@@ -212,16 +213,17 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
         }
         return await navigator.clipboard.readText();
       });
+      snapshotSucceeded = true;
     } catch (snapshotError: unknown) {
       const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
       progress(`Warning: clipboard snapshot failed (${msg}). Original clipboard cannot be restored.`, false);
     }
 
-    // Only clear clipboard when we have a restorable text snapshot.
-    // When clipboard holds non-text data (images, files), skipping the
-    // clear preserves the original content — the copy button writes new
-    // text regardless of prior clipboard state.
-    if (originalClipboard !== null) {
+    // Clear clipboard for copy-failure detection (readText returns '' if
+    // the copy button didn't write anything).
+    // Skip clear only when snapshot confirmed non-text content (images/files)
+    // — in that case originalClipboard is null AND snapshot succeeded.
+    if (originalClipboard !== null || !snapshotSucceeded) {
       await page.evaluate(() => navigator.clipboard.writeText(''));
     }
 
