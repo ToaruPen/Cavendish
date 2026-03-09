@@ -193,12 +193,15 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   }
 
   // Save original clipboard so we can restore it after the operation.
-  // Default to empty string if readText fails (e.g. clipboard holds non-text data).
-  const originalClipboard = await page.evaluate(
-    () => navigator.clipboard.readText().catch(() => ''),
-  );
+  // Returns null when readText fails (e.g. clipboard holds an image) so we
+  // skip restore in finally and avoid destroying non-text clipboard content.
+  let originalClipboard: string | null = null;
 
   try {
+    originalClipboard = await page.evaluate(
+      () => navigator.clipboard.readText().catch((): null => null),
+    );
+
     await page.evaluate(() => navigator.clipboard.writeText(''));
 
     await openDeepResearchExportMenu(contentFrame);
@@ -220,11 +223,15 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     }
     throw error;
   } finally {
-    // Always restore original clipboard — best-effort since the main error matters more
-    await page.evaluate(
-      (text) => navigator.clipboard.writeText(text),
-      originalClipboard,
-    ).catch(() => { /* best-effort: restore may fail if page navigated away */ });
+    // Restore clipboard only if we successfully read original text content.
+    // When originalClipboard is null (non-text data), skip restore to avoid
+    // overwriting images/rich content with an empty string.
+    if (originalClipboard !== null) {
+      await page.evaluate(
+        (text: string) => navigator.clipboard.writeText(text),
+        originalClipboard,
+      ).catch(() => { /* best-effort: restore may fail if page navigated away */ });
+    }
   }
 }
 
