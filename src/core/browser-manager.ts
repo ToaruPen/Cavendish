@@ -38,6 +38,7 @@ export function ensureProfileDirectories(): void {
 
 const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
+const CDP_FETCH_TIMEOUT_MS = 5_000;
 
 interface CdpEndpointData {
   port: number;
@@ -237,7 +238,9 @@ export class BrowserManager {
   private async waitForCdp(quiet: boolean): Promise<void> {
     for (let attempt = 1; attempt <= CDP_MAX_RETRIES; attempt += 1) {
       try {
-        const res = await fetch(`${CDP_BASE_URL}/json/version`);
+        const res = await fetch(`${CDP_BASE_URL}/json/version`, {
+          signal: AbortSignal.timeout(CDP_FETCH_TIMEOUT_MS),
+        });
         if (res.ok) {
           return;
         }
