@@ -64,6 +64,15 @@ async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
 }
 
 /**
+ * Whether the error indicates the page is permanently unusable
+ * (e.g. user closed the tab or browser disconnected).
+ * Transient errors (redirects, reloads during OAuth) return false.
+ */
+function isPageClosedError(error: unknown): boolean {
+  return error instanceof Error && /closed|destroyed/i.test(error.message);
+}
+
+/**
  * Wait for the prompt textarea to become visible on the page,
  * indicating that the user has logged in to ChatGPT.
  * Falls back to CDP tab-URL heuristic when Playwright detection fails.
@@ -79,21 +88,18 @@ async function waitForLogin(
   let pageUsable = true;
 
   while (Date.now() < deadline) {
-    // Try page-level detection first (faster, more reliable)
     if (pageUsable) {
       try {
         const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
         await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
         return true;
       } catch (error: unknown) {
-        if (!(error instanceof errors.TimeoutError)) {
-          // Page closed or crashed — switch to CDP-only polling
+        if (!(error instanceof errors.TimeoutError) && isPageClosedError(error)) {
           pageUsable = false;
         }
       }
     }
 
-    // Fall back to CDP tab-URL heuristic (non-auth tab means logged in)
     if (await isLoggedInViaCdp(quiet)) {
       return true;
     }
