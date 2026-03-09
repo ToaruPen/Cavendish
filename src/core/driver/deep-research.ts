@@ -196,10 +196,10 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   // Uses clipboard.read() to serialize each ClipboardItem's representations
   // as base64 strings, enabling full restoration of text, images, and mixed
   // content. Returns empty array for empty clipboard (restore clears it).
-  // Returns null only on API failure.
-  // Clipboard API failures are caught separately and logged as warnings.
+  // Returns null only on API failure — in that case we skip the clipboard
+  // clear to preserve the user's data (copy-failure detection is weakened
+  // but user data integrity takes priority).
   let clipboardSnapshot: Record<string, string>[] | null = null;
-  let snapshotSucceeded = false;
 
   try {
     try {
@@ -222,16 +222,16 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
         }
         return serialized;
       });
-      snapshotSucceeded = true;
     } catch (snapshotError: unknown) {
       const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
       progress(`Warning: clipboard snapshot failed (${msg}). Original clipboard cannot be restored.`, false);
     }
 
-    // Always clear clipboard for copy-failure detection (readText returns ''
-    // if the copy button didn't write anything). Safe because we now serialize
-    // and restore all clipboard content types in the finally block.
-    if (clipboardSnapshot !== null || !snapshotSucceeded) {
+    // Clear clipboard for copy-failure detection only when we have a
+    // restorable snapshot. When snapshot failed (null), skip clear to
+    // preserve the user's clipboard — copy-failure detection is weakened
+    // but data integrity takes priority.
+    if (clipboardSnapshot !== null) {
       await page.evaluate(() => navigator.clipboard.writeText(''));
     }
 
