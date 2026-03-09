@@ -198,21 +198,24 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   // rejecting, so we must check item types to distinguish "empty text"
   // from "non-text content". Returns null when clipboard has no text/plain
   // item so the finally block skips restore and preserves the original data.
+  // Clipboard API failures (e.g. permission denied) are caught separately
+  // and logged as warnings — the copy operation proceeds without restore.
   let originalClipboard: string | null = null;
 
   try {
-    originalClipboard = await page.evaluate(async () => {
-      try {
+    try {
+      originalClipboard = await page.evaluate(async () => {
         const items = await navigator.clipboard.read();
         const hasText = items.some((item) => item.types.includes('text/plain'));
         if (!hasText) {
           return null;
         }
         return await navigator.clipboard.readText();
-      } catch {
-        return null;
-      }
-    });
+      });
+    } catch (snapshotError: unknown) {
+      const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
+      progress(`Warning: clipboard snapshot failed (${msg}). Original clipboard cannot be restored.`, false);
+    }
 
     // Only clear clipboard when we have a restorable text snapshot.
     // When clipboard holds non-text data (images, files), skipping the
