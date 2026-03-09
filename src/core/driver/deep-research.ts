@@ -192,26 +192,37 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     throw new Error('Deep Research content frame not found');
   }
 
-  // Save original clipboard text so we can restore it after the operation.
-  // Uses clipboard.read() to detect non-text content (images, rich text):
-  // Chromium's readText() resolves to '' for non-text items rather than
-  // rejecting, so we must check item types to distinguish "empty text"
-  // from "non-text content". Returns null when clipboard has no text/plain
-  // item so the finally block skips restore and preserves the original data.
-  // Clipboard API failures (e.g. permission denied) are caught separately
-  // and logged as warnings — the copy operation proceeds without restore.
-  let originalClipboard: string | null = null;
+  // Save original clipboard contents (all MIME types) so we can restore them.
+  // Uses clipboard.read() to serialize each ClipboardItem's representations
+  // as base64 strings, enabling full restoration of text, images, and mixed
+  // content. Returns null when clipboard is empty or API fails.
+  // Clipboard API failures are caught separately and logged as warnings.
+  let clipboardSnapshot: Record<string, string>[] | null = null;
   let snapshotSucceeded = false;
 
   try {
     try {
-      originalClipboard = await page.evaluate(async () => {
+      clipboardSnapshot = await page.evaluate(async () => {
         const items = await navigator.clipboard.read();
-        const hasText = items.some((item) => item.types.includes('text/plain'));
-        if (!hasText) {
+        if (items.length === 0) {
           return null;
         }
-        return await navigator.clipboard.readText();
+        const serialized: Record<string, string>[] = [];
+        for (const item of items) {
+          const representations: Record<string, string> = {};
+          for (const type of item.types) {
+            const blob = await item.getType(type);
+            const buffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            const chunks: string[] = [];
+            for (let i = 0; i < bytes.length; i += 8192) {
+              chunks.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
+            }
+            representations[type] = btoa(chunks.join(''));
+          }
+          serialized.push(representations);
+        }
+        return serialized;
       });
       snapshotSucceeded = true;
     } catch (snapshotError: unknown) {
@@ -219,11 +230,10 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       progress(`Warning: clipboard snapshot failed (${msg}). Original clipboard cannot be restored.`, false);
     }
 
-    // Clear clipboard for copy-failure detection (readText returns '' if
-    // the copy button didn't write anything).
-    // Skip clear only when snapshot confirmed non-text content (images/files)
-    // — in that case originalClipboard is null AND snapshot succeeded.
-    if (originalClipboard !== null || !snapshotSucceeded) {
+    // Always clear clipboard for copy-failure detection (readText returns ''
+    // if the copy button didn't write anything). Safe because we now serialize
+    // and restore all clipboard content types in the finally block.
+    if (clipboardSnapshot !== null || !snapshotSucceeded) {
       await page.evaluate(() => navigator.clipboard.writeText(''));
     }
 
@@ -246,14 +256,22 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     }
     throw error;
   } finally {
-    // Restore clipboard only if we successfully read original text content.
-    // When originalClipboard is null (non-text data), skip restore to avoid
-    // overwriting images/rich content with an empty string.
-    if (originalClipboard !== null) {
-      await page.evaluate(
-        (text: string) => navigator.clipboard.writeText(text),
-        originalClipboard,
-      ).catch((restoreError: unknown) => {
+    if (clipboardSnapshot !== null) {
+      await page.evaluate(async (snapshot: Record<string, string>[]) => {
+        const items = snapshot.map((representations) => {
+          const blobMap: Record<string, Blob> = {};
+          for (const [type, base64] of Object.entries(representations)) {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            blobMap[type] = new Blob([bytes], { type });
+          }
+          return new ClipboardItem(blobMap);
+        });
+        await navigator.clipboard.write(items);
+      }, clipboardSnapshot).catch((restoreError: unknown) => {
         const msg = restoreError instanceof Error ? restoreError.message : String(restoreError);
         progress(`Warning: failed to restore clipboard (${msg}). Deep Research content may remain on clipboard.`, false);
       });
