@@ -6,6 +6,7 @@ import { type Page, errors } from 'playwright';
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
 /** Polling interval (ms) while waiting for user to log in. */
@@ -64,12 +65,28 @@ async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
 }
 
 /**
- * Whether the error indicates the page is permanently unusable
- * (e.g. user closed the tab or browser disconnected).
+ * Whether the error indicates the page/tab/browser is permanently unusable.
+ * Matches Playwright errors containing "closed" (e.g. "Page closed",
+ * "Browser has been closed", "Target page, context or browser has been closed").
  * Does NOT match "Execution context was destroyed" which is transient.
+ *
+ * Callers should use `isBrowserConnected()` to distinguish tab-close
+ * (recoverable via CDP polling) from browser disconnect (fatal).
  */
 function isPageClosedError(error: unknown): boolean {
   return error instanceof Error && /closed/i.test(error.message);
+}
+
+/**
+ * Safely check whether the browser process behind a Page is still connected.
+ * Returns false when the browser has crashed, been killed, or disconnected.
+ */
+function isBrowserConnected(page: Page): boolean {
+  try {
+    return page.context().browser()?.isConnected() ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -108,7 +125,15 @@ async function waitForLogin(
         await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
         return true;
       } catch (error: unknown) {
-        if (isPageClosedError(error)) {
+        if (isPageClosedError(error) && !isBrowserConnected(page)) {
+          // Browser crash/disconnect: fail fast with actionable message.
+          throw new CavendishError(
+            'Browser disconnected or crashed during login.',
+            'cdp_unavailable',
+            'Run `cavendish init` to relaunch Chrome and try again.',
+          );
+        } else if (isPageClosedError(error)) {
+          // Tab closed by user: fall back to CDP polling.
           pageUsable = false;
         } else if (!isTransientNavigationError(error)) {
           throw error;
