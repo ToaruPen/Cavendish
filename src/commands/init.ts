@@ -85,6 +85,7 @@ function isBrowserConnected(page: Page): boolean {
   try {
     return page.context().browser()?.isConnected() ?? false;
   } catch {
+    // Context/browser access may throw if already disconnected
     return false;
   }
 }
