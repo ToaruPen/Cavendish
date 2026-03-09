@@ -214,7 +214,13 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       }
     });
 
-    await page.evaluate(() => navigator.clipboard.writeText(''));
+    // Only clear clipboard when we have a restorable text snapshot.
+    // When clipboard holds non-text data (images, files), skipping the
+    // clear preserves the original content — the copy button writes new
+    // text regardless of prior clipboard state.
+    if (originalClipboard !== null) {
+      await page.evaluate(() => navigator.clipboard.writeText(''));
+    }
 
     await openDeepResearchExportMenu(contentFrame);
 
@@ -242,7 +248,10 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       await page.evaluate(
         (text: string) => navigator.clipboard.writeText(text),
         originalClipboard,
-      ).catch(() => { /* best-effort: restore may fail if page navigated away */ });
+      ).catch((restoreError: unknown) => {
+        const msg = restoreError instanceof Error ? restoreError.message : String(restoreError);
+        progress(`Warning: failed to restore clipboard (${msg}). Deep Research content may remain on clipboard.`, false);
+      });
     }
   }
 }
