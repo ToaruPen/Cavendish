@@ -196,9 +196,7 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   // Uses clipboard.read() to serialize each ClipboardItem's representations
   // as base64 strings, enabling full restoration of text, images, and mixed
   // content. Returns empty array for empty clipboard (restore clears it).
-  // Returns null only on API failure — in that case we skip the clipboard
-  // clear to preserve the user's data (copy-failure detection is weakened
-  // but user data integrity takes priority).
+  // Throws on API failure to avoid irreversible clipboard destruction.
   let clipboardSnapshot: Record<string, string>[] | null = null;
 
   try {
@@ -224,16 +222,15 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       });
     } catch (snapshotError: unknown) {
       const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
-      progress(`Warning: clipboard snapshot failed (${msg}). Original clipboard cannot be restored.`, false);
+      throw new Error(
+        `Failed to snapshot clipboard before copy (${msg}). `
+        + 'Aborting to preserve existing clipboard. Use --format markdown to export instead.',
+      );
     }
 
-    // Clear clipboard for copy-failure detection only when we have a
-    // restorable snapshot. When snapshot failed (null), skip clear to
-    // preserve the user's clipboard — copy-failure detection is weakened
-    // but data integrity takes priority.
-    if (clipboardSnapshot !== null) {
-      await page.evaluate(() => navigator.clipboard.writeText(''));
-    }
+    // Clear clipboard so we can detect copy-button failure (empty → not updated).
+    // clipboardSnapshot is guaranteed non-null here because snapshot failure throws above.
+    await page.evaluate(() => navigator.clipboard.writeText(''));
 
     await openDeepResearchExportMenu(contentFrame);
 
@@ -254,6 +251,9 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     }
     throw error;
   } finally {
+    // Restore the original clipboard. The operation above (menu open → copy click
+    // → readText) takes ~2-3s, so the risk of user-initiated clipboard changes
+    // between snapshot and restore is negligible; unconditional restore is acceptable.
     if (clipboardSnapshot !== null) {
       await page.evaluate(async (snapshot: Record<string, string>[]) => {
         if (snapshot.length === 0) {
