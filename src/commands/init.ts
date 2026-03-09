@@ -90,6 +90,24 @@ function isBrowserConnected(page: Page): boolean {
 }
 
 /**
+ * Try to find another open ChatGPT tab in the same browser context.
+ * Used to recover Playwright-based prompt detection when the original
+ * login tab is closed by the user.
+ */
+function findAlternateTab(closedPage: Page): Page | null {
+  try {
+    for (const p of closedPage.context().pages()) {
+      if (p !== closedPage && !p.isClosed()) {
+        return p;
+      }
+    }
+  } catch {
+    // Context may be unavailable if browser disconnected
+  }
+  return null;
+}
+
+/**
  * Whether the error is a transient Playwright navigation error
  * that can occur during OAuth redirects/reloads.
  */
@@ -101,6 +119,30 @@ function isTransientNavigationError(error: unknown): boolean {
     return false;
   }
   return /execution context was destroyed|frame was detached|navigating/i.test(error.message);
+}
+
+/**
+ * Handle errors during login prompt detection.
+ * Returns an updated Page if tab recovery succeeded, or null to fall back to CDP.
+ * Throws on browser disconnect or unexpected errors.
+ */
+function handleLoginPollError(error: unknown, currentPage: Page): Page | null {
+  if (!isPageClosedError(error)) {
+    if (!isTransientNavigationError(error)) {
+      throw error;
+    }
+    return currentPage;
+  }
+  // Page/tab/browser closed — check if browser is still alive
+  if (!isBrowserConnected(currentPage)) {
+    throw new CavendishError(
+      'Browser disconnected or crashed during login.',
+      'cdp_unavailable',
+      'Run `cavendish init` to relaunch Chrome and try again.',
+    );
+  }
+  // Tab closed by user: try to find another open tab
+  return findAlternateTab(currentPage);
 }
 
 /**
@@ -116,27 +158,21 @@ async function waitForLogin(
   cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  let activePage: Page = page;
   let pageUsable = true;
 
   while (Date.now() < deadline) {
     if (pageUsable) {
       try {
-        const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
+        const promptInput = activePage.locator(SELECTORS.PROMPT_INPUT);
         await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
         return true;
       } catch (error: unknown) {
-        if (isPageClosedError(error) && !isBrowserConnected(page)) {
-          // Browser crash/disconnect: fail fast with actionable message.
-          throw new CavendishError(
-            'Browser disconnected or crashed during login.',
-            'cdp_unavailable',
-            'Run `cavendish init` to relaunch Chrome and try again.',
-          );
-        } else if (isPageClosedError(error)) {
-          // Tab closed by user: fall back to CDP polling.
+        const recovered = handleLoginPollError(error, activePage);
+        if (recovered) {
+          activePage = recovered;
+        } else {
           pageUsable = false;
-        } else if (!isTransientNavigationError(error)) {
-          throw error;
         }
       }
     }
