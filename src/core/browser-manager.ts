@@ -101,8 +101,9 @@ export class BrowserManager {
     // Always create a new tab so parallel commands don't conflict
     verbose('Opening new ChatGPT tab...', isVerbose);
     const page = await context.newPage();
-    await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
+    // Track immediately so closePage() can clean up if goto() throws
     this.createdPage = page;
+    await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
     return page;
   }
 
