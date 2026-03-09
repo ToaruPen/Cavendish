@@ -92,6 +92,12 @@ export class BrowserManager {
       });
     }
 
+    // Close any previously tracked page to prevent tab leaks when
+    // getPage() is called more than once on the same instance.
+    if (this.createdPage) {
+      await this.closePage();
+    }
+
     // Always create a new tab so parallel commands don't conflict
     verbose('Opening new ChatGPT tab...', isVerbose);
     const page = await context.newPage();
