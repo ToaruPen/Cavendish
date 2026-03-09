@@ -476,6 +476,7 @@ export const askCommand = defineCommand({
     } catch (error: unknown) {
       failStructured(error, format);
     } finally {
+      await browser.closePage();
       await browser.close();
     }
   },

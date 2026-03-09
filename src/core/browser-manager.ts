@@ -54,6 +54,7 @@ interface CdpEndpointData {
  */
 export class BrowserManager {
   private browser: Browser | null = null;
+  private createdPage: Page | null = null;
 
   /**
    * Get a Page navigated to chatgpt.com.
@@ -91,19 +92,11 @@ export class BrowserManager {
       });
     }
 
-    // Reuse existing chatgpt.com tab
-    for (const page of context.pages()) {
-      if (page.url().startsWith(CHATGPT_BASE_URL)) {
-        const tabUrl = new URL(page.url());
-        verbose(`Reusing existing ChatGPT tab: ${tabUrl.origin}${tabUrl.pathname}`, isVerbose);
-        return page;
-      }
-    }
-
-    // No chatgpt.com tab found — open one
-    verbose('No ChatGPT tab found, opening new tab...', isVerbose);
+    // Always create a new tab so parallel commands don't conflict
+    verbose('Opening new ChatGPT tab...', isVerbose);
     const page = await context.newPage();
     await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
+    this.createdPage = page;
     return page;
   }
 
@@ -194,6 +187,21 @@ export class BrowserManager {
 
     this.browser = browser;
     progress('Connected to Chrome', quiet);
+  }
+
+  /**
+   * Close the tab created by this instance.
+   * Only closes the page, not the browser or other tabs.
+   */
+  async closePage(): Promise<void> {
+    if (this.createdPage) {
+      try {
+        await this.createdPage.close();
+      } catch {
+        // Page may already be closed (e.g. user closed the tab manually)
+      }
+      this.createdPage = null;
+    }
   }
 
   /**

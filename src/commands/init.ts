@@ -84,6 +84,8 @@ async function waitForLogin(
       await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
       return true;
     } catch (error: unknown) {
+      // Close the tab created by getPage() to avoid leaking tabs on each iteration
+      await browser.closePage();
       // Only treat timeout (prompt not visible yet) as "not logged in".
       // Connection/selector errors should fail fast instead of waiting 5 min.
       if (!(error instanceof errors.TimeoutError)) {
@@ -239,6 +241,12 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       await navigateToGoogleLogin(page, quiet);
     }
 
+    // Close the page used for navigateToGoogleLogin before entering
+    // waitForLogin, which creates its own pages in a loop.
+    // Without this, the page reference is lost when waitForLogin
+    // overwrites createdPage, leaking a tab.
+    await browser.closePage();
+
     const loggedIn = await waitForLogin(browser, quiet);
 
     if (loggedIn) {
@@ -254,6 +262,7 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       loggedIn,
     };
   } finally {
+    await browser.closePage();
     await browser.close();
   }
 }

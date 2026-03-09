@@ -35,6 +35,8 @@ export async function withDriver(
   } catch (error: unknown) {
     failStructured(error, format);
   } finally {
+    verbose('Closing tab...', isVerbose);
+    await browser.closePage();
     verbose('Closing Playwright connection...', isVerbose);
     await browser.close();
     verbose('Cleanup complete', isVerbose);
