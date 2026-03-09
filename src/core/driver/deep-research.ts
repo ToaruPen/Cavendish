@@ -195,7 +195,8 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   // Save original clipboard contents (all MIME types) so we can restore them.
   // Uses clipboard.read() to serialize each ClipboardItem's representations
   // as base64 strings, enabling full restoration of text, images, and mixed
-  // content. Returns null when clipboard is empty or API fails.
+  // content. Returns empty array for empty clipboard (restore clears it).
+  // Returns null only on API failure.
   // Clipboard API failures are caught separately and logged as warnings.
   let clipboardSnapshot: Record<string, string>[] | null = null;
   let snapshotSucceeded = false;
@@ -204,9 +205,6 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     try {
       clipboardSnapshot = await page.evaluate(async () => {
         const items = await navigator.clipboard.read();
-        if (items.length === 0) {
-          return null;
-        }
         const serialized: Record<string, string>[] = [];
         for (const item of items) {
           const representations: Record<string, string> = {};
@@ -258,6 +256,11 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   } finally {
     if (clipboardSnapshot !== null) {
       await page.evaluate(async (snapshot: Record<string, string>[]) => {
+        if (snapshot.length === 0) {
+          // Original clipboard was empty — clear to restore that state.
+          await navigator.clipboard.writeText('');
+          return;
+        }
         const items = snapshot.map((representations) => {
           const blobMap: Record<string, Blob> = {};
           for (const [type, base64] of Object.entries(representations)) {
