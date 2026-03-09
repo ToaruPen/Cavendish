@@ -201,13 +201,19 @@ export class BrowserManager {
    * Only closes the page, not the browser or other tabs.
    */
   async closePage(): Promise<void> {
-    if (this.createdPage) {
-      try {
-        await this.createdPage.close();
-      } catch {
-        // Page may already be closed (e.g. user closed the tab manually)
+    if (!this.createdPage) {
+      return;
+    }
+    const page = this.createdPage;
+    this.createdPage = null;
+    try {
+      await page.close();
+    } catch (error: unknown) {
+      // Swallow "already closed" errors — the page may have been closed
+      // by the user or a browser disconnect. Rethrow anything unexpected.
+      if (error instanceof Error && !/closed|destroyed/i.test(error.message)) {
+        throw error;
       }
-      this.createdPage = null;
     }
   }
 
