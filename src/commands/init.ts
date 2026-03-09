@@ -66,10 +66,24 @@ async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
 /**
  * Whether the error indicates the page is permanently unusable
  * (e.g. user closed the tab or browser disconnected).
- * Transient errors (redirects, reloads during OAuth) return false.
+ * Does NOT match "Execution context was destroyed" which is transient.
  */
 function isPageClosedError(error: unknown): boolean {
-  return error instanceof Error && /closed|destroyed/i.test(error.message);
+  return error instanceof Error && /closed/i.test(error.message);
+}
+
+/**
+ * Whether the error is a transient Playwright navigation error
+ * that can occur during OAuth redirects/reloads.
+ */
+function isTransientNavigationError(error: unknown): boolean {
+  if (error instanceof errors.TimeoutError) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /execution context was destroyed|frame was detached|navigating/i.test(error.message);
 }
 
 /**
@@ -94,8 +108,10 @@ async function waitForLogin(
         await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
         return true;
       } catch (error: unknown) {
-        if (!(error instanceof errors.TimeoutError) && isPageClosedError(error)) {
+        if (isPageClosedError(error)) {
           pageUsable = false;
+        } else if (!isTransientNavigationError(error)) {
+          throw error;
         }
       }
     }
