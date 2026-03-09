@@ -192,15 +192,27 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     throw new Error('Deep Research content frame not found');
   }
 
-  // Save original clipboard so we can restore it after the operation.
-  // Returns null when readText fails (e.g. clipboard holds an image) so we
-  // skip restore in finally and avoid destroying non-text clipboard content.
+  // Save original clipboard text so we can restore it after the operation.
+  // Uses clipboard.read() to detect non-text content (images, rich text):
+  // Chromium's readText() resolves to '' for non-text items rather than
+  // rejecting, so we must check item types to distinguish "empty text"
+  // from "non-text content". Returns null when clipboard has no text/plain
+  // item so the finally block skips restore and preserves the original data.
   let originalClipboard: string | null = null;
 
   try {
-    originalClipboard = await page.evaluate(
-      () => navigator.clipboard.readText().catch((): null => null),
-    );
+    originalClipboard = await page.evaluate(async () => {
+      try {
+        const items = await navigator.clipboard.read();
+        const hasText = items.some((item) => item.types.includes('text/plain'));
+        if (!hasText) {
+          return null;
+        }
+        return await navigator.clipboard.readText();
+      } catch {
+        return null;
+      }
+    });
 
     await page.evaluate(() => navigator.clipboard.writeText(''));
 
