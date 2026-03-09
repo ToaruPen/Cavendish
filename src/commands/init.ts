@@ -6,6 +6,7 @@ import { type Page, errors } from 'playwright';
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
 /** Polling interval (ms) while waiting for user to log in. */
@@ -64,35 +65,121 @@ async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
 }
 
 /**
+ * Whether the error indicates the page/tab/browser is permanently unusable.
+ * Matches Playwright errors containing "closed" (e.g. "Page closed",
+ * "Browser has been closed", "Target page, context or browser has been closed").
+ * Does NOT match "Execution context was destroyed" which is transient.
+ *
+ * Callers should use `isBrowserConnected()` to distinguish tab-close
+ * (recoverable via CDP polling) from browser disconnect (fatal).
+ */
+function isPageClosedError(error: unknown): boolean {
+  return error instanceof Error && /closed/i.test(error.message);
+}
+
+/**
+ * Safely check whether the browser process behind a Page is still connected.
+ * Returns false when the browser has crashed, been killed, or disconnected.
+ */
+function isBrowserConnected(page: Page): boolean {
+  try {
+    return page.context().browser()?.isConnected() ?? false;
+  } catch {
+    // Context/browser access may throw if already disconnected
+    return false;
+  }
+}
+
+/**
+ * Try to find another open ChatGPT tab in the same browser context.
+ * Used to recover Playwright-based prompt detection when the original
+ * login tab is closed by the user.
+ */
+function findAlternateTab(closedPage: Page): Page | null {
+  try {
+    for (const p of closedPage.context().pages()) {
+      if (p !== closedPage && !p.isClosed() && p.url().startsWith(CHATGPT_BASE_URL)) {
+        return p;
+      }
+    }
+  } catch {
+    // Context may be unavailable if browser disconnected
+  }
+  return null;
+}
+
+/**
+ * Whether the error is a transient Playwright navigation error
+ * that can occur during OAuth redirects/reloads.
+ */
+function isTransientNavigationError(error: unknown): boolean {
+  if (error instanceof errors.TimeoutError) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /execution context was destroyed|frame was detached|navigating/i.test(error.message);
+}
+
+/**
+ * Handle errors during login prompt detection.
+ * Returns an updated Page if tab recovery succeeded, or null to fall back to CDP.
+ * Throws on browser disconnect or unexpected errors.
+ */
+function handleLoginPollError(error: unknown, currentPage: Page): Page | null {
+  if (!isPageClosedError(error)) {
+    if (!isTransientNavigationError(error)) {
+      throw error;
+    }
+    return currentPage;
+  }
+  // Page/tab/browser closed — check if browser is still alive
+  if (!isBrowserConnected(currentPage)) {
+    throw new CavendishError(
+      'Browser disconnected or crashed during login.',
+      'cdp_unavailable',
+      'Run `cavendish init` to relaunch Chrome and try again.',
+    );
+  }
+  // Tab closed by user: try to find another open tab
+  return findAlternateTab(currentPage);
+}
+
+/**
  * Wait for the prompt textarea to become visible on the page,
  * indicating that the user has logged in to ChatGPT.
  * Falls back to CDP tab-URL heuristic when Playwright detection fails.
  */
 async function waitForLogin(
-  browser: BrowserManager,
+  page: Page,
   quiet: boolean,
 ): Promise<boolean> {
   progress('Waiting for ChatGPT login (open the browser and log in)...', quiet);
   cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  let activePage: Page = page;
+  let pageUsable = true;
 
   while (Date.now() < deadline) {
-    try {
-      const page = await browser.getPage(quiet);
-      const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
-      await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
-      return true;
-    } catch (error: unknown) {
-      // Only treat timeout (prompt not visible yet) as "not logged in".
-      // Connection/selector errors should fail fast instead of waiting 5 min.
-      if (!(error instanceof errors.TimeoutError)) {
-        throw error;
-      }
-      // Fall back to CDP heuristic (non-auth tab means logged in).
-      if (await isLoggedInViaCdp(quiet)) {
+    if (pageUsable) {
+      try {
+        const promptInput = activePage.locator(SELECTORS.PROMPT_INPUT);
+        await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
         return true;
+      } catch (error: unknown) {
+        const recovered = handleLoginPollError(error, activePage);
+        if (recovered) {
+          activePage = recovered;
+        } else {
+          pageUsable = false;
+        }
       }
+    }
+
+    if (await isLoggedInViaCdp(quiet)) {
+      return true;
     }
 
     await new Promise((r) => setTimeout(r, LOGIN_POLL_INTERVAL_MS));
@@ -239,7 +326,9 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       await navigateToGoogleLogin(page, quiet);
     }
 
-    const loggedIn = await waitForLogin(browser, quiet);
+    // Keep the page open so the user can complete login in the same tab.
+    // waitForLogin polls the existing page instead of creating new tabs.
+    const loggedIn = await waitForLogin(page, quiet);
 
     if (loggedIn) {
       progress('ChatGPT login confirmed', quiet);
@@ -254,6 +343,7 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       loggedIn,
     };
   } finally {
+    await browser.closePage();
     await browser.close();
   }
 }
