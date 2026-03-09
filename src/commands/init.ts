@@ -69,32 +69,33 @@ async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
  * Falls back to CDP tab-URL heuristic when Playwright detection fails.
  */
 async function waitForLogin(
-  browser: BrowserManager,
+  page: Page,
   quiet: boolean,
 ): Promise<boolean> {
   progress('Waiting for ChatGPT login (open the browser and log in)...', quiet);
   cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  let pageUsable = true;
 
   while (Date.now() < deadline) {
-    try {
-      const page = await browser.getPage(quiet);
-      const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
-      await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
-      return true;
-    } catch (error: unknown) {
-      // Close the tab created by getPage() to avoid leaking tabs on each iteration
-      await browser.closePage();
-      // Only treat timeout (prompt not visible yet) as "not logged in".
-      // Connection/selector errors should fail fast instead of waiting 5 min.
-      if (!(error instanceof errors.TimeoutError)) {
-        throw error;
-      }
-      // Fall back to CDP heuristic (non-auth tab means logged in).
-      if (await isLoggedInViaCdp(quiet)) {
+    // Try page-level detection first (faster, more reliable)
+    if (pageUsable) {
+      try {
+        const promptInput = page.locator(SELECTORS.PROMPT_INPUT);
+        await promptInput.waitFor({ state: 'visible', timeout: 5_000 });
         return true;
+      } catch (error: unknown) {
+        if (!(error instanceof errors.TimeoutError)) {
+          // Page closed or crashed — switch to CDP-only polling
+          pageUsable = false;
+        }
       }
+    }
+
+    // Fall back to CDP tab-URL heuristic (non-auth tab means logged in)
+    if (await isLoggedInViaCdp(quiet)) {
+      return true;
     }
 
     await new Promise((r) => setTimeout(r, LOGIN_POLL_INTERVAL_MS));
@@ -241,13 +242,9 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       await navigateToGoogleLogin(page, quiet);
     }
 
-    // Close the page used for navigateToGoogleLogin before entering
-    // waitForLogin, which creates its own pages in a loop.
-    // Without this, the page reference is lost when waitForLogin
-    // overwrites createdPage, leaking a tab.
-    await browser.closePage();
-
-    const loggedIn = await waitForLogin(browser, quiet);
+    // Keep the page open so the user can complete login in the same tab.
+    // waitForLogin polls the existing page instead of creating new tabs.
+    const loggedIn = await waitForLogin(page, quiet);
 
     if (loggedIn) {
       progress('ChatGPT login confirmed', quiet);
