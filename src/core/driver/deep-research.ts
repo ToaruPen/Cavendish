@@ -192,7 +192,44 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     throw new Error('Deep Research content frame not found');
   }
 
+  // Save original clipboard contents (all MIME types) so we can restore them.
+  // Uses clipboard.read() to serialize each ClipboardItem's representations
+  // as base64 strings, enabling full restoration of text, images, and mixed
+  // content. Returns empty array for empty clipboard (restore clears it).
+  // Throws on API failure to avoid irreversible clipboard destruction.
+  let clipboardSnapshot: Record<string, string>[] | null = null;
+
   try {
+    try {
+      clipboardSnapshot = await page.evaluate(async () => {
+        const items = await navigator.clipboard.read();
+        const serialized: Record<string, string>[] = [];
+        for (const item of items) {
+          const representations: Record<string, string> = {};
+          for (const type of item.types) {
+            const blob = await item.getType(type);
+            const buffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            const chunks: string[] = [];
+            for (let i = 0; i < bytes.length; i += 8192) {
+              chunks.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
+            }
+            representations[type] = btoa(chunks.join(''));
+          }
+          serialized.push(representations);
+        }
+        return serialized;
+      });
+    } catch (snapshotError: unknown) {
+      const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
+      throw new Error(
+        `Failed to snapshot clipboard before copy (${msg}). `
+        + 'Aborting to preserve existing clipboard. Use --format markdown to export instead.',
+      );
+    }
+
+    // Clear clipboard so we can detect copy-button failure (empty → not updated).
+    // clipboardSnapshot is guaranteed non-null here because snapshot failure throws above.
     await page.evaluate(() => navigator.clipboard.writeText(''));
 
     await openDeepResearchExportMenu(contentFrame);
@@ -213,6 +250,35 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       throw new Error('Deep Research iframe was replaced during copy. Try again.');
     }
     throw error;
+  } finally {
+    // Restore the original clipboard. The operation above (menu open → copy click
+    // → readText) takes ~2-3s, so the risk of user-initiated clipboard changes
+    // between snapshot and restore is negligible; unconditional restore is acceptable.
+    if (clipboardSnapshot !== null) {
+      await page.evaluate(async (snapshot: Record<string, string>[]) => {
+        if (snapshot.length === 0) {
+          // Original clipboard was empty — clear to restore that state.
+          await navigator.clipboard.writeText('');
+          return;
+        }
+        const items = snapshot.map((representations) => {
+          const blobMap: Record<string, Blob> = {};
+          for (const [type, base64] of Object.entries(representations)) {
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            blobMap[type] = new Blob([bytes], { type });
+          }
+          return new ClipboardItem(blobMap);
+        });
+        await navigator.clipboard.write(items);
+      }, clipboardSnapshot).catch((restoreError: unknown) => {
+        const msg = restoreError instanceof Error ? restoreError.message : String(restoreError);
+        progress(`Warning: failed to restore clipboard (${msg}). Deep Research content may remain on clipboard.`, false);
+      });
+    }
   }
 }
 
