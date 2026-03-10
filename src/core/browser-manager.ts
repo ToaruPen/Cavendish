@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { type Browser, type BrowserContext, type Page, chromium } from 'playwright';
+import { type Browser, type BrowserContext, type Page, chromium, errors } from 'playwright';
 
 import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 
@@ -105,6 +105,22 @@ export class BrowserManager {
     // Track immediately so closePage() can clean up if goto() throws
     this.createdPage = page;
     await page.goto(CHATGPT_BASE_URL, { waitUntil: 'domcontentloaded' });
+
+    // Wait for SPA hydration: ChatGPT fetches the model list and user
+    // preferences via HTTP after DOM is ready.  Without this wait,
+    // downstream code (model picker, sidebar) can see stale cached
+    // state.  networkidle fires once there are no HTTP connections for
+    // 500 ms.  Persistent connections (WebSockets, SSE) can prevent it
+    // from firing — the 15 s timeout is the safety net for those cases.
+    verbose('Waiting for SPA initialization...', isVerbose);
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch((e: unknown) => {
+      if (e instanceof errors.TimeoutError) {
+        verbose('networkidle timeout — proceeding with current state', isVerbose);
+        return;
+      }
+      throw e;
+    });
+
     return page;
   }
 
