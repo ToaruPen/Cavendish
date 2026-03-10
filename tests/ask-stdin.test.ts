@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 
-import { buildPrompt } from '../src/commands/ask.js';
+import { buildPrompt, STDIN_MAX_BYTES } from '../src/commands/ask.js';
 
 describe('buildPrompt()', () => {
   it('returns prompt only when stdinData is empty', () => {
@@ -26,5 +26,61 @@ describe('buildPrompt()', () => {
 
   it('returns empty string when both prompt and stdinData are empty', () => {
     expect(buildPrompt('', '')).toBe('');
+  });
+});
+
+describe('readStdin() size limit', () => {
+  const originalIsTTY = process.stdin.isTTY;
+
+  afterEach(() => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalIsTTY, configurable: true });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  async function importWithMockedFs(
+    buf: Buffer,
+  ): Promise<{ readStdin: () => string }> {
+    vi.resetModules();
+
+    vi.doMock('node:fs', async () => {
+      const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...real,
+        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean } => ({
+          isFIFO: (): boolean => true,
+          isFile: (): boolean => false,
+        }),
+        readFileSync: (): Buffer => buf,
+      };
+    });
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+
+    const mod = await import('../src/commands/ask.js');
+    return { readStdin: mod.readStdin };
+  }
+
+  it('accepts input within the size limit', async () => {
+    const buf = Buffer.alloc(1024, 'a');
+    const { readStdin } = await importWithMockedFs(buf);
+
+    const result = readStdin();
+    expect(result).toHaveLength(1024);
+  });
+
+  it('throws when input exceeds STDIN_MAX_BYTES', async () => {
+    const buf = Buffer.alloc(STDIN_MAX_BYTES + 1, 'x');
+    const { readStdin } = await importWithMockedFs(buf);
+
+    expect(() => readStdin()).toThrow(/Stdin input exceeds/);
+  });
+
+  it('accepts input at exactly the limit', async () => {
+    const buf = Buffer.alloc(STDIN_MAX_BYTES, 'y');
+    const { readStdin } = await importWithMockedFs(buf);
+
+    const result = readStdin();
+    expect(result).toHaveLength(STDIN_MAX_BYTES);
   });
 });

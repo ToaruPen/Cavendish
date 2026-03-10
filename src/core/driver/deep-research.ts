@@ -224,7 +224,7 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       const msg = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
       throw new Error(
         `Failed to snapshot clipboard before copy (${msg}). `
-        + 'Aborting to preserve existing clipboard. Use --format markdown to export instead.',
+        + 'Aborting to preserve existing clipboard. Use --export markdown to download the report instead.',
       );
     }
 
