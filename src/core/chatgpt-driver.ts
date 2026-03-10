@@ -339,24 +339,21 @@ export class ChatGPTDriver {
       throw error;
     }
 
-    const count = await projectItem.count();
-    if (count > 1) {
-      for (let i = 0; i < count; i++) {
-        const text = await projectItem.nth(i).textContent();
-        if (text?.trim() === projectName) {
-          await projectItem.nth(i).click();
-          progress(`Conversation moved to project: ${projectName}`, quiet);
-          return;
-        }
-      }
-      await this.page.keyboard.press('Escape');
-      throw new Error(
-        `Multiple projects partially match "${projectName}" but none is an exact match. Please use the full project name.`,
-      );
+    const texts: (string | null)[] = await projectItem.evaluateAll(
+      (els) => els.map((el) => el.textContent),
+    );
+    const matchIndex = texts.findIndex((t) => t?.trim() === projectName);
+    if (matchIndex !== -1) {
+      await projectItem.nth(matchIndex).click();
+      progress(`Conversation moved to project: ${projectName}`, quiet);
+      return;
     }
-    await projectItem.first().click();
-
-    progress(`Conversation moved to project: ${projectName}`, quiet);
+    await this.page.keyboard.press('Escape');
+    throw new Error(
+      texts.length > 1
+        ? `Multiple projects partially match "${projectName}" but none is an exact match. Please use the full project name.`
+        : `Project "${projectName}" partially matched but is not an exact match (found: "${texts[0]?.trim() ?? ''}"). Please use the full project name.`,
+    );
   }
 
   // ── Composer + menu (submenu navigation) ───────────────────
@@ -584,21 +581,8 @@ export class ChatGPTDriver {
       },
     );
 
-    const messages: ConversationMessage[] = [];
-    for (const msg of rawMessages) {
-      if (
-        msg.role === 'assistant' &&
-        messages.length > 0 &&
-        messages[messages.length - 1].role === 'assistant'
-      ) {
-        messages[messages.length - 1] = msg;
-      } else {
-        messages.push(msg);
-      }
-    }
-
-    progress(`Read ${String(messages.length)} message(s)`, quiet);
-    return messages;
+    progress(`Read ${String(rawMessages.length)} message(s)`, quiet);
+    return rawMessages;
   }
 
   // ── Private ────────────────────────────────────────────────

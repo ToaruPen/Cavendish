@@ -4,6 +4,23 @@ import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { failValidation, outputList, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
+export function validateProjectArgs(
+  showChats: boolean,
+  createProject: boolean,
+  projectName: string | undefined,
+): string | null {
+  if (showChats && createProject) {
+    return '--chats and --create are mutually exclusive. Use one at a time.';
+  }
+  if (showChats && projectName === undefined) {
+    return '--chats requires --name. Use: cavendish projects --name "Project" --chats';
+  }
+  if (createProject && projectName === undefined) {
+    return '--create requires --name. Use: cavendish projects --create --name "Project"';
+  }
+  return null;
+}
+
 /**
  * `cavendish projects` — list projects, project chats, or create a project.
  */
@@ -37,13 +54,9 @@ export const projectsCommand = defineCommand({
     const showChats = args.chats === true;
     const createProject = args.create === true;
 
-    if (showChats && projectName === undefined) {
-      failValidation('--chats requires --name. Use: cavendish projects --name "Project" --chats', format);
-      return;
-    }
-
-    if (createProject && projectName === undefined) {
-      failValidation('--create requires --name. Use: cavendish projects --create --name "Project"', format);
+    const validationError = validateProjectArgs(showChats, createProject, projectName);
+    if (validationError !== null) {
+      failValidation(validationError, format);
       return;
     }
 
