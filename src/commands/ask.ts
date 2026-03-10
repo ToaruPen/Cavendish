@@ -1,67 +1,15 @@
-import { fstatSync, readFileSync } from 'node:fs';
-
 import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, extractArgsOrFail, extractFileArgs, findMissingFile } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, validateFileArgs } from '../core/cli-args.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
 const PRO_TIMEOUT_SEC = 2400;
-
-/**
- * Maximum stdin size (1 MB). This is a soft limit — the full buffer is read
- * into memory before the check, so it prevents oversized data from reaching
- * ChatGPT but does not guard against multi-GB allocations during the read.
- */
-export const STDIN_MAX_BYTES = 1_048_576;
-
-/**
- * Read piped stdin when running in a non-TTY context.
- * Returns the raw input, or an empty string when stdin is a TTY.
- * Throws if the input exceeds STDIN_MAX_BYTES.
- */
-export function readStdin(): string {
-  if (process.stdin.isTTY) {
-    return '';
-  }
-  let buf: Buffer;
-  try {
-    const stat = fstatSync(0);
-    if (!stat.isFIFO() && !stat.isFile()) {
-      return '';
-    }
-    buf = readFileSync(0);
-  } catch (error: unknown) {
-    throw new Error(
-      `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,
-    );
-  }
-  if (buf.length > STDIN_MAX_BYTES) {
-    throw new Error(
-      `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(buf.length)}). Reduce input size or use --file instead.`,
-    );
-  }
-  return buf.toString('utf-8');
-}
-
-/**
- * Combine optional stdin data with the user-supplied prompt.
- * When stdin data is present, it is prepended with a blank-line separator.
- */
-export function buildPrompt(prompt: string, stdinData: string): string {
-  if (stdinData.length === 0) {
-    return prompt;
-  }
-  if (prompt.length === 0) {
-    return stdinData;
-  }
-  return `${stdinData}\n\n${prompt}`;
-}
 
 /**
  * Resolve the effective timeout: use explicit --timeout if provided,
@@ -118,31 +66,6 @@ function validateThinkingEffort(
     return `--thinking-effort "${thinkingEffort}" is not valid for model "${model}". Allowed: ${allowedEfforts.join(', ')}`;
   }
   return undefined;
-}
-
-/** Validate file-related args (--file). Returns file paths or undefined on error. */
-export function validateFileArgs(format?: 'json' | 'text'): string[] | undefined {
-  let filePaths: string[];
-  try {
-    filePaths = extractFileArgs(process.argv);
-  } catch (error: unknown) {
-    failValidation(errorMessage(error), format);
-    return undefined;
-  }
-
-  let missingFile: string | undefined;
-  try {
-    missingFile = findMissingFile(filePaths);
-  } catch (error: unknown) {
-    failValidation(errorMessage(error), format);
-    return undefined;
-  }
-  if (missingFile !== undefined) {
-    failValidation(`file not found or not a regular file: ${missingFile}`, format);
-    return undefined;
-  }
-
-  return filePaths;
 }
 
 /** Validate --continue / --chat / --project mutual-exclusion rules.

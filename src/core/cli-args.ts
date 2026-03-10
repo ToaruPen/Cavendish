@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { fstatSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { errorMessage, failValidation } from './output-handler.js';
@@ -131,4 +131,84 @@ export function extractArgsOrFail(flag: string, format?: 'json' | 'text'): strin
     failValidation(errorMessage(error), format);
     return undefined;
   }
+}
+
+// ── Stdin / prompt helpers (shared by ask & deep-research) ───────────
+
+/**
+ * Maximum stdin size (1 MB). This is a soft limit — the full buffer is read
+ * into memory before the check, so it prevents oversized data from reaching
+ * ChatGPT but does not guard against multi-GB allocations during the read.
+ */
+export const STDIN_MAX_BYTES = 1_048_576;
+
+/**
+ * Read piped stdin when running in a non-TTY context.
+ * Returns the raw input, or an empty string when stdin is a TTY.
+ * Throws if the input exceeds STDIN_MAX_BYTES.
+ */
+export function readStdin(): string {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+  let buf: Buffer;
+  try {
+    const stat = fstatSync(0);
+    if (!stat.isFIFO() && !stat.isFile()) {
+      return '';
+    }
+    buf = readFileSync(0);
+  } catch (error: unknown) {
+    throw new Error(
+      `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,
+    );
+  }
+  if (buf.length > STDIN_MAX_BYTES) {
+    throw new Error(
+      `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(buf.length)}). Reduce input size or use --file instead.`,
+    );
+  }
+  return buf.toString('utf-8');
+}
+
+/**
+ * Combine optional stdin data with the user-supplied prompt.
+ * When stdin data is present, it is prepended with a blank-line separator.
+ */
+export function buildPrompt(prompt: string, stdinData: string): string {
+  if (stdinData.length === 0) {
+    return prompt;
+  }
+  if (prompt.length === 0) {
+    return stdinData;
+  }
+  return `${stdinData}\n\n${prompt}`;
+}
+
+/**
+ * Validate --file arguments from process.argv.
+ * Returns resolved absolute paths, or undefined on validation error.
+ */
+export function validateFileArgs(format?: 'json' | 'text'): string[] | undefined {
+  let filePaths: string[];
+  try {
+    filePaths = extractFileArgs(process.argv);
+  } catch (error: unknown) {
+    failValidation(errorMessage(error), format);
+    return undefined;
+  }
+
+  let missingFile: string | undefined;
+  try {
+    missingFile = findMissingFile(filePaths);
+  } catch (error: unknown) {
+    failValidation(errorMessage(error), format);
+    return undefined;
+  }
+  if (missingFile !== undefined) {
+    failValidation(`file not found or not a regular file: ${missingFile}`, format);
+    return undefined;
+  }
+
+  return filePaths;
 }

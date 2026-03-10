@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
-import { buildPrompt, STDIN_MAX_BYTES } from '../src/commands/ask.js';
+import { STDIN_MAX_BYTES, buildPrompt } from '../src/core/cli-args.js';
 
 describe('buildPrompt()', () => {
   it('returns prompt only when stdinData is empty', () => {
@@ -57,7 +57,7 @@ describe('readStdin() size limit', () => {
 
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
 
-    const mod = await import('../src/commands/ask.js');
+    const mod = await import('../src/core/cli-args.js');
     return { readStdin: mod.readStdin };
   }
 
