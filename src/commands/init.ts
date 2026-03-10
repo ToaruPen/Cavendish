@@ -4,7 +4,7 @@ import { defineCommand } from 'citty';
 import { type Page, errors } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
-import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
+import { BrowserManager, CHROME_PROFILE_DIR, resolveCdpBaseUrl } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
@@ -35,9 +35,9 @@ interface InitResult {
 /** Whether a CDP probe error has already been logged (suppress duplicates during polling). */
 let cdpErrorLogged = false;
 
-async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
+async function isLoggedInViaCdp(quiet: boolean, cdpBaseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/list`, {
+    const res = await fetch(`${cdpBaseUrl}/json/list`, {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) {
@@ -159,6 +159,7 @@ async function waitForLogin(
   cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  const cdpBaseUrl = resolveCdpBaseUrl();
   let activePage: Page = page;
   let pageUsable = true;
 
@@ -178,7 +179,7 @@ async function waitForLogin(
       }
     }
 
-    if (await isLoggedInViaCdp(quiet)) {
+    if (await isLoggedInViaCdp(quiet, cdpBaseUrl)) {
       return true;
     }
 
@@ -269,21 +270,34 @@ async function navigateToGoogleLogin(page: Page, quiet: boolean): Promise<void> 
  * using the old profile in memory) is terminated before re-launch.
  */
 async function killExistingChrome(quiet: boolean): Promise<void> {
+  const cdpUrl = resolveCdpBaseUrl();
+  const { chromium } = await import('playwright');
+
+  progress('Stopping existing Chrome process...', quiet);
+
+  let browser;
   try {
-    const { chromium } = await import('playwright');
-    progress('Stopping existing Chrome process...', quiet);
-    const browser = await chromium.connectOverCDP(CDP_BASE_URL);
-    try {
-      const cdpSession = await browser.newBrowserCDPSession();
-      await cdpSession.send('Browser.close');
-    } finally {
-      await browser.close();
-    }
+    browser = await chromium.connectOverCDP(cdpUrl);
+  } catch {
+    // Chrome not running or can't connect — nothing to stop
+    progress('No running Chrome found on CDP endpoint', quiet);
+    return;
+  }
+
+  try {
+    const cdpSession = await browser.newBrowserCDPSession();
+    await cdpSession.send('Browser.close');
     // Give Chrome a moment to fully shut down
     await new Promise((r) => setTimeout(r, 1_000));
     progress('Chrome process stopped', quiet);
-  } catch {
-    // Chrome not running or can't connect — that's fine
+  } catch (error: unknown) {
+    throw new CavendishError(
+      `Failed to stop Chrome via CDP (${error instanceof Error ? error.message : String(error)}). `
+      + 'Close Chrome manually before running --reset.',
+      'chrome_close_failed',
+    );
+  } finally {
+    await browser.close().catch(() => { /* connection may already be broken */ });
   }
 }
 

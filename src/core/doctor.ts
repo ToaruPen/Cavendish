@@ -12,7 +12,7 @@ import type { Page } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 
-import { BrowserManager, CDP_BASE_URL, CDP_ENDPOINT_FILE, CHROME_PROFILE_DIR } from './browser-manager.js';
+import { BrowserManager, CDP_ENDPOINT_FILE, CHROME_PROFILE_DIR, resolveCdpBaseUrl } from './browser-manager.js';
 import { errorMessage, progress } from './output-handler.js';
 
 /** Timeout for individual doctor checks (ms). */
@@ -45,7 +45,7 @@ export interface DoctorResult {
 
 async function checkCdp(): Promise<DoctorCheck> {
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/version`, {
+    const res = await fetch(`${resolveCdpBaseUrl()}/json/version`, {
       signal: AbortSignal.timeout(DOCTOR_CHECK_TIMEOUT_MS),
     });
     if (res.ok) {

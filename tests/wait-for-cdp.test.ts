@@ -44,7 +44,8 @@ async function importWithMocks(
   // Stub child_process so launch() doesn't spawn real Chrome
   vi.doMock('node:child_process', () => ({
     execFileSync: (): string => '',
-    spawn: (): { unref: () => void; once: (evt: string, cb: () => void) => void } => ({
+    spawn: (): { pid: number; unref: () => void; once: (evt: string, cb: () => void) => void } => ({
+      pid: 12345,
       unref: (): void => { /* noop stub */ },
       once: (evt: string, cb: () => void): void => {
         if (evt === 'spawn') {
@@ -55,7 +56,8 @@ async function importWithMocks(
     }),
   }));
 
-  // Stub fs so ensureProfileDirectories / saveCdpEndpoint don't touch disk
+  // Stub fs so ensureProfileDirectories / saveCdpEndpoint don't touch disk.
+  // readFileSync returns a fake DevToolsActivePort content (port on first line).
   vi.doMock('node:fs', async () => {
     const real = await vi.importActual<typeof import('node:fs')>('node:fs');
     return {
@@ -63,6 +65,7 @@ async function importWithMocks(
       mkdirSync: (): undefined => undefined,
       chmodSync: (): undefined => undefined,
       existsSync: (): boolean => true,
+      readFileSync: (): string => '54321\n/devtools/browser/fake-id',
       writeFileSync: (): undefined => undefined,
     };
   });
@@ -142,7 +145,7 @@ describe('waitForCdp fetch timeout', () => {
     if (result.status === 'rejected') {
       expect(result.reason).toBeInstanceOf(Error);
       expect((result.reason as Error).message).toMatch(
-        /did not respond on port/,
+        /did not start a CDP endpoint/,
       );
     }
 
