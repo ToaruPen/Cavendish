@@ -256,8 +256,13 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     // between snapshot and restore is negligible; unconditional restore is acceptable.
     if (clipboardSnapshot !== null) {
       await page.evaluate(async (snapshot: Record<string, string>[]) => {
-        if (snapshot.length === 0) {
-          // Original clipboard was empty — clear to restore that state.
+        // No items or all items have only empty representations → write empty text.
+        // Chrome rejects ClipboardItem with zero-byte Blobs ("Empty dictionary argument"),
+        // so we fall back to writeText('') for clipboards that had no meaningful content.
+        const hasContent = snapshot.some((reps) =>
+          Object.values(reps).some((b64) => b64.length > 0),
+        );
+        if (snapshot.length === 0 || !hasContent) {
           await navigator.clipboard.writeText('');
           return;
         }
