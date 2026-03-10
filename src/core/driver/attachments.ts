@@ -146,11 +146,27 @@ export async function attachFiles(page: Page, filePaths: string[], quiet = false
 // ── Shared helpers ──────────────────────────────────────────
 
 export async function waitForAttachmentTiles(page: Page, expected: number): Promise<void> {
+  // Wait for the expected number of file tiles to appear in the composer.
   await page.waitForFunction(
     ({ selector, count }: { selector: string; count: number }) =>
       document.querySelectorAll(selector).length >= count,
     { selector: SELECTORS.FILE_ATTACHMENT_TILE, count: expected },
     { timeout: 10_000 },
+  );
+
+  // Wait for upload completion: the submit button becomes enabled once all
+  // files finish uploading.  Without this, sendMessage() can fire before
+  // the server has processed the attachment, sending a prompt without the file.
+  // Check that the button is both visible AND not disabled.
+  await page.waitForFunction(
+    (selector: string) => {
+      const btn = document.querySelector(selector);
+      return btn !== null
+        && btn.getBoundingClientRect().height > 0
+        && !btn.hasAttribute('disabled');
+    },
+    SELECTORS.SUBMIT_BUTTON,
+    { timeout: 30_000 },
   );
 }
 
