@@ -451,7 +451,23 @@ export class ChatGPTDriver {
     // Wait for menu items to stabilize after SPA hydration.
     // On a fresh tab the React app may still be mounting, so menu
     // items can update from legacy to latest models mid-render.
-    await this.waitForModelMenuStable(menuItems);
+    const { populated, stabilized } = await this.waitForModelMenuStable(menuItems);
+
+    if (!populated) {
+      await this.page.keyboard.press('Escape');
+      throw new Error(
+        `Model picker menu never populated while selecting "${model}". `
+        + `Menu selector: ${SELECTORS.MODEL_MENU}, item selector: ${SELECTORS.MODEL_MENUITEM}. `
+        + 'The page may not have fully loaded — check CDP connection and ChatGPT availability.',
+      );
+    }
+    if (!stabilized) {
+      progress(
+        `Model picker did not stabilize within timeout while selecting "${model}" `
+        + `(menu: ${SELECTORS.MODEL_MENU}, item: ${SELECTORS.MODEL_MENUITEM}) — proceeding with current state`,
+        quiet,
+      );
+    }
 
     const item = menuItems.filter({ hasText: model });
 
@@ -698,11 +714,14 @@ export class ChatGPTDriver {
    * Wait for model picker menu items to stabilize after SPA hydration.
    * Polls both data-testid and textContent until two consecutive reads
    * produce the same snapshot, indicating React has finished updating.
+   *
+   * @returns `populated` — at least one menu item was found.
+   *          `stabilized` — two consecutive snapshots matched within the timeout.
    */
   private async waitForModelMenuStable(
     menuItems: Locator,
     maxWaitMs = 5000,
-  ): Promise<void> {
+  ): Promise<{ populated: boolean; stabilized: boolean }> {
     const snapshot = (): Promise<string> =>
       menuItems.evaluateAll((els) =>
         els.map((el) =>
@@ -718,16 +737,16 @@ export class ChatGPTDriver {
       const currentSnapshot = await snapshot();
 
       if (currentSnapshot === previousSnapshot && currentSnapshot.length > 0) {
-        return;
+        return { populated: true, stabilized: true };
       }
 
       previousSnapshot = currentSnapshot;
     }
-    // Timeout: proceed anyway.  The primary defence is the networkidle
-    // wait in getPage() which ensures the SPA has fetched the model list.
-    // This poll is a secondary safety net for edge cases where the menu
-    // re-renders after networkidle.  Throwing here would block the user
-    // on slow networks where the menu is likely correct but renders slowly.
+    // Timeout: the primary defence is the networkidle wait in getPage()
+    // which ensures the SPA has fetched the model list.  This poll is a
+    // secondary safety net for edge cases where the menu re-renders
+    // after networkidle.
+    return { populated: previousSnapshot.length > 0, stabilized: false };
   }
 
   private async findMenuItemByLabels(candidates: readonly string[]): Promise<Locator> {
