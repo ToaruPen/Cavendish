@@ -109,10 +109,9 @@ export class BrowserManager {
     // Wait for SPA hydration: ChatGPT fetches the model list and user
     // preferences via HTTP after DOM is ready.  Without this wait,
     // downstream code (model picker, sidebar) can see stale cached
-    // state.  networkidle fires once HTTP activity settles (WebSocket
-    // connections are excluded).  The timeout is a safety net — if a
-    // long-lived HTTP connection prevents networkidle we proceed and
-    // let callers handle any remaining staleness.
+    // state.  networkidle fires once there are no HTTP connections for
+    // 500 ms.  Persistent connections (WebSockets, SSE) can prevent it
+    // from firing — the 15 s timeout is the safety net for those cases.
     verbose('Waiting for SPA initialization...', isVerbose);
     await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch((e: unknown) => {
       if (e instanceof errors.TimeoutError) {

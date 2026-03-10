@@ -712,11 +712,12 @@ export class ChatGPTDriver {
 
   /**
    * Wait for model picker menu items to stabilize after SPA hydration.
-   * Polls both data-testid and textContent until two consecutive reads
-   * produce the same snapshot, indicating React has finished updating.
+   * Polls both data-testid and textContent until three consecutive reads
+   * (two consecutive matches) produce the same snapshot, indicating React
+   * has finished updating.
    *
    * @returns `populated` — at least one menu item was found.
-   *          `stabilized` — two consecutive snapshots matched within the timeout.
+   *          `stabilized` — consecutive snapshots matched within the timeout.
    */
   private async waitForModelMenuStable(
     menuItems: Locator,
@@ -729,7 +730,9 @@ export class ChatGPTDriver {
         ).join('|'),
       );
 
+    const REQUIRED_MATCHES = 2;
     let previousSnapshot = await snapshot();
+    let matchCount = 0;
     const deadline = Date.now() + maxWaitMs;
 
     while (Date.now() < deadline) {
@@ -737,7 +740,12 @@ export class ChatGPTDriver {
       const currentSnapshot = await snapshot();
 
       if (currentSnapshot === previousSnapshot && currentSnapshot.length > 0) {
-        return { populated: true, stabilized: true };
+        matchCount += 1;
+        if (matchCount >= REQUIRED_MATCHES) {
+          return { populated: true, stabilized: true };
+        }
+      } else {
+        matchCount = 0;
       }
 
       previousSnapshot = currentSnapshot;
