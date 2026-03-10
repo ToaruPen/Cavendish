@@ -18,7 +18,7 @@ import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversation
 import type { ConversationItem, ConversationMessage, DeepResearchExportFormat, ProjectItem, WaitForResponseOptions, WaitForResponseResult } from './chatgpt-types.js';
 import { attachFiles as attachFilesImpl, attachGitHubRepo as attachGitHubRepoImpl, attachGoogleDriveFile as attachGoogleDriveFileImpl, enableAgentMode as enableAgentModeImpl } from './driver/attachments.js';
 import { copyDeepResearchContent as copyDRContent, exportDeepResearch as exportDR, getDeepResearchResponse as getDRResponse, navigateToDeepResearch as navToDR, refreshDeepResearch as refreshDR, sendDeepResearchFollowUp as sendDRFollowUp, sendDeepResearchMessage as sendDRMsg, waitForDeepResearchResponse as waitForDRResponse } from './driver/deep-research.js';
-import { delay, isTimeoutError } from './driver/helpers.js';
+import { delay, isTimeoutError, POLL_INTERVAL_MS } from './driver/helpers.js';
 import { getAssistantMessageCount as getAssistantMsgCount, getLastResponse as getLastResp, waitForResponse as waitForResp } from './driver/response-handler.js';
 import { EFFORT_LABEL_CANDIDATES, MODEL_EFFORT_LEVELS, resolveModelCategory } from './model-config.js';
 import type { ThinkingEffortLevel } from './model-config.js';
@@ -443,11 +443,17 @@ export class ChatGPTDriver {
     await this.page.locator(SELECTORS.MODEL_SELECTOR_BUTTON).click();
     await this.page.locator(SELECTORS.MODEL_MENU).waitFor({ state: 'visible' });
 
-    const item = this.page
+    const menuItems = this.page
       .locator(SELECTORS.MODEL_MENU)
       .first()
-      .locator(SELECTORS.MODEL_MENUITEM)
-      .filter({ hasText: model });
+      .locator(SELECTORS.MODEL_MENUITEM);
+
+    // Wait for menu items to stabilize after SPA hydration.
+    // On a fresh tab the React app may still be mounting, so menu
+    // items can update from legacy to latest models mid-render.
+    await this.waitForModelMenuStable(menuItems);
+
+    const item = menuItems.filter({ hasText: model });
 
     const count = await item.count();
     if (count !== 1) {
@@ -686,6 +692,42 @@ export class ChatGPTDriver {
       }
     }
     return null;
+  }
+
+  /**
+   * Wait for model picker menu items to stabilize after SPA hydration.
+   * Polls both data-testid and textContent until two consecutive reads
+   * produce the same snapshot, indicating React has finished updating.
+   */
+  private async waitForModelMenuStable(
+    menuItems: Locator,
+    maxWaitMs = 5000,
+  ): Promise<void> {
+    const snapshot = (): Promise<string> =>
+      menuItems.evaluateAll((els) =>
+        els.map((el) =>
+          `${el.getAttribute('data-testid') ?? ''}:${el.textContent}`,
+        ).join('|'),
+      );
+
+    let previousSnapshot = await snapshot();
+    const deadline = Date.now() + maxWaitMs;
+
+    while (Date.now() < deadline) {
+      await delay(POLL_INTERVAL_MS);
+      const currentSnapshot = await snapshot();
+
+      if (currentSnapshot === previousSnapshot && currentSnapshot.length > 0) {
+        return;
+      }
+
+      previousSnapshot = currentSnapshot;
+    }
+    // Timeout: proceed anyway.  The primary defence is the networkidle
+    // wait in getPage() which ensures the SPA has fetched the model list.
+    // This poll is a secondary safety net for edge cases where the menu
+    // re-renders after networkidle.  Throwing here would block the user
+    // on slow networks where the menu is likely correct but renders slowly.
   }
 
   private async findMenuItemByLabels(candidates: readonly string[]): Promise<Locator> {
