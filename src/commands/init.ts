@@ -291,11 +291,14 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
 function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   if (process.platform === 'win32') {
     // Use PowerShell's Get-CimInstance (replaces deprecated WMIC removed in Win11 24H2).
-    const psPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    // Resolve PowerShell path via %SystemRoot% so non-standard Windows installs work.
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows';
+    const psPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
     if (!existsSync(psPath)) {
       return null;
     }
-    const escapedDir = CHROME_PROFILE_DIR.replaceAll('\\', '\\\\');
+    // Escape backslashes for WMI LIKE pattern and single quotes for WQL string literal.
+    const escapedDir = CHROME_PROFILE_DIR.replaceAll('\\', '\\\\').replaceAll("'", "''");
     return {
       cmd: psPath,
       args: [
@@ -310,9 +313,12 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   if (!pgrepPath) {
     return null;
   }
+  // Escape regex metacharacters in the profile dir path so pgrep -f
+  // treats them literally (e.g. ".cavendish" won't match "Xcavendish").
+  const escapedDir = CHROME_PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return {
     cmd: pgrepPath,
-    args: ['-f', '--', `--user-data-dir=${CHROME_PROFILE_DIR}`],
+    args: ['-f', '--', `--user-data-dir=${escapedDir}`],
   };
 }
 
@@ -350,6 +356,9 @@ export function findChromeByProfileDir(): number[] | null {
       return [];
     }
     // Any other error (timeout, spawn failure, etc.) — scanner failed.
+    // The original error details (timeout vs EPERM vs syntax) are intentionally
+    // collapsed to null here; the caller surfaces the "scanner unavailable"
+    // CavendishError with user guidance to close Chrome manually.
     return null;
   }
 }
