@@ -357,8 +357,11 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
     checks.push(...skipPlaywrightChecks(detail));
   } finally {
     try {
-      await browser.closePage();
-      await browser.close();
+      try {
+        await browser.closePage();
+      } finally {
+        await browser.close();
+      }
     } finally {
       releaseLock();
     }

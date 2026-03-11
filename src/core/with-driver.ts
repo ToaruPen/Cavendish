@@ -40,10 +40,13 @@ export async function withDriver(
     failStructured(error, format);
   } finally {
     try {
-      verbose('Closing tab...', isVerbose);
-      await browser.closePage();
-      verbose('Closing Playwright connection...', isVerbose);
-      await browser.close();
+      try {
+        verbose('Closing tab...', isVerbose);
+        await browser.closePage();
+      } finally {
+        verbose('Closing Playwright connection...', isVerbose);
+        await browser.close();
+      }
     } finally {
       verbose('Releasing process lock...', isVerbose);
       releaseLock();

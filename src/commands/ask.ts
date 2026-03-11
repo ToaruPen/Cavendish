@@ -419,8 +419,11 @@ export const askCommand = defineCommand({
       failStructured(error, format);
     } finally {
       try {
-        await browser.closePage();
-        await browser.close();
+        try {
+          await browser.closePage();
+        } finally {
+          await browser.close();
+        }
       } finally {
         verbose('Releasing process lock...', isVerbose);
         releaseLock();
