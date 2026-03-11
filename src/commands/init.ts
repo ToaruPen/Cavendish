@@ -103,7 +103,8 @@ function findAlternateTab(closedPage: Page): Page | null {
       }
     }
   } catch {
-    // Context may be unavailable if browser disconnected
+    // Intentional: probe-and-continue — ignore errors when probing
+    // browser/context state (e.g. browser disconnected, context destroyed).
   }
   return null;
 }
@@ -279,6 +280,10 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
     }
     await new Promise((r) => setTimeout(r, 250));
   }
+  throw new Error(
+    `Chrome is still responding at ${cdpUrl} after ${String(timeoutMs)}ms. `
+    + 'Close Chrome manually before running --reset.',
+  );
 }
 
 async function killExistingChrome(quiet: boolean): Promise<void> {
