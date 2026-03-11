@@ -309,7 +309,11 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
       'chrome_close_failed',
     );
   } finally {
-    await browser.close().catch(() => { /* connection may already be broken */ });
+    await browser.close().catch((error: unknown) => {
+      const msg = errorMessage(error);
+      if (/closed|disconnected/i.test(msg)) { return; }
+      console.error(`[cavendish] browser.close() failed: ${msg}`);
+    });
   }
 }
 
