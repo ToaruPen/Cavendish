@@ -1,5 +1,13 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -444,19 +452,47 @@ export class BrowserManager {
    * Prevents accidentally deleting an endpoint written by a different
    * Chrome process that launched successfully in the meantime.
    *
-   * When the file is missing or unreadable, we skip deletion rather than
-   * risking removal of a file being written by another process.
+   * Uses an atomic rename-then-verify approach to avoid a TOCTOU race:
+   * 1. Atomically rename the endpoint file to a temporary path (removes
+   *    it from the well-known location so concurrent writers create a
+   *    fresh file instead of overwriting our copy).
+   * 2. Read the renamed file and verify the PID matches.
+   * 3. If PID matches: delete the temp file (stale endpoint removed).
+   * 4. If PID does NOT match: rename the temp file back to restore the
+   *    newer endpoint written by another process.
    */
   private removeStaleCdpEndpoint(pid: number): void {
+    const tmpPath = `${CDP_ENDPOINT_FILE}.removing.${String(pid)}`;
     try {
-      const saved = readCdpEndpoint();
-      if (saved?.pid === pid) {
-        unlinkSync(CDP_ENDPOINT_FILE);
-      }
-      // If saved is null (file missing/corrupt/unreadable), do nothing.
-      // Another process may be writing a new endpoint concurrently.
+      // Step 1: Atomically move the file away from the well-known path.
+      // renameSync is atomic on POSIX for same-filesystem renames.
+      renameSync(CDP_ENDPOINT_FILE, tmpPath);
     } catch {
-      // unlinkSync failed — file may already be gone, nothing to do.
+      // File missing or already renamed by another process — nothing to do.
+      return;
+    }
+
+    try {
+      // Step 2: Read the file we just moved and verify the PID.
+      const raw = readFileSync(tmpPath, 'utf8');
+      const data = JSON.parse(raw) as Record<string, unknown>;
+      if (data.pid === pid) {
+        // Step 3: PID matches — this endpoint is stale, remove it.
+        unlinkSync(tmpPath);
+      } else {
+        // Step 4: PID does not match — another process wrote a newer
+        // endpoint before our rename. Restore it.
+        renameSync(tmpPath, CDP_ENDPOINT_FILE);
+      }
+    } catch {
+      // Read/parse/unlink failed — try to restore the file to avoid
+      // losing a valid endpoint. If restore also fails, the file is
+      // already gone and another process will recreate it on next launch.
+      try {
+        renameSync(tmpPath, CDP_ENDPOINT_FILE);
+      } catch {
+        // Both paths failed — file is already cleaned up or inaccessible.
+      }
     }
   }
 
