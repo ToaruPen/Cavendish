@@ -475,34 +475,46 @@ export async function waitForPidExit(pids: number[], timeoutMs: number): Promise
   }
 }
 
-async function killExistingChrome(quiet: boolean): Promise<void> {
-  const endpoint = readCdpEndpoint();
-  if (!endpoint) {
-    // CDP endpoint file is missing — try to find Chrome by its profile dir argument.
-    progress('CDP endpoint file not found — scanning for Chrome process by profile directory...', quiet);
-    const pids = findChromeByProfileDir();
-    if (pids === null) {
-      // Scanner unavailable — cannot determine Chrome state
+/**
+ * Scan for Chrome processes by profile directory and kill them.
+ *
+ * - If scanner is unavailable and `throwOnScannerFailure` is true, throws CavendishError.
+ * - If scanner is unavailable and `throwOnScannerFailure` is false, silently returns.
+ * - If Chrome processes are found but cannot be killed, throws CavendishError.
+ */
+async function killChromeByProfileScan(quiet: boolean, throwOnScannerFailure: boolean): Promise<void> {
+  const pids = findChromeByProfileDir();
+  if (pids === null) {
+    if (throwOnScannerFailure) {
       throw new CavendishError(
         'Cannot detect running Chrome processes (process scanner unavailable).',
         'chrome_close_failed',
         'Close Chrome manually before running --reset.',
       );
     }
-    if (pids.length === 0) {
-      progress('No running Chrome found for this profile', quiet);
-      return;
-    }
-    const killed = killChromePids(pids, quiet);
-    if (!killed) {
-      throw new CavendishError(
-        'Found Chrome process(es) but failed to stop them.',
-        'chrome_close_failed',
-        'Close Chrome manually before running --reset.',
-      );
-    }
-    // Wait for processes to exit (up to 5s) before profile deletion
-    await waitForPidExit(pids, 5_000);
+    return;
+  }
+  if (pids.length === 0) {
+    progress('No running Chrome found for this profile', quiet);
+    return;
+  }
+  const killed = killChromePids(pids, quiet);
+  if (!killed) {
+    throw new CavendishError(
+      'Found Chrome process(es) but failed to stop them.',
+      'chrome_close_failed',
+      'Close Chrome manually before running --reset.',
+    );
+  }
+  await waitForPidExit(pids, 5_000);
+}
+
+async function killExistingChrome(quiet: boolean): Promise<void> {
+  const endpoint = readCdpEndpoint();
+  if (!endpoint) {
+    // CDP endpoint file is missing — try to find Chrome by its profile dir argument.
+    progress('CDP endpoint file not found — scanning for Chrome process by profile directory...', quiet);
+    await killChromeByProfileScan(quiet, true);
     return;
   }
   const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
@@ -517,7 +529,10 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
   } catch (error: unknown) {
     const msg = errorMessage(error);
     if (msg.includes('ECONNREFUSED')) {
-      progress('No running Chrome found', quiet);
+      // Stale endpoint — CDP port no longer active. Chrome may still be running
+      // with a different port (e.g. after a restart), so scan by profile dir.
+      progress('CDP connection refused — scanning for Chrome process by profile directory...', quiet);
+      await killChromeByProfileScan(quiet, false);
       return;
     }
     throw new CavendishError(
