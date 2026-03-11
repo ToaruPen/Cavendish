@@ -1,6 +1,7 @@
 import { BrowserManager } from './browser-manager.js';
 import { ChatGPTDriver } from './chatgpt-driver.js';
 import { failStructured, verbose } from './output-handler.js';
+import { acquireLock, releaseLock } from './process-lock.js';
 
 export interface WithDriverOptions {
   /** Browser permissions to grant for the ChatGPT origin (default: none). */
@@ -25,6 +26,10 @@ export async function withDriver(
   const isVerbose = options?.verbose ?? false;
   const browser = new BrowserManager();
 
+  verbose('Acquiring process lock...', isVerbose);
+  acquireLock();
+  verbose('Process lock acquired', isVerbose);
+
   try {
     verbose('Acquiring browser page...', isVerbose);
     const page = await browser.getPage(quiet, options?.permissions ?? [], isVerbose);
@@ -35,10 +40,15 @@ export async function withDriver(
   } catch (error: unknown) {
     failStructured(error, format);
   } finally {
-    verbose('Closing tab...', isVerbose);
-    await browser.closePage();
-    verbose('Closing Playwright connection...', isVerbose);
-    await browser.close();
-    verbose('Cleanup complete', isVerbose);
+    try {
+      verbose('Closing tab...', isVerbose);
+      await browser.closePage();
+      verbose('Closing Playwright connection...', isVerbose);
+      await browser.close();
+    } finally {
+      verbose('Releasing process lock...', isVerbose);
+      releaseLock();
+      verbose('Cleanup complete', isVerbose);
+    }
   }
 }

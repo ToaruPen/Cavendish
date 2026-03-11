@@ -6,6 +6,7 @@ import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-drive
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, validateFileArgs } from '../core/cli-args.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
+import { acquireLock, releaseLock } from '../core/process-lock.js';
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -349,6 +350,10 @@ export const askCommand = defineCommand({
       verbose(`Target chat: ${validated.chatId}`, isVerbose);
     }
 
+    verbose('Acquiring process lock...', isVerbose);
+    acquireLock();
+    verbose('Process lock acquired', isVerbose);
+
     const browser = new BrowserManager();
 
     try {
@@ -414,8 +419,13 @@ export const askCommand = defineCommand({
     } catch (error: unknown) {
       failStructured(error, format);
     } finally {
-      await browser.closePage();
-      await browser.close();
+      try {
+        await browser.closePage();
+        await browser.close();
+      } finally {
+        verbose('Releasing process lock...', isVerbose);
+        releaseLock();
+      }
     }
   },
 });

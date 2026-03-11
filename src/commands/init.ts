@@ -8,6 +8,7 @@ import { BrowserManager, CHROME_PROFILE_DIR, readCdpEndpoint, resolveCdpBaseUrl 
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
+import { acquireLock, releaseLock } from '../core/process-lock.js';
 
 /** Polling interval (ms) while waiting for user to log in. */
 const LOGIN_POLL_INTERVAL_MS = 3_000;
@@ -364,6 +365,7 @@ function reportProfileStatus(quiet: boolean): void {
  * Connect to Chrome, optionally navigate to Google login, verify login, and return the init result.
  */
 async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitResult> {
+  acquireLock();
   const browser = new BrowserManager();
 
   try {
@@ -392,8 +394,12 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       loggedIn,
     };
   } finally {
-    await browser.closePage();
-    await browser.close();
+    try {
+      await browser.closePage();
+      await browser.close();
+    } finally {
+      releaseLock();
+    }
   }
 }
 
