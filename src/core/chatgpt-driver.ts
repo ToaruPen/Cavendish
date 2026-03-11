@@ -404,12 +404,13 @@ export class ChatGPTDriver {
 
   // ── Attachments (delegated) ────────────────────────────────
 
-  async attachGoogleDriveFile(fileName: string, quiet = false): Promise<void> {
+  async attachGoogleDriveFile(fileName: string, quiet = false, sendButtonSelector?: string): Promise<void> {
     await attachGoogleDriveFileImpl(
       this.page,
       fileName,
       (lp, q) => this.openComposerMenuItem(lp, q),
       quiet,
+      sendButtonSelector,
     );
   }
 
@@ -430,8 +431,8 @@ export class ChatGPTDriver {
     );
   }
 
-  async attachFiles(filePaths: string[], quiet = false): Promise<void> {
-    await attachFilesImpl(this.page, filePaths, quiet);
+  async attachFiles(filePaths: string[], quiet = false, sendButtonSelector?: string): Promise<void> {
+    await attachFilesImpl(this.page, filePaths, quiet, sendButtonSelector);
   }
 
   // ── Model & messaging ──────────────────────────────────────

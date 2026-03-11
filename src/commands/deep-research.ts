@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 
 import { defineCommand } from 'citty';
 
-import { assertValidChatId } from '../constants/selectors.js';
+import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG } from '../core/cli-args.js';
 import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
@@ -200,7 +200,7 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, t
     case 'initial':
       await driver.navigateToDeepResearch(quiet);
       if (mode.filePaths.length > 0) {
-        await driver.attachFiles(mode.filePaths, quiet);
+        await driver.attachFiles(mode.filePaths, quiet, SELECTORS.SEND_BUTTON);
       }
       progress('Sending Deep Research query...', quiet);
       await driver.sendDeepResearchMessage(mode.prompt);
