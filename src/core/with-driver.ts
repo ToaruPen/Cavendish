@@ -41,7 +41,7 @@ export async function withDriver(
     // Register a cleanup callback so SIGINT/SIGTERM can close the tab
     // before process.exit(). closePage() is idempotent — safe to call
     // even if the page is already closed.
-    unregisterPageCleanup = registerCleanup(async () => {
+    unregisterPageCleanup = registerCleanup(async (): Promise<void> => {
       await browser.closePage();
     });
 
