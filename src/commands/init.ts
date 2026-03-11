@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
-import { type Page, errors } from 'playwright';
+import { type Browser, type Page, errors } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CHROME_PROFILE_DIR, resolveCdpBaseUrl } from '../core/browser-manager.js';
@@ -275,13 +275,20 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
 
   progress('Stopping existing Chrome process...', quiet);
 
-  let browser;
+  let browser: Browser | undefined;
   try {
     browser = await chromium.connectOverCDP(cdpUrl);
-  } catch {
-    // Chrome not running or can't connect — nothing to stop
-    progress('No running Chrome found on CDP endpoint', quiet);
-    return;
+  } catch (error: unknown) {
+    const msg = errorMessage(error);
+    if (msg.includes('ECONNREFUSED')) {
+      progress('No running Chrome found', quiet);
+      return;
+    }
+    throw new CavendishError(
+      `Cannot connect to Chrome via CDP: ${msg}`,
+      'cdp_unavailable',
+      'Ensure Chrome is running with --remote-debugging-port, or run `cavendish init` to relaunch.',
+    );
   }
 
   try {
