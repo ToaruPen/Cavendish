@@ -16,19 +16,76 @@ const SIGINT_EXIT_CODE = 130;
 /** SIGTERM exit code per POSIX convention (128 + 15). */
 const SIGTERM_EXIT_CODE = 143;
 
+/** Maximum time to wait for cleanup callbacks before forcing exit. */
+const CLEANUP_TIMEOUT_MS = 3_000;
+
 /** Guard against duplicate registration (Node does NOT deduplicate listeners). */
 let registered = false;
+
+/** Set of active cleanup callbacks to run before process.exit(). */
+const cleanupCallbacks = new Set<() => void | Promise<void>>();
+
+/**
+ * Register a cleanup callback that will run before process.exit() on
+ * SIGINT/SIGTERM. Returns an unregister function to remove the callback.
+ *
+ * Cleanup callbacks are intended for restoring transient external state
+ * (e.g. clipboard contents) that would otherwise be lost when the
+ * process exits abruptly. They run with a hard timeout to prevent
+ * hanging the shutdown sequence.
+ *
+ * @example
+ * ```ts
+ * const unregister = registerCleanup(() => restoreClipboard());
+ * try {
+ *   // ... do work that modifies clipboard ...
+ * } finally {
+ *   unregister(); // normal path handles its own cleanup
+ * }
+ * ```
+ */
+export function registerCleanup(fn: () => void | Promise<void>): () => void {
+  cleanupCallbacks.add(fn);
+  return (): void => {
+    cleanupCallbacks.delete(fn);
+  };
+}
+
+/**
+ * Run all registered cleanup callbacks with a hard timeout.
+ * Uses Promise.allSettled so one failing callback does not block others.
+ */
+async function runCleanupCallbacks(): Promise<void> {
+  if (cleanupCallbacks.size === 0) {
+    return;
+  }
+  const promises = [...cleanupCallbacks].map((fn) => {
+    try {
+      return Promise.resolve(fn());
+    } catch {
+      // Synchronous throw — treat as settled (rejected).
+      return Promise.resolve();
+    }
+  });
+  await Promise.race([
+    Promise.allSettled(promises),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, CLEANUP_TIMEOUT_MS);
+    }),
+  ]);
+}
 
 /**
  * Register process-level signal handlers for graceful shutdown.
  * Idempotent — safe to call more than once; subsequent calls are no-ops.
  *
- * The handlers log a shutdown message to stderr and exit with the
- * POSIX-conventional exit code. `process.exit()` bypasses any pending
- * async finally blocks (e.g. `withDriver()`'s `browser.close()`), but
- * this is acceptable: `close()` only tears down the Playwright CDP
- * websocket — Chrome persists as a detached process by design, and
- * the OS reclaims the socket on process exit.
+ * The handlers log a shutdown message to stderr, run any registered
+ * cleanup callbacks (with a timeout), and exit with the POSIX-conventional
+ * exit code. `process.exit()` bypasses any pending async finally blocks
+ * (e.g. `withDriver()`'s `browser.close()`), but this is acceptable:
+ * `close()` only tears down the Playwright CDP websocket — Chrome
+ * persists as a detached process by design, and the OS reclaims the
+ * socket on process exit.
  */
 export function registerSignalHandlers(): void {
   if (registered) {
@@ -44,11 +101,15 @@ function handleSigint(): void {
   // is piped (process.stderr.write is async on POSIX pipes).
   writeSync(2, '\n[cavendish] Shutting down (SIGINT)...\n');
   releaseLock();
-  process.exit(SIGINT_EXIT_CODE);
+  void runCleanupCallbacks().finally(() => {
+    process.exit(SIGINT_EXIT_CODE);
+  });
 }
 
 function handleSigterm(): void {
   writeSync(2, '[cavendish] Shutting down (SIGTERM)...\n');
   releaseLock();
-  process.exit(SIGTERM_EXIT_CODE);
+  void runCleanupCallbacks().finally(() => {
+    process.exit(SIGTERM_EXIT_CODE);
+  });
 }

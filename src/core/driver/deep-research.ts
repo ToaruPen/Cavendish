@@ -10,6 +10,7 @@ import type { Frame, Page } from 'playwright';
 import { CHATGPT_BASE_URL, SELECTORS } from '../../constants/selectors.js';
 import type { DeepResearchExportFormat, WaitForResponseResult } from '../chatgpt-types.js';
 import { progress } from '../output-handler.js';
+import { registerCleanup } from '../shutdown.js';
 
 import { DEFAULT_TIMEOUT_MS, computeIframeWaitDeadline, computePhaseDeadline, delay, isFrameDetachedError, isTimeoutError, POLL_INTERVAL_MS } from './helpers.js';
 
@@ -198,6 +199,7 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
   // content. Returns empty array for empty clipboard (restore clears it).
   // Throws on API failure to avoid irreversible clipboard destruction.
   let clipboardSnapshot: Record<string, string>[] | null = null;
+  let unregisterCleanup: (() => void) | null = null;
 
   try {
     try {
@@ -228,6 +230,11 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
       );
     }
 
+    // Register signal cleanup so SIGINT/SIGTERM restores clipboard before exit.
+    // The finally block unregisters this since normal flow handles its own restore.
+    const snapshot = clipboardSnapshot;
+    unregisterCleanup = registerCleanup(() => restoreClipboard(page, snapshot));
+
     // Clear clipboard so we can detect copy-button failure (empty → not updated).
     // clipboardSnapshot is guaranteed non-null here because snapshot failure throws above.
     await page.evaluate(() => navigator.clipboard.writeText(''));
@@ -254,37 +261,57 @@ export async function copyDeepResearchContent(page: Page): Promise<string> {
     // Restore the original clipboard. The operation above (menu open → copy click
     // → readText) takes ~2-3s, so the risk of user-initiated clipboard changes
     // between snapshot and restore is negligible; unconditional restore is acceptable.
+    //
+    // IMPORTANT: unregister the signal cleanup AFTER restore completes, not before.
+    // If a signal arrives during restore, the cleanup callback is still registered
+    // and runCleanupCallbacks() will also attempt restore (harmless double-call
+    // since restoreClipboard has a .catch()). Unregistering first would create a
+    // race window where a signal could fire with no cleanup registered.
     if (clipboardSnapshot !== null) {
-      await page.evaluate(async (snapshot: Record<string, string>[]) => {
-        // No items or all items have only empty representations → write empty text.
-        // Chrome rejects ClipboardItem with zero-byte Blobs ("Empty dictionary argument"),
-        // so we fall back to writeText('') for clipboards that had no meaningful content.
-        const hasContent = snapshot.some((reps) =>
-          Object.values(reps).some((b64) => b64.length > 0),
-        );
-        if (snapshot.length === 0 || !hasContent) {
-          await navigator.clipboard.writeText('');
-          return;
-        }
-        const items = snapshot.map((representations) => {
-          const blobMap: Record<string, Blob> = {};
-          for (const [type, base64] of Object.entries(representations)) {
-            const binary = atob(base64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i += 1) {
-              bytes[i] = binary.charCodeAt(i);
-            }
-            blobMap[type] = new Blob([bytes], { type });
-          }
-          return new ClipboardItem(blobMap);
-        });
-        await navigator.clipboard.write(items);
-      }, clipboardSnapshot).catch((restoreError: unknown) => {
-        const msg = restoreError instanceof Error ? restoreError.message : String(restoreError);
-        progress(`Warning: failed to restore clipboard (${msg}). Deep Research content may remain on clipboard.`, false);
-      });
+      await restoreClipboard(page, clipboardSnapshot);
+    }
+    if (unregisterCleanup) {
+      unregisterCleanup();
     }
   }
+}
+
+/**
+ * Restore clipboard from a previously captured snapshot.
+ * Shared between the normal finally-block path and the signal cleanup path.
+ */
+async function restoreClipboard(
+  page: Page,
+  snapshot: Record<string, string>[],
+): Promise<void> {
+  await page.evaluate(async (snap: Record<string, string>[]) => {
+    // No items or all items have only empty representations → write empty text.
+    // Chrome rejects ClipboardItem with zero-byte Blobs ("Empty dictionary argument"),
+    // so we fall back to writeText('') for clipboards that had no meaningful content.
+    const hasContent = snap.some((reps) =>
+      Object.values(reps).some((b64) => b64.length > 0),
+    );
+    if (snap.length === 0 || !hasContent) {
+      await navigator.clipboard.writeText('');
+      return;
+    }
+    const items = snap.map((representations) => {
+      const blobMap: Record<string, Blob> = {};
+      for (const [type, base64] of Object.entries(representations)) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        blobMap[type] = new Blob([bytes], { type });
+      }
+      return new ClipboardItem(blobMap);
+    });
+    await navigator.clipboard.write(items);
+  }, snapshot).catch((restoreError: unknown) => {
+    const msg = restoreError instanceof Error ? restoreError.message : String(restoreError);
+    progress(`Warning: failed to restore clipboard (${msg}). Deep Research content may remain on clipboard.`, false);
+  });
 }
 
 export async function exportDeepResearch(

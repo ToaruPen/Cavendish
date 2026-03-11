@@ -7,6 +7,7 @@ describe('registerSignalHandlers', () => {
   beforeEach(() => {
     // Reset module state so the idempotent guard resets between tests
     vi.resetModules();
+    vi.useFakeTimers();
     registeredHandlers.length = 0;
     vi.spyOn(process, 'on').mockImplementation(((event: string, handler: (...args: unknown[]) => void) => {
       registeredHandlers.push({ event, handler });
@@ -16,6 +17,7 @@ describe('registerSignalHandlers', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('registers a SIGINT handler', async () => {
@@ -46,6 +48,9 @@ describe('registerSignalHandlers', () => {
     expect(entry).toBeDefined();
     entry?.handler();
 
+    // process.exit() is called after async cleanup callbacks resolve
+    await vi.advanceTimersByTimeAsync(0);
+
     expect(exitSpy).toHaveBeenCalledWith(130);
   });
 
@@ -58,6 +63,9 @@ describe('registerSignalHandlers', () => {
     const entry = registeredHandlers.find((h) => h.event === 'SIGTERM');
     expect(entry).toBeDefined();
     entry?.handler();
+
+    // process.exit() is called after async cleanup callbacks resolve
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(exitSpy).toHaveBeenCalledWith(143);
   });
