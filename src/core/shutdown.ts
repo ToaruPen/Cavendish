@@ -25,8 +25,8 @@ let registered = false;
 /** Set of active cleanup callbacks to run before process.exit(). */
 const cleanupCallbacks = new Set<() => void | Promise<void>>();
 
-/** Re-entrancy guard to prevent concurrent cleanup runs (e.g. SIGINT + SIGTERM). */
-let cleanupRunning = false;
+/** Shared cleanup promise so re-entrant calls await the same in-flight cleanup. */
+let cleanupPromise: Promise<void> | null = null;
 
 /**
  * Register a cleanup callback that will run before process.exit() on
@@ -57,34 +57,42 @@ export function registerCleanup(fn: () => void | Promise<void>): () => void {
 /**
  * Run all registered cleanup callbacks with a hard timeout.
  * Uses Promise.allSettled so one failing callback does not block others.
- * Guarded against re-entrancy — if both SIGINT and SIGTERM fire before
- * process.exit(), only the first invocation runs the callbacks.
+ * Re-entrant safe — if both SIGINT and SIGTERM fire before process.exit(),
+ * the second call awaits the same in-flight cleanup promise instead of
+ * skipping it.
  */
 async function runCleanupCallbacks(): Promise<void> {
-  if (cleanupCallbacks.size === 0 || cleanupRunning) {
+  if (cleanupCallbacks.size === 0) {
     return;
   }
-  cleanupRunning = true;
-  const promises = [...cleanupCallbacks].map((fn) => {
-    try {
-      return Promise.resolve(fn());
-    } catch (e: unknown) {
-      // Synchronous throw — treat as settled (rejected).
-      const error = e instanceof Error ? e : new Error(String(e));
-      return Promise.reject(error);
-    }
-  });
-  const results = await Promise.race([
-    Promise.allSettled(promises),
-    new Promise<PromiseSettledResult<void>[]>((resolve) => {
-      setTimeout(resolve, CLEANUP_TIMEOUT_MS, []);
-    }),
-  ]);
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      writeSync(2, `[cavendish] cleanup callback failed: ${String(result.reason)}\n`);
-    }
+  if (cleanupPromise) {
+    return cleanupPromise;
   }
+  cleanupPromise = (async (): Promise<void> => {
+    const promises = [...cleanupCallbacks].map((fn) => {
+      try {
+        return Promise.resolve(fn());
+      } catch (e: unknown) {
+        // Synchronous throw — log and treat as settled (rejected).
+        const msg = e instanceof Error ? e.message : String(e);
+        writeSync(2, `[cavendish] cleanup callback threw synchronously: ${msg}\n`);
+        const error = e instanceof Error ? e : new Error(String(e));
+        return Promise.reject(error);
+      }
+    });
+    const results = await Promise.race([
+      Promise.allSettled(promises),
+      new Promise<PromiseSettledResult<void>[]>((resolve) => {
+        setTimeout(resolve, CLEANUP_TIMEOUT_MS, []);
+      }),
+    ]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        writeSync(2, `[cavendish] cleanup callback failed: ${String(result.reason)}\n`);
+      }
+    }
+  })();
+  return cleanupPromise;
 }
 
 /**
