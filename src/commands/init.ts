@@ -437,8 +437,12 @@ function sigkillPids(pids: Set<number>): void {
   for (const pid of pids) {
     try {
       process.kill(pid, 'SIGKILL');
-    } catch {
-      // ESRCH = already gone, ignore
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ESRCH') {
+        // EPERM or other failure — log but continue with remaining PIDs
+        progress(`Warning: SIGKILL failed for PID ${String(pid)}: ${code ?? 'unknown'}`, false);
+      }
     }
   }
 }
