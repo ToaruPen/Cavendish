@@ -2,6 +2,7 @@ import { BrowserManager } from './browser-manager.js';
 import { ChatGPTDriver } from './chatgpt-driver.js';
 import { failStructured, verbose } from './output-handler.js';
 import { acquireLock, releaseLock } from './process-lock.js';
+import { registerCleanup } from './shutdown.js';
 
 export interface WithDriverOptions {
   /** Browser permissions to grant for the ChatGPT origin (default: none). */
@@ -26,12 +27,24 @@ export async function withDriver(
   const isVerbose = options?.verbose ?? false;
   const browser = new BrowserManager();
 
+  // Registered after getPage() so signal handlers can close the tab
+  // even when process.exit() bypasses the finally block.
+  let unregisterPageCleanup: (() => void) | undefined;
+
   try {
     verbose('Acquiring process lock...', isVerbose);
     acquireLock();
     verbose('Process lock acquired', isVerbose);
     verbose('Acquiring browser page...', isVerbose);
     const page = await browser.getPage(quiet, options?.permissions ?? [], isVerbose);
+
+    // Register a cleanup callback so SIGINT/SIGTERM can close the tab
+    // before process.exit(). closePage() is idempotent — safe to call
+    // even if the page is already closed.
+    unregisterPageCleanup = registerCleanup(async () => {
+      await browser.closePage();
+    });
+
     verbose('Creating ChatGPTDriver...', isVerbose);
     const driver = new ChatGPTDriver(page);
     verbose('Driver ready, executing command action...', isVerbose);
@@ -39,6 +52,10 @@ export async function withDriver(
   } catch (error: unknown) {
     failStructured(error, format);
   } finally {
+    // Unregister the signal cleanup callback before the normal cleanup
+    // path runs, preventing a double-close race.
+    unregisterPageCleanup?.();
+
     try {
       try {
         verbose('Closing tab...', isVerbose);
