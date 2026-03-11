@@ -10,6 +10,7 @@ export type ErrorCategory =
   | 'cdp_unavailable'
   | 'chrome_not_found'
   | 'chrome_launch_failed'
+  | 'chrome_close_failed'
   | 'auth_expired'
   | 'cloudflare_blocked'
   | 'selector_miss'
@@ -26,16 +27,19 @@ export const EXIT_CODES: Readonly<Record<ErrorCategory, number>> = {
   selector_miss: 6,
   timeout: 7,
   chrome_launch_failed: 8,
+  chrome_close_failed: 9,
 };
 
 /** Suggested user actions per error category. */
 const DEFAULT_ACTIONS: Readonly<Record<ErrorCategory, string>> = {
   cdp_unavailable:
-    'Start Chrome with --remote-debugging-port=9222 or run "cavendish status" to check.',
+    'Run "cavendish init" to start Chrome or run "cavendish status" to check.',
   chrome_not_found:
     'Install Google Chrome and ensure it is in your PATH.',
   chrome_launch_failed:
     'Check Chrome permissions and ensure no other process is blocking the launch. Run "cavendish init" to re-detect Chrome settings.',
+  chrome_close_failed:
+    'Close Chrome manually before running --reset.',
   auth_expired:
     'Open Chrome and log in to ChatGPT, then retry.',
   cloudflare_blocked:
@@ -103,7 +107,7 @@ export function classifyError(error: unknown): CavendishError {
 
   // CDP / Chrome connection errors
   if (
-    lower.includes('did not respond on port') ||
+    lower.includes('did not start a cdp endpoint') ||
     lower.includes('failed to connect to chrome') ||
     lower.includes('econnrefused') ||
     lower.includes('connectovercdp')

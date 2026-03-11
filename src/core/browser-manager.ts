@@ -1,5 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,8 +13,9 @@ import { progress, verbose } from './output-handler.js';
 export const CAVENDISH_DIR = join(homedir(), '.cavendish');
 export const CHROME_PROFILE_DIR = join(CAVENDISH_DIR, 'chrome-profile');
 export const CDP_ENDPOINT_FILE = join(CAVENDISH_DIR, 'cdp-endpoint.json');
-export const CDP_PORT = 9222;
-export const CDP_BASE_URL = `http://127.0.0.1:${String(CDP_PORT)}`;
+
+/** Permission mask for the endpoint file: owner-only read/write. */
+const FILE_MODE = 0o600;
 
 /** Restrictive permission mask: owner-only read/write/execute. */
 const DIR_MODE = 0o700;
@@ -40,9 +41,44 @@ const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
 const CDP_FETCH_TIMEOUT_MS = 5_000;
 
-interface CdpEndpointData {
+export interface CdpEndpointData {
+  url?: string;
   port: number;
+  pid?: number;
   savedAt: string;
+}
+
+/**
+ * Read the saved CDP endpoint from `~/.cavendish/cdp-endpoint.json`.
+ * Returns null if the file doesn't exist or is unreadable.
+ */
+export function readCdpEndpoint(): CdpEndpointData | null {
+  try {
+    if (!existsSync(CDP_ENDPOINT_FILE)) {
+      return null;
+    }
+    const raw = readFileSync(CDP_ENDPOINT_FILE, 'utf8');
+    const data = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof data.port !== 'number' || data.port <= 0 || data.port > 65535) {
+      return null;
+    }
+    return data as unknown as CdpEndpointData;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the CDP base URL from the saved endpoint file.
+ * Falls back to the legacy fixed port 9222 for backward compatibility
+ * with Chrome instances launched by older Cavendish versions.
+ */
+export function resolveCdpBaseUrl(): string {
+  const endpoint = readCdpEndpoint();
+  if (endpoint) {
+    return `http://127.0.0.1:${String(endpoint.port)}`;
+  }
+  return 'http://127.0.0.1:9222';
 }
 
 /**
@@ -69,7 +105,7 @@ export class BrowserManager {
    */
   async getPage(quiet = false, permissions: string[] = [], isVerbose = false): Promise<Page> {
     if (!this.browser) {
-      verbose(`CDP endpoint: ${CDP_BASE_URL}`, isVerbose);
+      verbose(`CDP endpoint: ${resolveCdpBaseUrl()}`, isVerbose);
       await this.ensureConnected(quiet);
     }
 
@@ -143,8 +179,10 @@ export class BrowserManager {
     }
 
     const chromePath = this.findChromePath();
+    // Port 0 lets the OS assign an available port, avoiding the
+    // security risk of a well-known fixed port (e.g. 9222).
     const args = [
-      `--remote-debugging-port=${String(CDP_PORT)}`,
+      '--remote-debugging-port=0',
       '--remote-debugging-address=127.0.0.1',
       `--user-data-dir=${CHROME_PROFILE_DIR}`,
       '--disable-blink-features=AutomationControlled',
@@ -193,19 +231,27 @@ export class BrowserManager {
       });
     });
 
-    await this.waitForCdp(quiet);
-    await this.connect(quiet);
-    this.saveCdpEndpoint();
+    const cdpUrl = await this.discoverCdpEndpoint(child.pid ?? 0, quiet);
+    await this.connectTo(cdpUrl, quiet);
     progress('Chrome launched', quiet);
   }
 
   /**
-   * Connect to a running Chrome via CDP.
+   * Connect to a running Chrome via CDP using the saved endpoint file.
+   * Falls back to legacy port 9222 for backward compatibility.
    */
   async connect(quiet = false): Promise<void> {
-    progress('Connecting to Chrome via CDP...', quiet);
+    const baseUrl = resolveCdpBaseUrl();
+    await this.connectTo(baseUrl, quiet);
+  }
 
-    const browser = await chromium.connectOverCDP(CDP_BASE_URL, {
+  /**
+   * Connect to Chrome at a specific CDP base URL.
+   */
+  private async connectTo(cdpBaseUrl: string, quiet = false): Promise<void> {
+    progress(`Connecting to Chrome via CDP (${cdpBaseUrl})...`, quiet);
+
+    const browser = await chromium.connectOverCDP(cdpBaseUrl, {
       timeout: 10_000,
     });
 
@@ -269,20 +315,51 @@ export class BrowserManager {
   }
 
   /**
-   * Poll the CDP endpoint until Chrome is ready to accept connections.
-   * Max 3 attempts with logging per project guidelines.
+   * Read the DevToolsActivePort file and verify the port responds.
+   * Returns the CDP base URL on success, or null if not ready yet.
    */
-  private async waitForCdp(quiet: boolean): Promise<void> {
+  private async probeCdpPort(portFile: string, pid: number): Promise<string | null> {
+    let content: string;
+    try {
+      content = readFileSync(portFile, 'utf8').trim();
+    } catch {
+      return null;
+    }
+    const port = parseInt(content.split('\n')[0], 10);
+    if (isNaN(port) || port <= 0 || port > 65535) {
+      return null;
+    }
+    const baseUrl = `http://127.0.0.1:${String(port)}`;
+    const res = await fetch(`${baseUrl}/json/version`, {
+      signal: AbortSignal.timeout(CDP_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      return null;
+    }
+    this.saveCdpEndpoint(baseUrl, port, pid);
+    return baseUrl;
+  }
+
+  /**
+   * Discover the dynamically assigned CDP port after launching Chrome
+   * with `--remote-debugging-port=0`.
+   *
+   * Chrome writes a `DevToolsActivePort` file in the user-data-dir
+   * containing the assigned port on the first line.  We poll for this
+   * file, then verify the port responds to `/json/version`, save the
+   * endpoint to `cdp-endpoint.json`, and return the CDP base URL.
+   */
+  private async discoverCdpEndpoint(pid: number, quiet: boolean): Promise<string> {
+    const portFile = join(CHROME_PROFILE_DIR, 'DevToolsActivePort');
+
     for (let attempt = 1; attempt <= CDP_MAX_RETRIES; attempt += 1) {
       try {
-        const res = await fetch(`${CDP_BASE_URL}/json/version`, {
-          signal: AbortSignal.timeout(CDP_FETCH_TIMEOUT_MS),
-        });
-        if (res.ok) {
-          return;
+        const result = await this.probeCdpPort(portFile, pid);
+        if (result) {
+          return result;
         }
         progress(
-          `CDP not ready (attempt ${String(attempt)}/${String(CDP_MAX_RETRIES)}): HTTP ${String(res.status)}`,
+          `CDP not ready (attempt ${String(attempt)}/${String(CDP_MAX_RETRIES)})`,
           quiet,
         );
       } catch (error: unknown) {
@@ -293,12 +370,8 @@ export class BrowserManager {
       }
       await new Promise((r) => setTimeout(r, CDP_RETRY_INTERVAL_MS));
     }
-    const portHint =
-      process.platform === 'win32'
-        ? `netstat -ano | findstr :${String(CDP_PORT)} then taskkill /PID <pid> /F`
-        : `lsof -ti :${String(CDP_PORT)} | xargs kill`;
     throw new CavendishError(
-      `Chrome did not respond on port ${String(CDP_PORT)} after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and the port is free (${portHint}).`,
+      `Chrome did not start a CDP endpoint after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and can start.`,
       'cdp_unavailable',
     );
   }
@@ -391,12 +464,18 @@ export class BrowserManager {
 
   /**
    * Persist CDP endpoint info for other commands (e.g. `status`).
+   * File is written with 0o600 (owner-only) to prevent other local
+   * users from reading the dynamic port.
    */
-  private saveCdpEndpoint(): void {
+  private saveCdpEndpoint(baseUrl: string, port: number, pid: number): void {
     const data: CdpEndpointData = {
-      port: CDP_PORT,
+      url: baseUrl,
+      port,
+      pid,
       savedAt: new Date().toISOString(),
     };
-    writeFileSync(CDP_ENDPOINT_FILE, JSON.stringify(data, null, 2));
+    writeFileSync(CDP_ENDPOINT_FILE, JSON.stringify(data, null, 2), { mode: FILE_MODE });
+    // Explicit chmod to override umask (writeFileSync mode is masked)
+    chmodSync(CDP_ENDPOINT_FILE, FILE_MODE);
   }
 }

@@ -17,7 +17,7 @@ describe('CavendishError', () => {
 
   it('uses default action when none provided', () => {
     const err = new CavendishError('test', 'cdp_unavailable');
-    expect(err.action).toContain('Start Chrome');
+    expect(err.action).toContain('cavendish init');
   });
 
   it('uses default action for chrome_launch_failed', () => {
@@ -70,6 +70,7 @@ describe('EXIT_CODES', () => {
       'cdp_unavailable',
       'chrome_not_found',
       'chrome_launch_failed',
+      'chrome_close_failed',
       'auth_expired',
       'cloudflare_blocked',
       'selector_miss',
@@ -94,8 +95,8 @@ describe('classifyError', () => {
     expect(classifyError(err).category).toBe('cdp_unavailable');
   });
 
-  it('classifies CDP port errors', () => {
-    const err = new Error('Chrome did not respond on port 9222 after 3 attempts');
+  it('classifies CDP endpoint discovery errors', () => {
+    const err = new Error('Chrome did not start a CDP endpoint after 3 attempts');
     expect(classifyError(err).category).toBe('cdp_unavailable');
   });
 

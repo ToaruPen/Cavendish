@@ -1,10 +1,10 @@
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
-import { type Page, errors } from 'playwright';
+import { type Browser, type Page, errors } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
-import { BrowserManager, CDP_BASE_URL, CHROME_PROFILE_DIR } from '../core/browser-manager.js';
+import { BrowserManager, CHROME_PROFILE_DIR, readCdpEndpoint, resolveCdpBaseUrl } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
@@ -35,9 +35,9 @@ interface InitResult {
 /** Whether a CDP probe error has already been logged (suppress duplicates during polling). */
 let cdpErrorLogged = false;
 
-async function isLoggedInViaCdp(quiet: boolean): Promise<boolean> {
+async function isLoggedInViaCdp(quiet: boolean, cdpBaseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(`${CDP_BASE_URL}/json/list`, {
+    const res = await fetch(`${cdpBaseUrl}/json/list`, {
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) {
@@ -159,6 +159,7 @@ async function waitForLogin(
   cdpErrorLogged = false;
 
   const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+  const cdpBaseUrl = resolveCdpBaseUrl();
   let activePage: Page = page;
   let pageUsable = true;
 
@@ -178,7 +179,7 @@ async function waitForLogin(
       }
     }
 
-    if (await isLoggedInViaCdp(quiet)) {
+    if (await isLoggedInViaCdp(quiet, cdpBaseUrl)) {
       return true;
     }
 
@@ -268,22 +269,66 @@ async function navigateToGoogleLogin(page: Page, quiet: boolean): Promise<void> 
  * Needed after profile reset so that the stale Chrome process (still
  * using the old profile in memory) is terminated before re-launch.
  */
-async function killExistingChrome(quiet: boolean): Promise<void> {
-  try {
-    const { chromium } = await import('playwright');
-    progress('Stopping existing Chrome process...', quiet);
-    const browser = await chromium.connectOverCDP(CDP_BASE_URL);
+async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     try {
-      const cdpSession = await browser.newBrowserCDPSession();
-      await cdpSession.send('Browser.close');
-    } finally {
-      await browser.close();
+      await fetch(`${cdpUrl}/json/version`, { signal: AbortSignal.timeout(1_000) });
+    } catch {
+      return;
     }
-    // Give Chrome a moment to fully shut down
-    await new Promise((r) => setTimeout(r, 1_000));
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+async function killExistingChrome(quiet: boolean): Promise<void> {
+  const endpoint = readCdpEndpoint();
+  if (!endpoint) {
+    throw new CavendishError(
+      'CDP endpoint file is missing — cannot identify the running Chrome process.',
+      'cdp_unavailable',
+      'Close Chrome manually before running --reset, or run `cavendish init` without --reset first.',
+    );
+  }
+  const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
+
+  const { chromium } = await import('playwright');
+
+  progress('Stopping existing Chrome process...', quiet);
+
+  let browser: Browser | undefined;
+  try {
+    browser = await chromium.connectOverCDP(cdpUrl);
+  } catch (error: unknown) {
+    const msg = errorMessage(error);
+    if (msg.includes('ECONNREFUSED')) {
+      progress('No running Chrome found', quiet);
+      return;
+    }
+    throw new CavendishError(
+      `Cannot connect to Chrome via CDP: ${msg}`,
+      'cdp_unavailable',
+      'Ensure Chrome is running with --remote-debugging-port, or run `cavendish init` to relaunch.',
+    );
+  }
+
+  try {
+    const cdpSession = await browser.newBrowserCDPSession();
+    await cdpSession.send('Browser.close');
+    await waitForChromeShutdown(cdpUrl);
     progress('Chrome process stopped', quiet);
-  } catch {
-    // Chrome not running or can't connect — that's fine
+  } catch (error: unknown) {
+    throw new CavendishError(
+      `Failed to stop Chrome via CDP (${error instanceof Error ? error.message : String(error)}). `
+      + 'Close Chrome manually before running --reset.',
+      'chrome_close_failed',
+    );
+  } finally {
+    await browser.close().catch((error: unknown) => {
+      const msg = errorMessage(error);
+      if (/closed|disconnected/i.test(msg)) { return; }
+      console.error(`[cavendish] browser.close() failed: ${msg}`);
+    });
   }
 }
 
