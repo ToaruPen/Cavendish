@@ -109,10 +109,10 @@ export async function getDeepResearchResponse(page: Page): Promise<string> {
     return await contentFrame.evaluate(
       (selector: string) => {
         const root = document.querySelector(selector);
-        if (root) {
-          return root.textContent.trim();
-        }
-        return document.body.textContent.trim();
+        // Only extract text from the designated report root (<main>).
+        // Falling back to document.body would include button labels,
+        // animated counters, and other UI noise.
+        return root ? root.textContent.trim() : '';
       },
       SELECTORS.DEEP_RESEARCH_REPORT_ROOT,
     );
@@ -429,13 +429,75 @@ async function waitForDeepResearchReport(
   const initialText = await getDeepResearchResponse(page);
 
   // When seenStopButton is true, the research cycle (stop button appear → disappear) completed,
-  // so any non-empty text is the final report — preActionText comparison is intentionally skipped.
-  if (seenStopButton && initialText.length > 0 && !await hasDeepResearchStopButton(page)) {
+  // so any non-empty text that differs from preActionText is the final report.
+  // The preActionText guard prevents returning the old report on follow-up/refresh.
+  if (seenStopButton && initialText.length > 0 && initialText !== preActionText && !await hasDeepResearchStopButton(page)) {
     progress('Response complete', quiet);
     return { text: initialText, completed: true };
   }
 
   return pollForDeepResearchReport(page, deadline, timeout, quiet, seenStopButton, initialText, preActionText);
+}
+
+export interface ReportPollState {
+  stableCount: number;
+  previousText: string;
+  sawTransition: boolean;
+}
+
+/**
+ * Evaluate a single poll iteration for DR report readiness.
+ *
+ * @returns The final report text if complete, or `null` to keep polling.
+ */
+export function evaluateReportPoll(
+  text: string,
+  hasStop: boolean,
+  seenStopButton: boolean,
+  preActionText: string,
+  state: ReportPollState,
+): string | null {
+  const STABLE_THRESHOLD = 3;
+
+  if (hasStop) {
+    state.sawTransition = true;
+    state.stableCount = 0;
+    return null;
+  }
+  if (text.length === 0) {
+    state.sawTransition = true;
+    state.stableCount = 0;
+    state.previousText = '';
+    return null;
+  }
+  if (text !== preActionText) {
+    state.sawTransition = true;
+  }
+  // Still showing the pre-action text with no transition — keep waiting.
+  if (!seenStopButton && !state.sawTransition && text === preActionText) {
+    state.stableCount = 0;
+    return null;
+  }
+  // Stop button was seen → research cycle completed; any new text is final.
+  if (seenStopButton && text !== preActionText) {
+    return text;
+  }
+  // Stop button was seen but text is still the pre-action content → keep waiting.
+  if (seenStopButton && text === preActionText && preActionText.length > 0) {
+    state.stableCount = 0;
+    return null;
+  }
+  // Stop button was NOT seen → require stability before declaring complete.
+  if (text === state.previousText) {
+    state.stableCount++;
+    if (state.stableCount >= STABLE_THRESHOLD) {
+      return text;
+    }
+  } else {
+    state.stableCount = 0;
+  }
+  state.previousText = text;
+  return null;
 }
 
 async function pollForDeepResearchReport(
@@ -447,42 +509,24 @@ async function pollForDeepResearchReport(
   initialText: string,
   preActionText: string,
 ): Promise<WaitForResponseResult> {
-  const STABLE_THRESHOLD = 3;
-  let stableCount = 0;
-  let sawTransition = false;
+  // When the stop button was observed, the research cycle is confirmed complete,
+  // so the first non-empty changed text is the final report.
+  // When the stop button was NOT observed (skipped or missed), we require
+  // consecutive identical reads to avoid returning a mid-generation report.
+  const state: ReportPollState = {
+    stableCount: 0,
+    previousText: initialText,
+    sawTransition: false,
+  };
 
-  // Use the overall deadline from the user's --timeout directly.
-  // Previously a 120s hard cap was applied here, which could cut off
-  // the report wait well before the user's timeout (e.g. --timeout 1800).
   while (Date.now() < deadline) {
     await delay(POLL_INTERVAL_MS * 5);
     const hasStop = await hasDeepResearchStopButton(page);
-    if (hasStop) {
-      sawTransition = true;
-      stableCount = 0;
-      continue;
-    }
-    const text = await getDeepResearchResponse(page);
-    if (text.length === 0) {
-      sawTransition = true;
-      stableCount = 0;
-      continue;
-    }
-    if (text !== preActionText) {
-      sawTransition = true;
-    }
-    if (!seenStopButton && !sawTransition && text === preActionText) {
-      stableCount = 0;
-      continue;
-    }
-    if (seenStopButton || text !== initialText) {
+    const text = hasStop ? '' : await getDeepResearchResponse(page);
+    const result = evaluateReportPoll(text, hasStop, seenStopButton, preActionText, state);
+    if (result !== null) {
       progress('Response complete', quiet);
-      return { text, completed: true };
-    }
-    stableCount++;
-    if (stableCount >= STABLE_THRESHOLD) {
-      progress('Response complete (stable)', quiet);
-      return { text, completed: true };
+      return { text: result, completed: true };
     }
   }
 

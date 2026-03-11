@@ -136,19 +136,17 @@ async function waitForStopButtonAttach(
   }
 
   // 'message' — assistant message appeared before stop button (Pro thinking).
+  // Wait for the stop button to appear; if it never does, time out.
   const remaining = Math.max(deadline - Date.now(), 0);
   if (remaining <= 0) {
     return false;
   }
-  try {
-    await stopBtn.waitFor({ state: 'attached', timeout: remaining });
+  const stopOrTimeout = await awaitStopButton(stopBtn, remaining);
+  if (stopOrTimeout === 'stop') {
     return true;
-  } catch (error: unknown) {
-    if (!isTimeoutError(error)) {
-      throw error;
-    }
-    return false;
   }
+  // timeout
+  return false;
 }
 
 async function waitForStopButtonCycle(
@@ -267,6 +265,19 @@ async function waitForStopButtonOrResponse(
   } finally {
     race.settled = true;
   }
+}
+
+async function awaitStopButton(
+  stopBtn: Locator,
+  timeout: number,
+): Promise<'stop' | 'timeout'> {
+  return stopBtn
+    .waitFor({ state: 'attached', timeout })
+    .then((): 'stop' => 'stop')
+    .catch((error: unknown): 'timeout' => {
+      if (isTimeoutError(error)) { return 'timeout'; }
+      throw error;
+    });
 }
 
 async function pollChunks(

@@ -21,6 +21,7 @@ export async function attachGoogleDriveFile(
   fileName: string,
   openComposerMenuItem: OpenMenuFn,
   quiet = false,
+  sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
 ): Promise<void> {
   progress(`Attaching Google Drive file: ${fileName}`, quiet);
 
@@ -51,7 +52,7 @@ export async function attachGoogleDriveFile(
     timeout: 10_000,
   });
 
-  await waitForAttachmentTiles(page, tileCountBefore + 1);
+  await waitForAttachmentTiles(page, tileCountBefore + 1, sendButtonSelector);
 
   progress(`Google Drive file attached: ${fileName}`, quiet);
 }
@@ -132,26 +133,61 @@ export async function enableAgentMode(
 
 // ── File attach ─────────────────────────────────────────────
 
-export async function attachFiles(page: Page, filePaths: string[], quiet = false): Promise<void> {
+export async function attachFiles(
+  page: Page,
+  filePaths: string[],
+  quiet = false,
+  sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
+): Promise<void> {
   progress(`Attaching ${String(filePaths.length)} file(s)...`, quiet);
 
   const tileCountBefore = await page.locator(SELECTORS.FILE_ATTACHMENT_TILE).count();
   const fileInput = page.locator(SELECTORS.FILE_INPUT_GENERIC);
   await fileInput.setInputFiles(filePaths);
 
-  await waitForAttachmentTiles(page, tileCountBefore + filePaths.length);
+  await waitForAttachmentTiles(page, tileCountBefore + filePaths.length, sendButtonSelector);
   progress('Files attached', quiet);
 }
 
 // ── Shared helpers ──────────────────────────────────────────
 
-export async function waitForAttachmentTiles(page: Page, expected: number): Promise<void> {
+export async function waitForAttachmentTiles(
+  page: Page,
+  expected: number,
+  sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
+): Promise<void> {
+  // Wait for the expected number of file tiles to appear in the composer.
   await page.waitForFunction(
     ({ selector, count }: { selector: string; count: number }) =>
       document.querySelectorAll(selector).length >= count,
     { selector: SELECTORS.FILE_ATTACHMENT_TILE, count: expected },
     { timeout: 10_000 },
   );
+
+  // Wait for upload completion: the submit button becomes enabled once all
+  // files finish uploading.  Without this, sendMessage() can fire before
+  // the server has processed the attachment, sending a prompt without the file.
+  // Check that the button is both visible AND not disabled.
+  try {
+    await page.waitForFunction(
+      (selector: string) => {
+        const btn = document.querySelector(selector);
+        return btn !== null
+          && btn.getBoundingClientRect().height > 0
+          && !btn.hasAttribute('disabled');
+      },
+      sendButtonSelector,
+      { timeout: 30_000 },
+    );
+  } catch (err: unknown) {
+    if (isTimeoutError(err)) {
+      throw new Error(
+        `Send button did not become enabled within 30s after file upload (selector: ${sendButtonSelector}). `
+        + 'The file may still be uploading or the composer UI may have changed.',
+      );
+    }
+    throw err;
+  }
 }
 
 async function waitForGooglePickerFrame(page: Page): Promise<FrameLocator> {
