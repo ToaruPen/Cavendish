@@ -282,16 +282,15 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
 }
 
 async function killExistingChrome(quiet: boolean): Promise<void> {
-  // Try endpoint file first; fall back to legacy port 9222 for
-  // upgrades from older Cavendish versions that used a fixed port.
   const endpoint = readCdpEndpoint();
-  const cdpUrl = endpoint
-    ? `http://127.0.0.1:${String(endpoint.port)}`
-    : 'http://127.0.0.1:9222';
-
   if (!endpoint) {
-    progress('No CDP endpoint file — trying legacy port 9222...', quiet);
+    throw new CavendishError(
+      'CDP endpoint file is missing — cannot identify the running Chrome process.',
+      'cdp_unavailable',
+      'Close Chrome manually before running --reset, or run `cavendish init` without --reset first.',
+    );
   }
+  const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
 
   const { chromium } = await import('playwright');
 
