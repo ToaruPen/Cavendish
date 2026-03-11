@@ -288,49 +288,53 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
 }
 
 /** Resolve the absolute path for a process-scanning command per platform. */
-function resolveProcessScanner(): { cmd: string; buildArgs: () => string[] } | null {
+function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   if (process.platform === 'win32') {
-    // WMIC is available on all supported Windows versions at this fixed path.
-    const wmicPath = 'C:\\Windows\\System32\\wbem\\WMIC.exe';
-    if (!existsSync(wmicPath)) {
+    // Use PowerShell's Get-CimInstance (replaces deprecated WMIC removed in Win11 24H2).
+    const psPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    if (!existsSync(psPath)) {
       return null;
     }
+    const escapedDir = CHROME_PROFILE_DIR.replaceAll('\\', '\\\\');
     return {
-      cmd: wmicPath,
-      buildArgs: (): string[] => [
-        'process', 'where',
-        `CommandLine like '%--user-data-dir=${CHROME_PROFILE_DIR.replaceAll('\\', '\\\\')}%'`,
-        'get', 'ProcessId',
+      cmd: psPath,
+      args: [
+        '-NoProfile', '-Command',
+        `Get-CimInstance Win32_Process -Filter "CommandLine like '%--user-data-dir=${escapedDir}%'" | Select-Object -ExpandProperty ProcessId`,
       ],
     };
   }
-  // macOS / Linux: pgrep is at /usr/bin/pgrep on all major distributions.
-  const pgrepPath = '/usr/bin/pgrep';
-  if (!existsSync(pgrepPath)) {
+  // macOS / Linux: pgrep may be at /usr/bin/pgrep or /bin/pgrep depending on distro.
+  const pgrepCandidates = ['/usr/bin/pgrep', '/bin/pgrep'];
+  const pgrepPath = pgrepCandidates.find((p) => existsSync(p));
+  if (!pgrepPath) {
     return null;
   }
   return {
     cmd: pgrepPath,
-    buildArgs: (): string[] => ['-f', '--', `--user-data-dir=${CHROME_PROFILE_DIR}`],
+    args: ['-f', '--', `--user-data-dir=${CHROME_PROFILE_DIR}`],
   };
 }
 
 /**
  * Find Chrome PIDs that were launched with the cavendish profile directory.
- * Returns an array of PIDs (may be empty if Chrome is not running).
  *
- * Uses `/usr/bin/pgrep -f` on macOS/Linux and `WMIC.exe` on Windows to search
- * for Chrome processes with `--user-data-dir=<CHROME_PROFILE_DIR>`.
+ * Returns:
+ * - `number[]` (possibly empty) — scan succeeded; these are the matching PIDs
+ * - `null` — scanner unavailable or failed; caller cannot determine Chrome state
+ *
+ * Uses `pgrep -f` on macOS/Linux and PowerShell `Get-CimInstance` on Windows
+ * to search for Chrome processes with `--user-data-dir=<CHROME_PROFILE_DIR>`.
  *
  * @internal Exported for testing only.
  */
-export function findChromeByProfileDir(): number[] {
+export function findChromeByProfileDir(): number[] | null {
   const scanner = resolveProcessScanner();
   if (!scanner) {
-    return [];
+    return null;
   }
   try {
-    const output = execFileSync(scanner.cmd, scanner.buildArgs(), {
+    const output = execFileSync(scanner.cmd, scanner.args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 5_000,
@@ -339,10 +343,14 @@ export function findChromeByProfileDir(): number[] {
       .split('\n')
       .map((line) => parseInt(line.trim(), 10))
       .filter((pid) => !isNaN(pid) && pid > 0);
-  } catch {
+  } catch (error: unknown) {
     // pgrep exits with code 1 when no processes match — this is expected.
-    // Any other error (pgrep not installed, timeout, etc.) is also non-fatal.
-    return [];
+    const exitCode = (error as NodeJS.ErrnoException & { status?: number }).status;
+    if (exitCode === 1) {
+      return [];
+    }
+    // Any other error (timeout, spawn failure, etc.) — scanner failed.
+    return null;
   }
 }
 
@@ -375,12 +383,42 @@ export function killChromePids(pids: number[], quiet: boolean): boolean {
   return killed;
 }
 
+/**
+ * Poll until all given PIDs have exited, or until timeoutMs elapses.
+ * Uses `process.kill(pid, 0)` which throws ESRCH when the process no longer exists.
+ */
+async function waitForPidExit(pids: number[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const remaining = new Set(pids);
+  while (remaining.size > 0 && Date.now() < deadline) {
+    for (const pid of remaining) {
+      try {
+        process.kill(pid, 0);
+      } catch {
+        // Process no longer exists
+        remaining.delete(pid);
+      }
+    }
+    if (remaining.size > 0) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+}
+
 async function killExistingChrome(quiet: boolean): Promise<void> {
   const endpoint = readCdpEndpoint();
   if (!endpoint) {
     // CDP endpoint file is missing — try to find Chrome by its profile dir argument.
     progress('CDP endpoint file not found — scanning for Chrome process by profile directory...', quiet);
     const pids = findChromeByProfileDir();
+    if (pids === null) {
+      // Scanner unavailable — cannot determine Chrome state
+      throw new CavendishError(
+        'Cannot detect running Chrome processes (process scanner unavailable).',
+        'chrome_close_failed',
+        'Close Chrome manually before running --reset.',
+      );
+    }
     if (pids.length === 0) {
       progress('No running Chrome found for this profile', quiet);
       return;
@@ -393,8 +431,8 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
         'Close Chrome manually before running --reset.',
       );
     }
-    // Give Chrome a moment to release file locks before profile deletion
-    await new Promise((r) => setTimeout(r, 1_000));
+    // Wait for processes to exit (up to 5s) before profile deletion
+    await waitForPidExit(pids, 5_000);
     return;
   }
   const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;

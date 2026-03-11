@@ -41,7 +41,8 @@ function mockOutputHandler(): void {
 
 /**
  * Mock node:fs so that existsSync returns true for the process scanner
- * binary (e.g. /usr/bin/pgrep) and the rest delegates to the real fs.
+ * binary (e.g. /usr/bin/pgrep, /bin/pgrep, or powershell.exe) and the
+ * rest delegates to the real fs.
  */
 function mockFsForProcessScanner(): void {
   vi.doMock('node:fs', async () => {
@@ -50,7 +51,7 @@ function mockFsForProcessScanner(): void {
       ...real,
       // Return true for the scanner binary so resolveProcessScanner() succeeds
       existsSync: (path: string): boolean => {
-        if (path === '/usr/bin/pgrep' || path.includes('WMIC')) {
+        if (path === '/usr/bin/pgrep' || path === '/bin/pgrep' || path.includes('powershell')) {
           return true;
         }
         return real.existsSync(path);
@@ -61,7 +62,7 @@ function mockFsForProcessScanner(): void {
 
 /**
  * Mock node:fs so that existsSync returns false for the process scanner
- * binary, simulating a system without pgrep/wmic.
+ * binary, simulating a system without pgrep/powershell.
  */
 function mockFsNoScanner(): void {
   vi.doMock('node:fs', async () => {
@@ -69,7 +70,7 @@ function mockFsNoScanner(): void {
     return {
       ...real,
       existsSync: (path: string): boolean => {
-        if (path === '/usr/bin/pgrep' || path.includes('WMIC')) {
+        if (path === '/usr/bin/pgrep' || path === '/bin/pgrep' || path.includes('powershell')) {
           return false;
         }
         return real.existsSync(path);
@@ -134,7 +135,9 @@ describe('findChromeByProfileDir — scans for Chrome by profile dir (#146)', ()
     vi.doMock('node:child_process', () => ({
       execFileSync: (): string => {
         // pgrep exits with code 1 when no processes match
-        throw new Error('Command failed with exit code 1');
+        const err = new Error('Command failed with exit code 1') as Error & { status: number };
+        err.status = 1;
+        throw err;
       },
     }));
     mockOutputHandler();
@@ -144,7 +147,24 @@ describe('findChromeByProfileDir — scans for Chrome by profile dir (#146)', ()
     expect(pids).toEqual([]);
   });
 
-  it('returns empty array when scanner binary is not found', async () => {
+  it('returns null when scanner encounters a non-exit-1 error', async () => {
+    mockFsForProcessScanner();
+    vi.doMock('node:child_process', () => ({
+      execFileSync: (): string => {
+        // Unexpected error (e.g. timeout, spawn failure)
+        const err = new Error('Command timed out') as Error & { status: number };
+        err.status = 2;
+        throw err;
+      },
+    }));
+    mockOutputHandler();
+
+    const { findChromeByProfileDir } = await import('../src/commands/init.js');
+    const result = findChromeByProfileDir();
+    expect(result).toBeNull();
+  });
+
+  it('returns null when scanner binary is not found', async () => {
     mockFsNoScanner();
     vi.doMock('node:child_process', () => ({
       execFileSync: (): string => '',
@@ -152,8 +172,8 @@ describe('findChromeByProfileDir — scans for Chrome by profile dir (#146)', ()
     mockOutputHandler();
 
     const { findChromeByProfileDir } = await import('../src/commands/init.js');
-    const pids = findChromeByProfileDir();
-    expect(pids).toEqual([]);
+    const result = findChromeByProfileDir();
+    expect(result).toBeNull();
   });
 
   it('filters out invalid lines from pgrep output', async () => {
