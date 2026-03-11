@@ -17,13 +17,16 @@ const SIGINT_EXIT_CODE = 130;
 const SIGTERM_EXIT_CODE = 143;
 
 /** Maximum time to wait for cleanup callbacks before forcing exit. */
-const CLEANUP_TIMEOUT_MS = 3_000;
+export const CLEANUP_TIMEOUT_MS = 3_000;
 
 /** Guard against duplicate registration (Node does NOT deduplicate listeners). */
 let registered = false;
 
 /** Set of active cleanup callbacks to run before process.exit(). */
 const cleanupCallbacks = new Set<() => void | Promise<void>>();
+
+/** Re-entrancy guard to prevent concurrent cleanup runs (e.g. SIGINT + SIGTERM). */
+let cleanupRunning = false;
 
 /**
  * Register a cleanup callback that will run before process.exit() on
@@ -54,25 +57,34 @@ export function registerCleanup(fn: () => void | Promise<void>): () => void {
 /**
  * Run all registered cleanup callbacks with a hard timeout.
  * Uses Promise.allSettled so one failing callback does not block others.
+ * Guarded against re-entrancy — if both SIGINT and SIGTERM fire before
+ * process.exit(), only the first invocation runs the callbacks.
  */
 async function runCleanupCallbacks(): Promise<void> {
-  if (cleanupCallbacks.size === 0) {
+  if (cleanupCallbacks.size === 0 || cleanupRunning) {
     return;
   }
+  cleanupRunning = true;
   const promises = [...cleanupCallbacks].map((fn) => {
     try {
       return Promise.resolve(fn());
-    } catch {
+    } catch (e: unknown) {
       // Synchronous throw — treat as settled (rejected).
-      return Promise.resolve();
+      const error = e instanceof Error ? e : new Error(String(e));
+      return Promise.reject(error);
     }
   });
-  await Promise.race([
+  const results = await Promise.race([
     Promise.allSettled(promises),
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, CLEANUP_TIMEOUT_MS);
+    new Promise<PromiseSettledResult<void>[]>((resolve) => {
+      setTimeout(resolve, CLEANUP_TIMEOUT_MS, []);
     }),
   ]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      writeSync(2, `[cavendish] cleanup callback failed: ${String(result.reason)}\n`);
+    }
+  }
 }
 
 /**

@@ -112,7 +112,7 @@ describe('registerCleanup', () => {
   });
 
   it('force-exits after timeout even if cleanup hangs', async () => {
-    const { registerCleanup, registerSignalHandlers } = await import('../src/core/shutdown.js');
+    const { CLEANUP_TIMEOUT_MS, registerCleanup, registerSignalHandlers } = await import('../src/core/shutdown.js');
     registerSignalHandlers();
 
     // Register a cleanup that never resolves
@@ -122,8 +122,8 @@ describe('registerCleanup', () => {
 
     findHandler('SIGINT')?.();
 
-    // Cleanup timeout is 3000ms — advance past it
-    await vi.advanceTimersByTimeAsync(3_000);
+    // Advance past the cleanup timeout
+    await vi.advanceTimersByTimeAsync(CLEANUP_TIMEOUT_MS);
 
     expect(exitSpy).toHaveBeenCalledWith(130);
   });
