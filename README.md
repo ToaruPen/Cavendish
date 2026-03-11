@@ -37,7 +37,7 @@ cavendish status        # Health diagnostics (alias for doctor)
 cavendish doctor        # Health diagnostics (same checks as status)
 ```
 
-> **Note**: The dedicated Chrome profile avoids conflicts with your browser extensions and protects your main profile from corruption. Chrome stays running as a background process between commands for fast reconnection via CDP (port 9222).
+> **Note**: The dedicated Chrome profile avoids conflicts with your browser extensions and protects your main profile from corruption. Chrome stays running as a background process between commands for fast reconnection via CDP (OS-assigned random port).
 
 ## Commands
 
@@ -186,17 +186,21 @@ cavendish projects --create --name "New Project"
 
 ```text
 CLI (citty)
-  -> BrowserManager (Chrome launch/connect via CDP)
+  -> ProcessLock (exclusive access via ~/.cavendish/cavendish.lock)
+  -> BrowserManager (Chrome launch/connect via CDP, dynamic port)
     -> ChatGPTDriver (DOM operations)
       -> OutputHandler (text/json/ndjson to stdout)
       -> CavendishError (structured error classification)
+  -> Shutdown (signal handlers, cleanup callbacks)
 ```
 
 Key modules:
 
-- **BrowserManager** — Chrome launch/connect/profile management (CDP, persistent process)
+- **BrowserManager** — Chrome launch/connect/profile management (CDP with OS-assigned port, persistent process, orphan recovery)
 - **ChatGPTDriver** — DOM operations (message send, response capture, file attach, model select, deep research)
 - **OutputHandler** — Response formatting (text/json/ndjson to stdout, structured errors to stderr)
+- **ProcessLock** — Atomic file-based lock (`~/.cavendish/cavendish.lock`) preventing parallel execution; stale lock recovery via PID check
+- **Shutdown** — Signal handler registration (SIGINT/SIGTERM) with cleanup callbacks, lock release, and 3-second timeout
 - **DoctorChecks** — System health diagnostics (CDP, auth, selectors, integrations)
 - **CavendishError** — Structured error types with categories and exit codes
 
@@ -232,7 +236,7 @@ cavendish/
 │   │   ├── move.ts           # move command
 │   │   └── projects.ts       # projects command
 │   ├── core/
-│   │   ├── browser-manager.ts  # Chrome process management
+│   │   ├── browser-manager.ts  # Chrome process management (CDP, dynamic port, orphan recovery)
 │   │   ├── chatgpt-driver.ts   # DOM operations (facade)
 │   │   ├── driver/             # ChatGPTDriver sub-modules
 │   │   │   ├── attachments.ts  # Google Drive/GitHub/file attach
@@ -242,6 +246,8 @@ cavendish/
 │   │   ├── chatgpt-types.ts    # Type definitions for ChatGPTDriver
 │   │   ├── model-config.ts     # Model classification and thinking effort
 │   │   ├── output-handler.ts   # Response formatting
+│   │   ├── process-lock.ts     # Atomic file-based process lock
+│   │   ├── shutdown.ts         # Signal handlers and cleanup callbacks
 │   │   ├── cli-args.ts         # Shared CLI argument definitions
 │   │   ├── doctor.ts           # Health check logic
 │   │   ├── errors.ts           # Structured error types
@@ -249,13 +255,23 @@ cavendish/
 │   └── constants/
 │       └── selectors.ts        # DOM selector definitions
 ├── tests/
-│   ├── errors.test.ts
-│   ├── output-handler.test.ts
-│   ├── doctor.test.ts
-│   ├── profile-directories.test.ts
+│   ├── ask-chat-options.test.ts
 │   ├── ask-file.test.ts
 │   ├── ask-stdin.test.ts
-│   └── ask-chat-options.test.ts
+│   ├── cdp-robustness.test.ts
+│   ├── chat-id.test.ts
+│   ├── cleanup-registration.test.ts
+│   ├── doctor.test.ts
+│   ├── dr-report-poll.test.ts
+│   ├── dr-timeout.test.ts
+│   ├── errors.test.ts
+│   ├── model-config.test.ts
+│   ├── output-handler.test.ts
+│   ├── process-lock.test.ts
+│   ├── profile-directories.test.ts
+│   ├── projects-validation.test.ts
+│   ├── signal-handling.test.ts
+│   └── wait-for-cdp.test.ts
 └── docs/
     ├── plan.md
     └── live-test.md
@@ -267,10 +283,12 @@ Cavendish is designed for **single-user, local-machine use**. The security model
 
 ### CDP Binding
 
-Chrome's remote debugging port (9222) is explicitly bound to **127.0.0.1 only** (`--remote-debugging-address=127.0.0.1`). This means:
+Chrome is launched with `--remote-debugging-port=0`, which lets the OS assign a **random available port** instead of the well-known port 9222. The assigned port is discovered via Chrome's `DevToolsActivePort` file and saved to `~/.cavendish/cdp-endpoint.json` (0o600 permissions). The CDP endpoint is explicitly bound to **127.0.0.1 only** (`--remote-debugging-address=127.0.0.1`). This means:
 
+- The CDP port is **unpredictable** — no well-known port for attackers to target.
 - Only processes on the local machine can connect to the CDP endpoint.
 - The port is **not** exposed to the network — remote hosts cannot reach it.
+- The endpoint file (`cdp-endpoint.json`) is readable only by the file owner.
 
 ### Chrome Profile Directory
 
@@ -280,13 +298,17 @@ The Chrome profile (`~/.cavendish/chrome-profile`) contains your ChatGPT session
 
 Cavendish grants `clipboard-read` and `clipboard-write` permissions to `chatgpt.com` via the Playwright browser context. This is required for the Deep Research "copy content" feature, which reads the report from the system clipboard after clicking the export button inside an iframe.
 
+### Process Lock
+
+Cavendish uses an **atomic file-based lock** (`~/.cavendish/cavendish.lock`) to prevent parallel execution. Only one Cavendish command can interact with the Chrome instance at a time. The lock contains the owning process's PID and is automatically released on exit or signal (SIGINT/SIGTERM). Stale locks from crashed processes are detected and reclaimed.
+
 ### Multi-user Environments
 
 If you run Cavendish on a shared machine:
 
 - **macOS/Linux**: Verify that `~/.cavendish/` has `drwx------` permissions (`ls -ld ~/.cavendish`).
 - **Windows**: Verify that `%USERPROFILE%\.cavendish\` inherits appropriate NTFS ACLs restricting access to your user account.
-- Ensure no other local user/process can access port 9222. Binding to `127.0.0.1` prevents remote access, but it does not isolate the CDP endpoint from other users on the same machine.
+- The CDP port is OS-assigned and unpredictable, but binding to `127.0.0.1` does not isolate the endpoint from other users on the same machine. Verify that `~/.cavendish/cdp-endpoint.json` is not world-readable.
 - Do **not** share your `~/.cavendish/chrome-profile` directory — it contains active session data.
 
 ## License
