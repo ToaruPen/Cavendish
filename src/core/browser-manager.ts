@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -263,7 +262,15 @@ export class BrowserManager {
       if (killed) {
         this.removeStaleCdpEndpoint(chromePid);
       }
-      throw error;
+      // Wrap raw errors (e.g. from connectOverCDP) in CavendishError
+      // so callers always get a consistent, actionable error type.
+      if (error instanceof CavendishError) {
+        throw error;
+      }
+      throw new CavendishError(
+        `Failed to connect to Chrome via CDP: ${error instanceof Error ? error.message : String(error)}`,
+        'cdp_unavailable',
+      );
     }
     progress('Chrome launched', quiet);
   }
@@ -452,47 +459,29 @@ export class BrowserManager {
    * Prevents accidentally deleting an endpoint written by a different
    * Chrome process that launched successfully in the meantime.
    *
-   * Uses an atomic rename-then-verify approach to avoid a TOCTOU race:
-   * 1. Atomically rename the endpoint file to a temporary path (removes
-   *    it from the well-known location so concurrent writers create a
-   *    fresh file instead of overwriting our copy).
-   * 2. Read the renamed file and verify the PID matches.
-   * 3. If PID matches: delete the temp file (stale endpoint removed).
-   * 4. If PID does NOT match: rename the temp file back to restore the
-   *    newer endpoint written by another process.
+   * Uses a simple read-then-delete approach:
+   * 1. Read the endpoint file and check the PID.
+   * 2. If PID matches: delete it (the Chrome we killed wrote this file).
+   * 3. If PID does not match: leave it alone (another process wrote it).
+   *
+   * There is a small TOCTOU window between read and delete — another
+   * process could overwrite the file after our read. In practice this
+   * race requires another CLI invocation to launch Chrome successfully
+   * in the milliseconds between our read and unlink, which is extremely
+   * unlikely. Even if it occurs, the new Chrome will recreate the file
+   * on its next CDP probe.
    */
   private removeStaleCdpEndpoint(pid: number): void {
-    const tmpPath = `${CDP_ENDPOINT_FILE}.removing.${String(pid)}`;
     try {
-      // Step 1: Atomically move the file away from the well-known path.
-      // renameSync is atomic on POSIX for same-filesystem renames.
-      renameSync(CDP_ENDPOINT_FILE, tmpPath);
-    } catch {
-      // File missing or already renamed by another process — nothing to do.
-      return;
-    }
-
-    try {
-      // Step 2: Read the file we just moved and verify the PID.
-      const raw = readFileSync(tmpPath, 'utf8');
+      const raw = readFileSync(CDP_ENDPOINT_FILE, 'utf8');
       const data = JSON.parse(raw) as Record<string, unknown>;
-      if (data.pid === pid) {
-        // Step 3: PID matches — this endpoint is stale, remove it.
-        unlinkSync(tmpPath);
-      } else {
-        // Step 4: PID does not match — another process wrote a newer
-        // endpoint before our rename. Restore it.
-        renameSync(tmpPath, CDP_ENDPOINT_FILE);
+      if (data.pid !== pid) {
+        // Endpoint belongs to a different process — leave it alone.
+        return;
       }
+      unlinkSync(CDP_ENDPOINT_FILE);
     } catch {
-      // Read/parse/unlink failed — try to restore the file to avoid
-      // losing a valid endpoint. If restore also fails, the file is
-      // already gone and another process will recreate it on next launch.
-      try {
-        renameSync(tmpPath, CDP_ENDPOINT_FILE);
-      } catch {
-        // Both paths failed — file is already cleaned up or inaccessible.
-      }
+      // File missing, unreadable, or unparseable — nothing to clean up.
     }
   }
 

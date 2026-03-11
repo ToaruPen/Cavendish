@@ -10,12 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let processKillCalls: { pid: number; signal: NodeJS.Signals | number | undefined }[];
 let unlinkSyncCalls: string[];
-let renameSyncCalls: { src: string; dest: string }[];
 
 beforeEach(() => {
   processKillCalls = [];
   unlinkSyncCalls = [];
-  renameSyncCalls = [];
   vi.resetModules();
 });
 
@@ -145,7 +143,7 @@ function mockFsForLaunch(endpointPid?: number): void {
       chmodSync: (): undefined => undefined,
       existsSync: (): boolean => true,
       readFileSync: (filePath: string): string => {
-        // Return endpoint JSON when reading cdp-endpoint.json (or its .removing.* tmp)
+        // Return endpoint JSON when reading cdp-endpoint.json
         if (typeof filePath === 'string' && filePath.includes('cdp-endpoint')) {
           if (endpointPid !== undefined) {
             return JSON.stringify({ port: 54321, pid: endpointPid, savedAt: '2025-01-01T00:00:00Z' });
@@ -157,17 +155,6 @@ function mockFsForLaunch(endpointPid?: number): void {
         return '54321\n/devtools/browser/fake-id';
       },
       writeFileSync: (): undefined => undefined,
-      renameSync: (src: string, dest: string): undefined => {
-        renameSyncCalls.push({ src, dest });
-        // When endpointPid is undefined, simulate missing file for the
-        // initial rename (atomic move step) in removeStaleCdpEndpoint.
-        if (endpointPid === undefined && typeof src === 'string' && src.includes('cdp-endpoint') && !src.includes('.removing.')) {
-          const err = new Error('ENOENT') as NodeJS.ErrnoException;
-          err.code = 'ENOENT';
-          throw err;
-        }
-        return undefined;
-      },
       unlinkSync: (path: string): undefined => {
         unlinkSyncCalls.push(path);
         return undefined;
@@ -278,13 +265,36 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
 
     const bm = new BrowserManager();
 
-    await expect(bm.launch(true)).rejects.toThrow('connectOverCDP failed');
+    // Raw connectOverCDP error is wrapped in CavendishError
+    await expect(bm.launch(true)).rejects.toThrow(/Failed to connect to Chrome via CDP/);
 
     // Verify process.kill was called with the Chrome PID
     expect(processKillCalls.some((c) => c.pid === 88888)).toBe(true);
     // Verify stale endpoint file is removed so subsequent commands
     // don't try to connect to the dead port
     expect(unlinkSyncCalls.length).toBeGreaterThan(0);
+  });
+
+  it('wraps connectOverCDP errors in CavendishError with cdp_unavailable category', async () => {
+    const { BrowserManager } = await importWithMocks({
+      fetchBehavior: (): Promise<Response> =>
+        Promise.resolve(new Response('{}', { status: 200 })),
+      connectBehavior: 'fail',
+      spawnPid: 44444,
+      endpointPid: 44444,
+    });
+    const { CavendishError } = await import('../src/core/errors.js');
+
+    const bm = new BrowserManager();
+
+    try {
+      await bm.launch(true);
+      expect.unreachable('should have thrown');
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(CavendishError);
+      expect((error as InstanceType<typeof CavendishError>).category).toBe('cdp_unavailable');
+      expect((error as InstanceType<typeof CavendishError>).message).toContain('connectOverCDP failed');
+    }
   });
 
   it('does not remove endpoint when it belongs to a different Chrome process', async () => {
@@ -298,16 +308,14 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
 
     const bm = new BrowserManager();
 
-    await expect(bm.launch(true)).rejects.toThrow('connectOverCDP failed');
+    // Raw connectOverCDP error is wrapped in CavendishError
+    await expect(bm.launch(true)).rejects.toThrow(/Failed to connect to Chrome via CDP/);
 
     // Chrome should still be killed
     expect(processKillCalls.some((c) => c.pid === 88888)).toBe(true);
-    // But endpoint file should NOT be removed — it belongs to PID 11111
+    // But endpoint file should NOT be removed — it belongs to PID 11111.
+    // The read-then-delete approach sees a PID mismatch and leaves the file.
     expect(unlinkSyncCalls.length).toBe(0);
-    // The atomic rename-then-verify approach should have renamed the file
-    // back to the original path after discovering the PID mismatch.
-    const restoreRename = renameSyncCalls.find((c) => c.dest.includes('cdp-endpoint.json') && !c.dest.includes('.removing.'));
-    expect(restoreRename).toBeDefined();
   });
 
   it('does not kill Chrome or remove endpoint when launch succeeds', async () => {
@@ -343,8 +351,8 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
 
     const bm = new BrowserManager();
 
-    // Should throw the original connectOverCDP error, not ESRCH
-    await expect(bm.launch(true)).rejects.toThrow('connectOverCDP failed');
+    // Should throw the wrapped CavendishError, not ESRCH
+    await expect(bm.launch(true)).rejects.toThrow(/Failed to connect to Chrome via CDP/);
     // ESRCH means process already exited — endpoint should still be cleaned up
     expect(unlinkSyncCalls.length).toBeGreaterThan(0);
   });
@@ -365,7 +373,7 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
 
     const bm = new BrowserManager();
 
-    await expect(bm.launch(true)).rejects.toThrow('connectOverCDP failed');
+    await expect(bm.launch(true)).rejects.toThrow(/Failed to connect to Chrome via CDP/);
     // EPERM means Chrome is likely still running — do NOT remove endpoint
     expect(unlinkSyncCalls.length).toBe(0);
   });
