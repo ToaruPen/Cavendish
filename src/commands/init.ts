@@ -318,9 +318,10 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   // treats them literally (e.g. ".cavendish" won't match "Xcavendish").
   const escapedDir = CHROME_PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // Require "chrome" (or "chromium") in the command line to avoid killing non-Chrome processes.
+  // -i: case-insensitive (macOS Chrome binary is "Google Chrome" with uppercase C).
   return {
     cmd: pgrepPath,
-    args: ['-f', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}`],
+    args: ['-fi', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}`],
   };
 }
 
