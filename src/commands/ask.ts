@@ -350,13 +350,12 @@ export const askCommand = defineCommand({
       verbose(`Target chat: ${validated.chatId}`, isVerbose);
     }
 
-    verbose('Acquiring process lock...', isVerbose);
-    acquireLock();
-    verbose('Process lock acquired', isVerbose);
-
     const browser = new BrowserManager();
 
     try {
+      verbose('Acquiring process lock...', isVerbose);
+      acquireLock();
+      verbose('Process lock acquired', isVerbose);
       const page = await browser.getPage(quiet, [], isVerbose);
       const driver = new ChatGPTDriver(page);
 

@@ -131,6 +131,13 @@ export function acquireLock(): void {
   // Lock file exists — check if the owning process is still alive
   const existingPid = readLockPid();
 
+  // Re-entrancy guard: if this process already holds the lock, return early.
+  // This prevents false "another process is running" errors when the same
+  // process calls acquireLock() more than once (e.g. nested call paths).
+  if (existingPid === process.pid) {
+    return;
+  }
+
   if (existingPid !== null && isProcessAlive(existingPid)) {
     throw new CavendishError(
       `Another cavendish process (PID: ${String(existingPid)}) is running. Wait for it to finish or kill it manually.`,

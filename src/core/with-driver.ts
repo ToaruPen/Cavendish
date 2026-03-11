@@ -26,11 +26,10 @@ export async function withDriver(
   const isVerbose = options?.verbose ?? false;
   const browser = new BrowserManager();
 
-  verbose('Acquiring process lock...', isVerbose);
-  acquireLock();
-  verbose('Process lock acquired', isVerbose);
-
   try {
+    verbose('Acquiring process lock...', isVerbose);
+    acquireLock();
+    verbose('Process lock acquired', isVerbose);
     verbose('Acquiring browser page...', isVerbose);
     const page = await browser.getPage(quiet, options?.permissions ?? [], isVerbose);
     verbose('Creating ChatGPTDriver...', isVerbose);

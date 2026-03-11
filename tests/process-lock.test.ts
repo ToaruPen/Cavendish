@@ -106,6 +106,21 @@ describe('acquireLock', () => {
     expect(content).toBe(String(process.pid));
   });
 
+  it('allows re-entrant call from the same process', async () => {
+    const { acquireLock } = await importWithMockedHome();
+
+    acquireLock();
+
+    // Second call from the same process should be a no-op, not throw
+    expect(() => {
+      acquireLock();
+    }).not.toThrow();
+
+    // Lock file should still contain our PID
+    const content = readFileSync(fakeLockFile, 'utf8').trim();
+    expect(content).toBe(String(process.pid));
+  });
+
   it('throws CavendishError with cdp_unavailable category', async () => {
     const { acquireLock } = await importWithMockedHome();
     const { CavendishError } = await import('../src/core/errors.js');

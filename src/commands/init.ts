@@ -365,7 +365,6 @@ function reportProfileStatus(quiet: boolean): void {
  * Connect to Chrome, optionally navigate to Google login, verify login, and return the init result.
  */
 async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitResult> {
-  acquireLock();
   const browser = new BrowserManager();
 
   try {
@@ -394,12 +393,8 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
       loggedIn,
     };
   } finally {
-    try {
-      await browser.closePage();
-      await browser.close();
-    } finally {
-      releaseLock();
-    }
+    await browser.closePage();
+    await browser.close();
   }
 }
 
@@ -465,6 +460,8 @@ export const initCommand = defineCommand({
     }
 
     try {
+      acquireLock();
+
       if (args.reset === true) {
         await killExistingChrome(quiet);
         handleProfileReset(quiet);
@@ -479,6 +476,8 @@ export const initCommand = defineCommand({
       }
     } catch (error: unknown) {
       failStructured(error, format);
+    } finally {
+      releaseLock();
     }
   },
 });
