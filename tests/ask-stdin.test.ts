@@ -45,13 +45,26 @@ describe('readStdin() size limit', () => {
 
     vi.doMock('node:fs', async () => {
       const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+      let offset = 0;
       return {
         ...real,
         fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean } => ({
           isFIFO: (): boolean => true,
           isFile: (): boolean => false,
         }),
-        readFileSync: (): Buffer => buf,
+        readSync: (
+          _fd: number,
+          target: Buffer,
+          targetOffset: number,
+          length: number,
+        ): number => {
+          const remaining = buf.length - offset;
+          if (remaining <= 0) { return 0; }
+          const toCopy = Math.min(length, remaining);
+          buf.copy(target, targetOffset, offset, offset + toCopy);
+          offset += toCopy;
+          return toCopy;
+        },
       };
     });
 
