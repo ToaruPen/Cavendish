@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
@@ -286,14 +287,115 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
   );
 }
 
+/** Resolve the absolute path for a process-scanning command per platform. */
+function resolveProcessScanner(): { cmd: string; buildArgs: () => string[] } | null {
+  if (process.platform === 'win32') {
+    // WMIC is available on all supported Windows versions at this fixed path.
+    const wmicPath = 'C:\\Windows\\System32\\wbem\\WMIC.exe';
+    if (!existsSync(wmicPath)) {
+      return null;
+    }
+    return {
+      cmd: wmicPath,
+      buildArgs: (): string[] => [
+        'process', 'where',
+        `CommandLine like '%--user-data-dir=${CHROME_PROFILE_DIR.replaceAll('\\', '\\\\')}%'`,
+        'get', 'ProcessId',
+      ],
+    };
+  }
+  // macOS / Linux: pgrep is at /usr/bin/pgrep on all major distributions.
+  const pgrepPath = '/usr/bin/pgrep';
+  if (!existsSync(pgrepPath)) {
+    return null;
+  }
+  return {
+    cmd: pgrepPath,
+    buildArgs: (): string[] => ['-f', '--', `--user-data-dir=${CHROME_PROFILE_DIR}`],
+  };
+}
+
+/**
+ * Find Chrome PIDs that were launched with the cavendish profile directory.
+ * Returns an array of PIDs (may be empty if Chrome is not running).
+ *
+ * Uses `/usr/bin/pgrep -f` on macOS/Linux and `WMIC.exe` on Windows to search
+ * for Chrome processes with `--user-data-dir=<CHROME_PROFILE_DIR>`.
+ *
+ * @internal Exported for testing only.
+ */
+export function findChromeByProfileDir(): number[] {
+  const scanner = resolveProcessScanner();
+  if (!scanner) {
+    return [];
+  }
+  try {
+    const output = execFileSync(scanner.cmd, scanner.buildArgs(), {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    });
+    return output
+      .split('\n')
+      .map((line) => parseInt(line.trim(), 10))
+      .filter((pid) => !isNaN(pid) && pid > 0);
+  } catch {
+    // pgrep exits with code 1 when no processes match — this is expected.
+    // Any other error (pgrep not installed, timeout, etc.) is also non-fatal.
+    return [];
+  }
+}
+
+/**
+ * Kill Chrome processes by PID with best-effort SIGTERM.
+ * Returns true if at least one process was signaled (or already exited).
+ *
+ * @internal Exported for testing only.
+ */
+export function killChromePids(pids: number[], quiet: boolean): boolean {
+  let killed = false;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      progress(`Killed Chrome process (PID ${String(pid)})`, quiet);
+      killed = true;
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH') {
+        // Process already exited — count as success
+        killed = true;
+      } else {
+        progress(
+          `Warning: failed to kill Chrome process (PID ${String(pid)}): ${error instanceof Error ? error.message : String(error)}`,
+          quiet,
+        );
+      }
+    }
+  }
+  return killed;
+}
+
 async function killExistingChrome(quiet: boolean): Promise<void> {
   const endpoint = readCdpEndpoint();
   if (!endpoint) {
-    throw new CavendishError(
-      'CDP endpoint file is missing — cannot identify the running Chrome process.',
-      'cdp_unavailable',
-      'Close Chrome manually before running --reset, or run `cavendish init` without --reset first.',
-    );
+    // CDP endpoint file is missing — try to find Chrome by its profile dir argument.
+    progress('CDP endpoint file not found — scanning for Chrome process by profile directory...', quiet);
+    const pids = findChromeByProfileDir();
+    if (pids.length === 0) {
+      progress('No running Chrome found for this profile', quiet);
+      return;
+    }
+    const killed = killChromePids(pids, quiet);
+    if (!killed) {
+      throw new CavendishError(
+        'Found Chrome process(es) but failed to stop them.',
+        'chrome_close_failed',
+        'Close Chrome manually before running --reset.',
+      );
+    }
+    // Give Chrome a moment to release file locks before profile deletion
+    await new Promise((r) => setTimeout(r, 1_000));
+    return;
   }
   const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
 
