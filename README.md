@@ -205,7 +205,7 @@ npm test             # Run tests (vitest)
 <details>
 <summary>Project Structure</summary>
 
-```
+```text
 src/
 ├── index.ts                    # Entry point (citty)
 ├── commands/
