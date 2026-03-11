@@ -281,8 +281,7 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
     await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error(
-    `Chrome is still responding at ${cdpUrl} after ${String(timeoutMs)}ms. `
-    + 'Close Chrome manually before running --reset.',
+    `Chrome is still responding at ${cdpUrl} after ${String(timeoutMs)}ms`,
   );
 }
 
