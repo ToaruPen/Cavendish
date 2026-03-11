@@ -323,9 +323,9 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
   }
 
   // Connect to Chrome and run Playwright checks
-  acquireLock();
   const browser = new BrowserManager();
   try {
+    acquireLock();
     progress('Connecting to Chrome for doctor checks...', quiet);
     await browser.connect(quiet);
     const page = await browser.getPage(quiet);
