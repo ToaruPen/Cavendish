@@ -52,15 +52,16 @@ export async function withDriver(
   } catch (error: unknown) {
     failStructured(error, format);
   } finally {
-    // Unregister the signal cleanup callback before the normal cleanup
-    // path runs, preventing a double-close race.
-    unregisterPageCleanup?.();
-
     try {
       try {
         verbose('Closing tab...', isVerbose);
         await browser.closePage();
       } finally {
+        // Unregister AFTER closePage completes — if a signal arrived during
+        // closePage, the cleanup callback's redundant close is harmless
+        // (closePage is idempotent). Unregistering before closePage would
+        // leave a window where the tab leaks on signal.
+        unregisterPageCleanup?.();
         verbose('Closing Playwright connection...', isVerbose);
         await browser.close();
       }
