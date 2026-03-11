@@ -8,6 +8,7 @@ import { BrowserManager, CHROME_PROFILE_DIR, readCdpEndpoint, resolveCdpBaseUrl 
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
+import { acquireLock, releaseLock } from '../core/process-lock.js';
 
 /** Polling interval (ms) while waiting for user to log in. */
 const LOGIN_POLL_INTERVAL_MS = 3_000;
@@ -459,6 +460,8 @@ export const initCommand = defineCommand({
     }
 
     try {
+      acquireLock();
+
       if (args.reset === true) {
         await killExistingChrome(quiet);
         handleProfileReset(quiet);
@@ -473,6 +476,8 @@ export const initCommand = defineCommand({
       }
     } catch (error: unknown) {
       failStructured(error, format);
+    } finally {
+      releaseLock();
     }
   },
 });

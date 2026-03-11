@@ -14,6 +14,7 @@ import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 
 import { BrowserManager, CDP_ENDPOINT_FILE, CHROME_PROFILE_DIR, resolveCdpBaseUrl } from './browser-manager.js';
 import { errorMessage, progress } from './output-handler.js';
+import { acquireLock, releaseLock } from './process-lock.js';
 
 /** Timeout for individual doctor checks (ms). */
 const DOCTOR_CHECK_TIMEOUT_MS = 5_000;
@@ -324,6 +325,7 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
   // Connect to Chrome and run Playwright checks
   const browser = new BrowserManager();
   try {
+    acquireLock();
     progress('Connecting to Chrome for doctor checks...', quiet);
     await browser.connect(quiet);
     const page = await browser.getPage(quiet);
@@ -354,8 +356,15 @@ export async function collectDoctorChecks(quiet: boolean): Promise<DoctorCheck[]
     });
     checks.push(...skipPlaywrightChecks(detail));
   } finally {
-    await browser.closePage();
-    await browser.close();
+    try {
+      try {
+        await browser.closePage();
+      } finally {
+        await browser.close();
+      }
+    } finally {
+      releaseLock();
+    }
   }
 
   return checks;

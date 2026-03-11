@@ -1,5 +1,7 @@
 import { writeSync } from 'node:fs';
 
+import { releaseLock } from './process-lock.js';
+
 /**
  * Graceful shutdown handling for SIGINT and SIGTERM.
  *
@@ -41,10 +43,12 @@ function handleSigint(): void {
   // Use writeSync so the message is guaranteed to flush even when stderr
   // is piped (process.stderr.write is async on POSIX pipes).
   writeSync(2, '\n[cavendish] Shutting down (SIGINT)...\n');
+  releaseLock();
   process.exit(SIGINT_EXIT_CODE);
 }
 
 function handleSigterm(): void {
   writeSync(2, '[cavendish] Shutting down (SIGTERM)...\n');
+  releaseLock();
   process.exit(SIGTERM_EXIT_CODE);
 }
