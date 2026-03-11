@@ -327,7 +327,7 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   // -i: case-insensitive (macOS Chrome binary is "Google Chrome" with uppercase C).
   return {
     cmd: pgrepPath,
-    args: ['-fi', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}`],
+    args: ['-fi', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}( |$)`],
   };
 }
 
@@ -532,7 +532,7 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
       // Stale endpoint — CDP port no longer active. Chrome may still be running
       // with a different port (e.g. after a restart), so scan by profile dir.
       progress('CDP connection refused — scanning for Chrome process by profile directory...', quiet);
-      await killChromeByProfileScan(quiet, false);
+      await killChromeByProfileScan(quiet, true);
       return;
     }
     throw new CavendishError(
