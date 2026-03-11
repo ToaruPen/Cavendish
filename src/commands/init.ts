@@ -4,7 +4,7 @@ import { defineCommand } from 'citty';
 import { type Browser, type Page, errors } from 'playwright';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
-import { BrowserManager, CHROME_PROFILE_DIR, resolveCdpBaseUrl } from '../core/browser-manager.js';
+import { BrowserManager, CHROME_PROFILE_DIR, readCdpEndpoint, resolveCdpBaseUrl } from '../core/browser-manager.js';
 import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
@@ -270,7 +270,12 @@ async function navigateToGoogleLogin(page: Page, quiet: boolean): Promise<void> 
  * using the old profile in memory) is terminated before re-launch.
  */
 async function killExistingChrome(quiet: boolean): Promise<void> {
-  const cdpUrl = resolveCdpBaseUrl();
+  const endpoint = readCdpEndpoint();
+  if (!endpoint) {
+    progress('No CDP endpoint file found — no known Chrome to kill', quiet);
+    return;
+  }
+  const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
   const { chromium } = await import('playwright');
 
   progress('Stopping existing Chrome process...', quiet);
