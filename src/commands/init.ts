@@ -297,8 +297,14 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
     if (!existsSync(psPath)) {
       return null;
     }
-    // Escape backslashes for WMI LIKE pattern and single quotes for WQL string literal.
-    const escapedDir = CHROME_PROFILE_DIR.replaceAll('\\', '\\\\').replaceAll("'", "''");
+    // Escape WQL LIKE wildcards and special characters for the filter string.
+    // Order matters: escape [ before % and _ (since [%] and [_] contain brackets).
+    const escapedDir = CHROME_PROFILE_DIR
+      .replaceAll('\\', '\\\\')
+      .replaceAll("'", "''")
+      .replaceAll('[', '[[]')
+      .replaceAll('%', '[%]')
+      .replaceAll('_', '[_]');
     // Require "chrome" in the command line to avoid killing non-Chrome processes.
     return {
       cmd: psPath,
