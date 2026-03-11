@@ -260,7 +260,7 @@ export class BrowserManager {
       // running) or when another CLI invocation has already written
       // a newer endpoint for a different process.
       if (killed) {
-        this.removeStaleCdpEndpoint(chromePid);
+        this.removeStaleCdpEndpoint(chromePid, quiet);
       }
       // Wrap raw errors (e.g. from connectOverCDP) in CavendishError
       // so callers always get a consistent, actionable error type.
@@ -423,11 +423,19 @@ export class BrowserManager {
    * Does not throw — the original error from CDP discovery/connection
    * should propagate to the caller.
    *
-   * Note: we send SIGTERM without waiting for Chrome to exit.  This is
-   * intentional — the Chrome process was just launched moments ago and
-   * failed to accept a CDP connection, so it has no meaningful state.
-   * Adding a shutdown-wait loop here would risk masking the original
-   * error if the wait itself fails or times out.
+   * Design decision — SIGTERM without waiting for exit:
+   *
+   * `process.kill(pid)` sends SIGTERM but does not guarantee process
+   * termination.  We intentionally do not wait for Chrome to exit:
+   *
+   * 1. The Chrome process is freshly launched and has no user state to
+   *    preserve — a clean shutdown via SIGTERM is sufficient.
+   * 2. If Chrome ignores SIGTERM, the user can kill it manually.  This
+   *    follows the fail-fast principle: surface the original CDP error
+   *    immediately rather than blocking on cleanup.
+   * 3. Adding a wait-for-exit loop would introduce complexity (poll
+   *    interval, secondary timeout, extra error paths) for a rare
+   *    failure scenario that does not justify the cost.
    */
   private killOrphanChrome(pid: number, quiet: boolean): boolean {
     if (pid <= 0) {
@@ -471,7 +479,7 @@ export class BrowserManager {
    * unlikely. Even if it occurs, the new Chrome will recreate the file
    * on its next CDP probe.
    */
-  private removeStaleCdpEndpoint(pid: number): void {
+  private removeStaleCdpEndpoint(pid: number, quiet: boolean): void {
     try {
       const raw = readFileSync(CDP_ENDPOINT_FILE, 'utf8');
       const data = JSON.parse(raw) as Record<string, unknown>;
@@ -480,8 +488,13 @@ export class BrowserManager {
         return;
       }
       unlinkSync(CDP_ENDPOINT_FILE);
-    } catch {
-      // File missing, unreadable, or unparseable — nothing to clean up.
+    } catch (error: unknown) {
+      // File missing, unreadable, or unparseable — nothing to clean up,
+      // but log the detail for troubleshooting.
+      verbose(
+        `Could not remove stale CDP endpoint file: ${error instanceof Error ? error.message : String(error)}`,
+        !quiet,
+      );
     }
   }
 
