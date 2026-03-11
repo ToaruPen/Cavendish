@@ -141,7 +141,7 @@ async function waitForStopButtonAttach(
   if (remaining <= 0) {
     return false;
   }
-  const stopOrTimeout = await raceStopAndCopyButton(stopBtn, remaining);
+  const stopOrTimeout = await awaitStopButton(stopBtn, remaining);
   if (stopOrTimeout === 'stop') {
     return true;
   }
@@ -267,7 +267,7 @@ async function waitForStopButtonOrResponse(
   }
 }
 
-async function raceStopAndCopyButton(
+async function awaitStopButton(
   stopBtn: Locator,
   timeout: number,
 ): Promise<'stop' | 'timeout'> {
