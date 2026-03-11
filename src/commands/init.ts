@@ -299,11 +299,12 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
     }
     // Escape backslashes for WMI LIKE pattern and single quotes for WQL string literal.
     const escapedDir = CHROME_PROFILE_DIR.replaceAll('\\', '\\\\').replaceAll("'", "''");
+    // Require "chrome" in the command line to avoid killing non-Chrome processes.
     return {
       cmd: psPath,
       args: [
         '-NoProfile', '-Command',
-        `Get-CimInstance Win32_Process -Filter "CommandLine like '%--user-data-dir=${escapedDir}%'" | Select-Object -ExpandProperty ProcessId`,
+        `Get-CimInstance Win32_Process -Filter "Name like '%chrome%' AND CommandLine like '%--user-data-dir=${escapedDir}%'" | Select-Object -ExpandProperty ProcessId`,
       ],
     };
   }
@@ -316,9 +317,10 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   // Escape regex metacharacters in the profile dir path so pgrep -f
   // treats them literally (e.g. ".cavendish" won't match "Xcavendish").
   const escapedDir = CHROME_PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Require "chrome" (or "chromium") in the command line to avoid killing non-Chrome processes.
   return {
     cmd: pgrepPath,
-    args: ['-f', '--', `--user-data-dir=${escapedDir}`],
+    args: ['-f', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}`],
   };
 }
 
@@ -428,6 +430,12 @@ function sigkillPids(pids: Set<number>): void {
  *
  * If PIDs survive the timeout, escalates to SIGKILL and re-checks.
  * Throws CavendishError if any process still remains after escalation.
+ *
+ * Note: PID recycling (a new process reusing a recently-freed PID) is theoretically
+ * possible but practically negligible here — the window between findChromeByProfileDir()
+ * and kill is milliseconds, and the PIDs were just verified as Chrome via command-line
+ * pattern matching. OS PID allocation is typically monotonically increasing with a large
+ * wrap-around range (32k+ on Linux, 99999 on macOS).
  *
  * @internal Exported for testing only.
  */

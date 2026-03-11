@@ -126,7 +126,7 @@ describe('findChromeByProfileDir — scans for Chrome by profile dir (#146)', ()
     // "--user-data-dir=..." being parsed as an illegal option.
     expect(capturedArgs).toContain('--');
     const dashDashIndex = capturedArgs.indexOf('--');
-    const patternIndex = capturedArgs.findIndex((a) => a.startsWith('--user-data-dir='));
+    const patternIndex = capturedArgs.findIndex((a) => a.includes('--user-data-dir='));
     expect(dashDashIndex).toBeLessThan(patternIndex);
   });
 
