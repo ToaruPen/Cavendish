@@ -118,7 +118,7 @@ describe('withDriver cleanup registration', () => {
     expect(browserInstance.closePage).toHaveBeenCalled();
   });
 
-  it('does not register cleanup when getPage fails', async () => {
+  it('registers and unregisters cleanup even when getPage fails', async () => {
     const { BrowserManager } = await import('../src/core/browser-manager.js');
     (BrowserManager as ReturnType<typeof vi.fn>).mockImplementationOnce(() => ({
       getPage: vi.fn().mockRejectedValue(new Error('connection failed')),
@@ -131,6 +131,10 @@ describe('withDriver cleanup registration', () => {
 
     await withDriver(true, () => Promise.resolve());
 
-    expect(registerCleanup).not.toHaveBeenCalled();
+    // Cleanup is now registered before getPage, so it's always called
+    expect(registerCleanup).toHaveBeenCalledOnce();
+    // Unregister should still be called in the finally block
+    expect(unregisterFns).toHaveLength(1);
+    expect(unregisterFns[0]).toHaveBeenCalledOnce();
   });
 });
