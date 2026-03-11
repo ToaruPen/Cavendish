@@ -429,8 +429,9 @@ async function waitForDeepResearchReport(
   const initialText = await getDeepResearchResponse(page);
 
   // When seenStopButton is true, the research cycle (stop button appear → disappear) completed,
-  // so any non-empty text is the final report — preActionText comparison is intentionally skipped.
-  if (seenStopButton && initialText.length > 0 && !await hasDeepResearchStopButton(page)) {
+  // so any non-empty text that differs from preActionText is the final report.
+  // The preActionText guard prevents returning the old report on follow-up/refresh.
+  if (seenStopButton && initialText.length > 0 && initialText !== preActionText && !await hasDeepResearchStopButton(page)) {
     progress('Response complete', quiet);
     return { text: initialText, completed: true };
   }
@@ -480,6 +481,11 @@ export function evaluateReportPoll(
   // Stop button was seen → research cycle completed; any new text is final.
   if (seenStopButton && text !== preActionText) {
     return text;
+  }
+  // Stop button was seen but text is still the pre-action content → keep waiting.
+  if (seenStopButton && text === preActionText && preActionText.length > 0) {
+    state.stableCount = 0;
+    return null;
   }
   // Stop button was NOT seen → require stability before declaring complete.
   if (text === state.previousText) {

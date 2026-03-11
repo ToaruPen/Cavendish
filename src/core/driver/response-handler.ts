@@ -122,10 +122,6 @@ async function waitForStopButtonAttach(
   deadline: number,
   quiet: boolean,
 ): Promise<boolean> {
-  // Snapshot copy button count BEFORE the race so we can detect new
-  // copy buttons even if the response completes during the race.
-  const copyBtnCountBefore = await page.locator(SELECTORS.COPY_BUTTON).count();
-
   const result = await raceStopButtonAndMessage(
     page, stopBtn, msgCountBefore, timeout,
   );
@@ -140,18 +136,13 @@ async function waitForStopButtonAttach(
   }
 
   // 'message' — assistant message appeared before stop button (Pro thinking).
-  // Race stop button against copy button: if the response completes so fast
-  // that the stop button never appears, the copy button is a reliable fallback.
+  // Wait for the stop button to appear; if it never does, time out.
   const remaining = Math.max(deadline - Date.now(), 0);
   if (remaining <= 0) {
     return false;
   }
-  const stopOrCopy = await raceStopAndCopyButton(page, stopBtn, copyBtnCountBefore, remaining);
-  if (stopOrCopy === 'stop') {
-    return true;
-  }
-  if (stopOrCopy === 'copy') {
-    progress('Response completed (copy button detected)', quiet);
+  const stopOrTimeout = await raceStopAndCopyButton(stopBtn, remaining);
+  if (stopOrTimeout === 'stop') {
     return true;
   }
   // timeout
@@ -277,40 +268,16 @@ async function waitForStopButtonOrResponse(
 }
 
 async function raceStopAndCopyButton(
-  page: Page,
   stopBtn: Locator,
-  copyBtnCountBefore: number,
   timeout: number,
-): Promise<'stop' | 'copy' | 'timeout'> {
-  const deadline = Date.now() + timeout;
-  const race = { settled: false };
-
-  const stopPromise = stopBtn
+): Promise<'stop' | 'timeout'> {
+  return stopBtn
     .waitFor({ state: 'attached', timeout })
     .then((): 'stop' => 'stop')
     .catch((error: unknown): 'timeout' => {
       if (isTimeoutError(error)) { return 'timeout'; }
       throw error;
     });
-
-  // Poll for a NEW copy button (count > before) to avoid matching
-  // existing copy buttons from previous conversation turns.
-  const copyPromise = (async (): Promise<'copy' | 'timeout'> => {
-    while (!race.settled && Date.now() < deadline) {
-      const count = await page.locator(SELECTORS.COPY_BUTTON).count();
-      if (count > copyBtnCountBefore) {
-        return 'copy';
-      }
-      await delay(POLL_INTERVAL_MS);
-    }
-    return 'timeout';
-  })();
-
-  try {
-    return await Promise.race([stopPromise, copyPromise]);
-  } finally {
-    race.settled = true;
-  }
 }
 
 async function pollChunks(

@@ -29,10 +29,26 @@ describe('evaluateReportPoll', () => {
     expect(result).toBe('final report');
   });
 
-  it('returns null when seenStopButton but text equals preActionText', () => {
-    const state = makeState({ sawTransition: true });
+  it('returns null when seenStopButton but text equals preActionText and resets stableCount', () => {
+    const state = makeState({ sawTransition: true, stableCount: 2 });
     const result = evaluateReportPoll('pre-action', false, true, 'pre-action', state);
     expect(result).toBeNull();
+    expect(state.stableCount).toBe(0);
+  });
+
+  it('does not return stale preActionText via stability check when seenStopButton is true', () => {
+    const state = makeState({
+      sawTransition: true,
+      previousText: 'pre-action',
+      stableCount: 0,
+    });
+    // Call multiple times with text === preActionText and seenStopButton=true.
+    // Every call must return null — the stability check must never promote stale text.
+    for (let i = 0; i < 5; i++) {
+      const result = evaluateReportPoll('pre-action', false, true, 'pre-action', state);
+      expect(result).toBeNull();
+      expect(state.stableCount).toBe(0);
+    }
   });
 
   it('returns null when no transition and text equals preActionText (no stop button)', () => {
