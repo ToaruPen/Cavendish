@@ -287,8 +287,15 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
   );
 }
 
+interface ProcessScanner {
+  cmd: string;
+  args: string[];
+  /** pgrep exits with code 1 for "no matches"; PowerShell exits 0 with empty output. */
+  noMatchExitCode: number | null;
+}
+
 /** Resolve the absolute path for a process-scanning command per platform. */
-function resolveProcessScanner(): { cmd: string; args: string[] } | null {
+function resolveProcessScanner(): ProcessScanner | null {
   if (process.platform === 'win32') {
     // Use PowerShell's Get-CimInstance (replaces deprecated WMIC removed in Win11 24H2).
     // Resolve PowerShell path via %SystemRoot% so non-standard Windows installs work.
@@ -306,12 +313,14 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
       .replaceAll('%', '[%]')
       .replaceAll('_', '[_]');
     // Require "chrome" in the command line to avoid killing non-Chrome processes.
+    // PowerShell exits 0 with empty output when no processes match — no special exit code.
     return {
       cmd: psPath,
       args: [
         '-NoProfile', '-Command',
         `Get-CimInstance Win32_Process -Filter "Name like '%chrome%' AND CommandLine like '%--user-data-dir=${escapedDir}%'" | Select-Object -ExpandProperty ProcessId`,
       ],
+      noMatchExitCode: null,
     };
   }
   // macOS / Linux: pgrep may be at /usr/bin/pgrep, /bin/pgrep, or /sbin/pgrep depending on distro.
@@ -325,9 +334,11 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
   const escapedDir = CHROME_PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // Require "chrome" (or "chromium") in the command line to avoid killing non-Chrome processes.
   // -i: case-insensitive (macOS Chrome binary is "Google Chrome" with uppercase C).
+  // pgrep exits with code 1 when no processes match — this is expected.
   return {
     cmd: pgrepPath,
     args: ['-fi', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}( |$)`],
+    noMatchExitCode: 1,
   };
 }
 
@@ -359,9 +370,10 @@ export function findChromeByProfileDir(): number[] | null {
       .map((line) => parseInt(line.trim(), 10))
       .filter((pid) => !isNaN(pid) && pid > 0);
   } catch (error: unknown) {
-    // pgrep exits with code 1 when no processes match — this is expected.
+    // Some scanners use a specific exit code for "no matches" (e.g. pgrep → 1).
+    // Only treat that exit code as "no matches"; all others are scanner failures.
     const exitCode = (error as NodeJS.ErrnoException & { status?: number }).status;
-    if (exitCode === 1) {
+    if (scanner.noMatchExitCode !== null && exitCode === scanner.noMatchExitCode) {
       return [];
     }
     // Any other error (timeout, spawn failure, etc.) — scanner failed.
