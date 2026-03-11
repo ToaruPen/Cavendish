@@ -1,5 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -70,15 +70,18 @@ export function readCdpEndpoint(): CdpEndpointData | null {
 
 /**
  * Resolve the CDP base URL from the saved endpoint file.
- * Falls back to the legacy fixed port 9222 for backward compatibility
- * with Chrome instances launched by older Cavendish versions.
+ * Throws if the endpoint file is missing — callers must handle this
+ * (e.g. `ensureConnected` catches and falls back to launching Chrome).
  */
 export function resolveCdpBaseUrl(): string {
   const endpoint = readCdpEndpoint();
   if (endpoint) {
     return `http://127.0.0.1:${String(endpoint.port)}`;
   }
-  return 'http://127.0.0.1:9222';
+  throw new CavendishError(
+    'CDP endpoint not found. Run \'cavendish init\' to start Chrome with CDP enabled.',
+    'cdp_unavailable',
+  );
 }
 
 /**
@@ -105,7 +108,11 @@ export class BrowserManager {
    */
   async getPage(quiet = false, permissions: string[] = [], isVerbose = false): Promise<Page> {
     if (!this.browser) {
-      verbose(`CDP endpoint: ${resolveCdpBaseUrl()}`, isVerbose);
+      try {
+        verbose(`CDP endpoint: ${resolveCdpBaseUrl()}`, isVerbose);
+      } catch {
+        verbose('CDP endpoint: not configured (will launch Chrome)', isVerbose);
+      }
       await this.ensureConnected(quiet);
     }
 
@@ -231,14 +238,31 @@ export class BrowserManager {
       });
     });
 
-    const cdpUrl = await this.discoverCdpEndpoint(child.pid ?? 0, quiet);
-    await this.connectTo(cdpUrl, quiet);
+    const chromePid = child.pid ?? 0;
+    try {
+      const cdpUrl = await this.discoverCdpEndpoint(chromePid, quiet);
+      await this.connectTo(cdpUrl, quiet);
+    } catch (error: unknown) {
+      // Kill the orphan Chrome process to avoid leaving it running
+      // when CDP discovery or connection fails.
+      const killed = this.killOrphanChrome(chromePid, quiet);
+      // Remove the endpoint file only when:
+      // 1. The kill succeeded (or the process already exited), AND
+      // 2. The saved endpoint belongs to the process we just killed.
+      // Skip removal when the kill failed (Chrome is likely still
+      // running) or when another CLI invocation has already written
+      // a newer endpoint for a different process.
+      if (killed) {
+        this.removeStaleCdpEndpoint(chromePid);
+      }
+      throw error;
+    }
     progress('Chrome launched', quiet);
   }
 
   /**
    * Connect to a running Chrome via CDP using the saved endpoint file.
-   * Falls back to legacy port 9222 for backward compatibility.
+   * Throws if the endpoint file is missing or Chrome is unreachable.
    */
   async connect(quiet = false): Promise<void> {
     const baseUrl = resolveCdpBaseUrl();
@@ -374,6 +398,66 @@ export class BrowserManager {
       `Chrome did not start a CDP endpoint after ${String(CDP_MAX_RETRIES)} attempts. Ensure Chrome is installed and can start.`,
       'cdp_unavailable',
     );
+  }
+
+  /**
+   * Attempt to kill an orphaned Chrome process by PID.
+   * Returns true if the kill signal was sent (or the process already
+   * exited), false if the kill failed (e.g. EPERM).
+   *
+   * Does not throw — the original error from CDP discovery/connection
+   * should propagate to the caller.
+   *
+   * Note: we send SIGTERM without waiting for Chrome to exit.  This is
+   * intentional — the Chrome process was just launched moments ago and
+   * failed to accept a CDP connection, so it has no meaningful state.
+   * Adding a shutdown-wait loop here would risk masking the original
+   * error if the wait itself fails or times out.
+   */
+  private killOrphanChrome(pid: number, quiet: boolean): boolean {
+    if (pid <= 0) {
+      return false;
+    }
+    try {
+      process.kill(pid);
+      progress(`Killed orphan Chrome process (PID ${String(pid)})`, quiet);
+      return true;
+    } catch (error: unknown) {
+      // ESRCH = process already exited — treat as success (nothing to kill).
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH') {
+        return true;
+      }
+      // Other failures (EPERM, etc.) are logged so the user knows cleanup
+      // may be needed.  Return false so the caller does NOT remove the
+      // endpoint file — Chrome is likely still running.
+      progress(
+        `Warning: failed to kill Chrome process (PID ${String(pid)}): ${error instanceof Error ? error.message : String(error)}`,
+        quiet,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Remove the saved CDP endpoint file only if it belongs to the given PID.
+   * Prevents accidentally deleting an endpoint written by a different
+   * Chrome process that launched successfully in the meantime.
+   *
+   * When the file is missing or unreadable, we skip deletion rather than
+   * risking removal of a file being written by another process.
+   */
+  private removeStaleCdpEndpoint(pid: number): void {
+    try {
+      const saved = readCdpEndpoint();
+      if (saved?.pid === pid) {
+        unlinkSync(CDP_ENDPOINT_FILE);
+      }
+      // If saved is null (file missing/corrupt/unreadable), do nothing.
+      // Another process may be writing a new endpoint concurrently.
+    } catch {
+      // unlinkSync failed — file may already be gone, nothing to do.
+    }
   }
 
   /**
