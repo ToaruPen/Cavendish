@@ -304,8 +304,8 @@ function resolveProcessScanner(): { cmd: string; args: string[] } | null {
       ],
     };
   }
-  // macOS / Linux: pgrep may be at /usr/bin/pgrep or /bin/pgrep depending on distro.
-  const pgrepCandidates = ['/usr/bin/pgrep', '/bin/pgrep'];
+  // macOS / Linux: pgrep may be at /usr/bin/pgrep, /bin/pgrep, or /sbin/pgrep depending on distro.
+  const pgrepCandidates = ['/usr/bin/pgrep', '/bin/pgrep', '/sbin/pgrep'];
   const pgrepPath = pgrepCandidates.find((p) => existsSync(p));
   if (!pgrepPath) {
     return null;
@@ -383,25 +383,71 @@ export function killChromePids(pids: number[], quiet: boolean): boolean {
   return killed;
 }
 
+/** Check if a process has exited (ESRCH). Returns true only for ESRCH. */
+function hasProcessExited(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error: unknown) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/** Remove exited PIDs from the set. */
+function pruneExitedPids(remaining: Set<number>): void {
+  for (const pid of [...remaining]) {
+    if (hasProcessExited(pid)) {
+      remaining.delete(pid);
+    }
+  }
+}
+
+/** Send SIGKILL to all PIDs in the set (best-effort). */
+function sigkillPids(pids: Set<number>): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // ESRCH = already gone, ignore
+    }
+  }
+}
+
 /**
  * Poll until all given PIDs have exited, or until timeoutMs elapses.
  * Uses `process.kill(pid, 0)` which throws ESRCH when the process no longer exists.
+ *
+ * If PIDs survive the timeout, escalates to SIGKILL and re-checks.
+ * Throws CavendishError if any process still remains after escalation.
+ *
+ * @internal Exported for testing only.
  */
-async function waitForPidExit(pids: number[], timeoutMs: number): Promise<void> {
+export async function waitForPidExit(pids: number[], timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const remaining = new Set(pids);
+
   while (remaining.size > 0 && Date.now() < deadline) {
-    for (const pid of remaining) {
-      try {
-        process.kill(pid, 0);
-      } catch {
-        // Process no longer exists
-        remaining.delete(pid);
-      }
-    }
+    pruneExitedPids(remaining);
     if (remaining.size > 0) {
       await new Promise((r) => setTimeout(r, 200));
     }
+  }
+
+  if (remaining.size === 0) {
+    return;
+  }
+
+  // Escalate to SIGKILL for survivors
+  sigkillPids(remaining);
+  await new Promise((r) => setTimeout(r, 500));
+  pruneExitedPids(remaining);
+
+  if (remaining.size > 0) {
+    throw new CavendishError(
+      `Chrome process(es) did not exit in time: ${[...remaining].join(', ')}`,
+      'chrome_close_failed',
+      'Close Chrome manually before running --reset.',
+    );
   }
 }
 

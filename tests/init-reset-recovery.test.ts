@@ -51,7 +51,7 @@ function mockFsForProcessScanner(): void {
       ...real,
       // Return true for the scanner binary so resolveProcessScanner() succeeds
       existsSync: (path: string): boolean => {
-        if (path === '/usr/bin/pgrep' || path === '/bin/pgrep' || path.includes('powershell')) {
+        if (path === '/usr/bin/pgrep' || path === '/bin/pgrep' || path === '/sbin/pgrep' || path.includes('powershell')) {
           return true;
         }
         return real.existsSync(path);
@@ -70,7 +70,7 @@ function mockFsNoScanner(): void {
     return {
       ...real,
       existsSync: (path: string): boolean => {
-        if (path === '/usr/bin/pgrep' || path === '/bin/pgrep' || path.includes('powershell')) {
+        if (path === '/usr/bin/pgrep' || path === '/bin/pgrep' || path === '/sbin/pgrep' || path.includes('powershell')) {
           return false;
         }
         return real.existsSync(path);
@@ -263,5 +263,128 @@ describe('killChromePids — kills Chrome processes by PID (#146)', () => {
     const result = killChromePids([], true);
     expect(result).toBe(false);
     expect(processKillCalls.length).toBe(0);
+  });
+});
+
+/* ================================================================
+ * waitForPidExit — polling + SIGKILL escalation tests
+ * ================================================================ */
+
+describe('waitForPidExit — polls until PIDs exit with SIGKILL escalation (#146)', () => {
+  it('resolves immediately when all PIDs are already gone (ESRCH)', async () => {
+    mockOutputHandler();
+    stubProcessKill((_pid: number, signal?: NodeJS.Signals | number): true => {
+      if (signal === 0) {
+        const err = new Error('kill ESRCH') as NodeJS.ErrnoException;
+        err.code = 'ESRCH';
+        throw err;
+      }
+      return true;
+    });
+
+    const { waitForPidExit } = await import('../src/commands/init.js');
+    // Should resolve without throwing
+    await expect(waitForPidExit([111, 222], 1_000)).resolves.toBeUndefined();
+  });
+
+  it('resolves when PIDs exit during polling', async () => {
+    mockOutputHandler();
+    let pollCount = 0;
+    stubProcessKill((_pid: number, signal?: NodeJS.Signals | number): true => {
+      if (signal === 0) {
+        pollCount += 1;
+        if (pollCount >= 3) {
+          // After a few polls, process is gone
+          const err = new Error('kill ESRCH') as NodeJS.ErrnoException;
+          err.code = 'ESRCH';
+          throw err;
+        }
+        // Process still alive
+        return true;
+      }
+      return true;
+    });
+
+    const { waitForPidExit } = await import('../src/commands/init.js');
+    await expect(waitForPidExit([999], 5_000)).resolves.toBeUndefined();
+  });
+
+  it('throws CavendishError when PIDs survive timeout and SIGKILL (EPERM)', async () => {
+    mockOutputHandler();
+    stubProcessKill((_pid: number, signal?: NodeJS.Signals | number): true => {
+      if (signal === 0) {
+        // EPERM: process is alive but owned by another user
+        const err = new Error('kill EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      if (signal === 'SIGKILL') {
+        // EPERM: cannot kill process owned by another user
+        const err = new Error('kill EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      return true;
+    });
+
+    const { waitForPidExit } = await import('../src/commands/init.js');
+    // Use a very short timeout so the test runs quickly
+    await expect(waitForPidExit([777], 100)).rejects.toThrow(
+      'Chrome process(es) did not exit in time: 777',
+    );
+  });
+
+  it('does not treat EPERM as process exit during polling', async () => {
+    mockOutputHandler();
+    const killSignals: (NodeJS.Signals | number | undefined)[] = [];
+    stubProcessKill((_pid: number, signal?: NodeJS.Signals | number): true => {
+      killSignals.push(signal);
+      if (signal === 0) {
+        // EPERM: process alive but owned by another user
+        const err = new Error('kill EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      if (signal === 'SIGKILL') {
+        // SIGKILL also fails with EPERM
+        const err = new Error('kill EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      return true;
+    });
+
+    const { waitForPidExit } = await import('../src/commands/init.js');
+    await expect(waitForPidExit([888], 100)).rejects.toThrow('Chrome process(es) did not exit in time');
+    // Verify that SIGKILL escalation was attempted
+    expect(killSignals).toContain('SIGKILL');
+  });
+
+  it('resolves when SIGKILL succeeds after timeout', async () => {
+    mockOutputHandler();
+    let sigkillSent = false;
+    stubProcessKill((_pid: number, signal?: NodeJS.Signals | number): true => {
+      if (signal === 'SIGKILL') {
+        sigkillSent = true;
+        return true;
+      }
+      if (signal === 0) {
+        if (sigkillSent) {
+          // After SIGKILL + 500ms wait, process is gone
+          const err = new Error('kill ESRCH') as NodeJS.ErrnoException;
+          err.code = 'ESRCH';
+          throw err;
+        }
+        // During polling: EPERM (process alive but unresponsive to SIGTERM)
+        const err = new Error('kill EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      }
+      return true;
+    });
+
+    const { waitForPidExit } = await import('../src/commands/init.js');
+    // Short timeout to trigger SIGKILL escalation quickly
+    await expect(waitForPidExit([555], 100)).resolves.toBeUndefined();
   });
 });
