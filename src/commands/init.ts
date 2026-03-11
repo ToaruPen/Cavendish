@@ -269,13 +269,30 @@ async function navigateToGoogleLogin(page: Page, quiet: boolean): Promise<void> 
  * Needed after profile reset so that the stale Chrome process (still
  * using the old profile in memory) is terminated before re-launch.
  */
-async function killExistingChrome(quiet: boolean): Promise<void> {
-  const endpoint = readCdpEndpoint();
-  if (!endpoint) {
-    progress('No CDP endpoint file found — no known Chrome to kill', quiet);
-    return;
+async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await fetch(`${cdpUrl}/json/version`, { signal: AbortSignal.timeout(1_000) });
+    } catch {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
-  const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
+}
+
+async function killExistingChrome(quiet: boolean): Promise<void> {
+  // Try endpoint file first; fall back to legacy port 9222 for
+  // upgrades from older Cavendish versions that used a fixed port.
+  const endpoint = readCdpEndpoint();
+  const cdpUrl = endpoint
+    ? `http://127.0.0.1:${String(endpoint.port)}`
+    : 'http://127.0.0.1:9222';
+
+  if (!endpoint) {
+    progress('No CDP endpoint file — trying legacy port 9222...', quiet);
+  }
+
   const { chromium } = await import('playwright');
 
   progress('Stopping existing Chrome process...', quiet);
@@ -299,8 +316,7 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
   try {
     const cdpSession = await browser.newBrowserCDPSession();
     await cdpSession.send('Browser.close');
-    // Give Chrome a moment to fully shut down
-    await new Promise((r) => setTimeout(r, 1_000));
+    await waitForChromeShutdown(cdpUrl);
     progress('Chrome process stopped', quiet);
   } catch (error: unknown) {
     throw new CavendishError(
