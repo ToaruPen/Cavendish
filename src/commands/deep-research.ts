@@ -4,11 +4,9 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, readStdin, validateFileArgs } from '../core/cli-args.js';
 import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
-
-import { buildPrompt, readStdin, validateFileArgs } from './ask.js';
 
 const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
 

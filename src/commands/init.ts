@@ -22,7 +22,7 @@ const LOGIN_BUTTON_TIMEOUT_MS = 10_000;
 const GOOGLE_BUTTON_TIMEOUT_MS = 10_000;
 
 interface InitResult {
-  status: 'ready';
+  status: 'ready' | 'not_logged_in';
   profile: string;
   cdp: boolean;
   loggedIn: boolean;
@@ -337,7 +337,7 @@ async function setupAndVerify(quiet: boolean, skipLogin: boolean): Promise<InitR
     }
 
     return {
-      status: 'ready',
+      status: loggedIn ? 'ready' : 'not_logged_in',
       profile: CHROME_PROFILE_DIR,
       cdp: true,
       loggedIn,

@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { fstatSync, readSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { errorMessage, failValidation } from './output-handler.js';
@@ -131,4 +131,104 @@ export function extractArgsOrFail(flag: string, format?: 'json' | 'text'): strin
     failValidation(errorMessage(error), format);
     return undefined;
   }
+}
+
+// ── Stdin / prompt helpers (shared by ask & deep-research) ───────────
+
+/**
+ * Maximum stdin size (1 MB). Enforced during chunked reading so that
+ * oversized input is rejected immediately without buffering it all first.
+ */
+export const STDIN_MAX_BYTES = 1_048_576;
+
+/** Size of the scratch buffer used for chunked stdin reads. */
+const STDIN_CHUNK_SIZE = 64 * 1024;
+
+/**
+ * Read piped stdin when running in a non-TTY context.
+ * Returns the raw input, or an empty string when stdin is a TTY.
+ *
+ * Reads in 64 KiB chunks and checks the accumulated size after each chunk,
+ * throwing immediately when {@link STDIN_MAX_BYTES} is exceeded. This prevents
+ * OOM from multi-GB stdin input.
+ */
+export function readStdin(): string {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+  try {
+    const stat = fstatSync(0);
+    if (!stat.isFIFO() && !stat.isFile()) {
+      return '';
+    }
+
+    const scratch = Buffer.allocUnsafe(STDIN_CHUNK_SIZE);
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    for (;;) {
+      const bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      totalBytes += bytesRead;
+      if (totalBytes > STDIN_MAX_BYTES) {
+        throw new Error(
+          `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(totalBytes)}+). Reduce input size or use --file instead.`,
+        );
+      }
+      chunks.push(Buffer.from(scratch.subarray(0, bytesRead)));
+    }
+
+    return Buffer.concat(chunks, totalBytes).toString('utf-8');
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.startsWith('Stdin input exceeds')) {
+      throw error;
+    }
+    throw new Error(
+      `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,
+    );
+  }
+}
+
+/**
+ * Combine optional stdin data with the user-supplied prompt.
+ * When stdin data is present, it is prepended with a blank-line separator.
+ */
+export function buildPrompt(prompt: string, stdinData: string): string {
+  if (stdinData.length === 0) {
+    return prompt;
+  }
+  if (prompt.length === 0) {
+    return stdinData;
+  }
+  return `${stdinData}\n\n${prompt}`;
+}
+
+/**
+ * Validate --file arguments from process.argv.
+ * Returns resolved absolute paths, or undefined on validation error.
+ */
+export function validateFileArgs(format?: 'json' | 'text'): string[] | undefined {
+  let filePaths: string[];
+  try {
+    filePaths = extractFileArgs(process.argv);
+  } catch (error: unknown) {
+    failValidation(errorMessage(error), format);
+    return undefined;
+  }
+
+  let missingFile: string | undefined;
+  try {
+    missingFile = findMissingFile(filePaths);
+  } catch (error: unknown) {
+    failValidation(errorMessage(error), format);
+    return undefined;
+  }
+  if (missingFile !== undefined) {
+    failValidation(`file not found or not a regular file: ${missingFile}`, format);
+    return undefined;
+  }
+
+  return filePaths;
 }
