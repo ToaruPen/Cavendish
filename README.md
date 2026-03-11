@@ -288,7 +288,7 @@ Chrome is launched with `--remote-debugging-port=0`, which lets the OS assign a 
 - The CDP port is **unpredictable** — no well-known port for attackers to target.
 - Only processes on the local machine can connect to the CDP endpoint.
 - The port is **not** exposed to the network — remote hosts cannot reach it.
-- The endpoint file (`cdp-endpoint.json`) is readable only by the file owner.
+- The endpoint file (`cdp-endpoint.json`) is written with **0o600 permissions** and explicitly `chmod`-ed to enforce owner-only readability on macOS and Linux. On Windows, Node.js silently ignores POSIX permission bits beyond the read-only flag, so the file inherits NTFS ACLs from the user's home directory instead (same behavior as the Chrome profile directory).
 
 ### Chrome Profile Directory
 
@@ -308,7 +308,7 @@ If you run Cavendish on a shared machine:
 
 - **macOS/Linux**: Verify that `~/.cavendish/` has `drwx------` permissions (`ls -ld ~/.cavendish`).
 - **Windows**: Verify that `%USERPROFILE%\.cavendish\` inherits appropriate NTFS ACLs restricting access to your user account.
-- The CDP port is OS-assigned and unpredictable, but binding to `127.0.0.1` does not isolate the endpoint from other users on the same machine. Verify that `~/.cavendish/cdp-endpoint.json` is not world-readable.
+- The CDP port is OS-assigned and unpredictable, but binding to `127.0.0.1` does not isolate the endpoint from other users on the same machine. Verify that `cdp-endpoint.json` inside your Cavendish config directory (`~/.cavendish/` on macOS/Linux, `%USERPROFILE%\.cavendish\` on Windows) is not world-readable.
 - Do **not** share your `~/.cavendish/chrome-profile` directory — it contains active session data.
 
 ## License
