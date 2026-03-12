@@ -1,3 +1,6 @@
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { defineCommand, runMain } from 'citty';
 
 import { archiveCommand } from './commands/archive.js';
@@ -14,8 +17,6 @@ import { statusCommand } from './commands/status.js';
 import { registerSignalHandlers } from './core/shutdown.js';
 
 declare const __VERSION__: string;
-
-registerSignalHandlers();
 
 const main = defineCommand({
   meta: {
@@ -39,4 +40,14 @@ const main = defineCommand({
   },
 });
 
-void runMain(main);
+// Only execute CLI when run directly (not when imported as a module).
+// Use realpathSync to resolve symlinks from global npm installs (e.g.
+// /usr/local/bin/cavendish → ~/.npm/.../dist/index.mjs).
+const currentFile = fileURLToPath(import.meta.url);
+const entryFile = process.argv[1] ? realpathSync(process.argv[1]) : '';
+const isDirectRun = entryFile === currentFile;
+
+if (isDirectRun) {
+  registerSignalHandlers();
+  void runMain(main);
+}
