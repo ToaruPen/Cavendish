@@ -2,6 +2,7 @@ import { BrowserManager } from './browser-manager.js';
 import { ChatGPTDriver } from './chatgpt-driver.js';
 import { failStructured, verbose } from './output-handler.js';
 import { acquireLock, releaseLock } from './process-lock.js';
+import { registerCleanup } from './shutdown.js';
 
 export interface WithDriverOptions {
   /** Browser permissions to grant for the ChatGPT origin (default: none). */
@@ -26,12 +27,20 @@ export async function withDriver(
   const isVerbose = options?.verbose ?? false;
   const browser = new BrowserManager();
 
+  // Register cleanup before getPage() so SIGINT/SIGTERM during page
+  // acquisition can still close the tab. closePage() is idempotent —
+  // safe to call even when no page has been created yet.
+  const unregisterPageCleanup = registerCleanup(async (): Promise<void> => {
+    await browser.closePage();
+  });
+
   try {
     verbose('Acquiring process lock...', isVerbose);
     acquireLock();
     verbose('Process lock acquired', isVerbose);
     verbose('Acquiring browser page...', isVerbose);
     const page = await browser.getPage(quiet, options?.permissions ?? [], isVerbose);
+
     verbose('Creating ChatGPTDriver...', isVerbose);
     const driver = new ChatGPTDriver(page);
     verbose('Driver ready, executing command action...', isVerbose);
@@ -44,6 +53,11 @@ export async function withDriver(
         verbose('Closing tab...', isVerbose);
         await browser.closePage();
       } finally {
+        // Unregister AFTER closePage completes — if a signal arrived during
+        // closePage, the cleanup callback's redundant close is harmless
+        // (closePage is idempotent). Unregistering before closePage would
+        // leave a window where the tab leaks on signal.
+        unregisterPageCleanup();
         verbose('Closing Playwright connection...', isVerbose);
         await browser.close();
       }
