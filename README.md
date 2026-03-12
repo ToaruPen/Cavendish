@@ -155,13 +155,14 @@ cavendish init --reset        # Reset profile and re-authenticate
 cavendish doctor              # Health diagnostics (CDP, auth, selectors)
 cavendish doctor --json       # JSON output
 cavendish status              # Alias for doctor
+cavendish status --json       # JSON output (same as doctor --json)
 ```
 
 ### Common Options
 
 | Flag | Scope | Description |
 |------|-------|-------------|
-| `--format text\|json` | ask, deep-research, list, read, projects, status | Output format (default: `json`) |
+| `--format text\|json` | ask, deep-research, list, read, projects | Output format (default: `json`) |
 | `--stream` | ask, deep-research | NDJSON streaming output |
 | `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: 120, Pro: 2400, DR: 1800) |
 | `--quiet` | all | Suppress progress output |
