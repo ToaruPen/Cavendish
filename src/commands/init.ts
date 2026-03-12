@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
@@ -286,14 +287,251 @@ async function waitForChromeShutdown(cdpUrl: string, timeoutMs = 10_000): Promis
   );
 }
 
+interface ProcessScanner {
+  cmd: string;
+  args: string[];
+  /** pgrep exits with code 1 for "no matches"; PowerShell exits 0 with empty output. */
+  noMatchExitCode: number | null;
+}
+
+/** Resolve the absolute path for a process-scanning command per platform. */
+function resolveProcessScanner(): ProcessScanner | null {
+  if (process.platform === 'win32') {
+    // Use PowerShell's Get-CimInstance (replaces deprecated WMIC removed in Win11 24H2).
+    // Resolve PowerShell path via %SystemRoot% so non-standard Windows installs work.
+    const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows';
+    const psPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    if (!existsSync(psPath)) {
+      return null;
+    }
+    // Escape WQL LIKE wildcards and special characters for the filter string.
+    // Order matters: escape [ before % and _ (since [%] and [_] contain brackets).
+    const escapedDir = CHROME_PROFILE_DIR
+      .replaceAll('\\', '\\\\')
+      .replaceAll("'", "''")
+      .replaceAll('[', '[[]')
+      .replaceAll('%', '[%]')
+      .replaceAll('_', '[_]');
+    // Require "chrome" in the command line to avoid killing non-Chrome processes.
+    // PowerShell exits 0 with empty output when no processes match — no special exit code.
+    return {
+      cmd: psPath,
+      args: [
+        '-NoProfile', '-Command',
+        `Get-CimInstance Win32_Process -Filter "Name like '%chrome%' AND CommandLine like '%--user-data-dir=${escapedDir}%'" | Select-Object -ExpandProperty ProcessId`,
+      ],
+      noMatchExitCode: null,
+    };
+  }
+  // macOS / Linux: pgrep may be at /usr/bin/pgrep, /bin/pgrep, or /sbin/pgrep depending on distro.
+  const pgrepCandidates = ['/usr/bin/pgrep', '/bin/pgrep', '/sbin/pgrep'];
+  const pgrepPath = pgrepCandidates.find((p) => existsSync(p));
+  if (!pgrepPath) {
+    return null;
+  }
+  // Escape regex metacharacters in the profile dir path so pgrep -f
+  // treats them literally (e.g. ".cavendish" won't match "Xcavendish").
+  const escapedDir = CHROME_PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Require "chrome" (or "chromium") in the command line to avoid killing non-Chrome processes.
+  // -i: case-insensitive (macOS Chrome binary is "Google Chrome" with uppercase C).
+  // pgrep exits with code 1 when no processes match — this is expected.
+  return {
+    cmd: pgrepPath,
+    args: ['-fi', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}( |$)`],
+    noMatchExitCode: 1,
+  };
+}
+
+/**
+ * Find Chrome PIDs that were launched with the cavendish profile directory.
+ *
+ * Returns:
+ * - `number[]` (possibly empty) — scan succeeded; these are the matching PIDs
+ * - `null` — scanner unavailable or failed; caller cannot determine Chrome state
+ *
+ * Uses `pgrep -f` on macOS/Linux and PowerShell `Get-CimInstance` on Windows
+ * to search for Chrome processes with `--user-data-dir=<CHROME_PROFILE_DIR>`.
+ *
+ * @internal Exported for testing only.
+ */
+export function findChromeByProfileDir(): number[] | null {
+  const scanner = resolveProcessScanner();
+  if (!scanner) {
+    return null;
+  }
+  try {
+    const output = execFileSync(scanner.cmd, scanner.args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    });
+    return output
+      .split('\n')
+      .map((line) => parseInt(line.trim(), 10))
+      .filter((pid) => !isNaN(pid) && pid > 0);
+  } catch (error: unknown) {
+    // Some scanners use a specific exit code for "no matches" (e.g. pgrep → 1).
+    // Only treat that exit code as "no matches"; all others are scanner failures.
+    const exitCode = (error as NodeJS.ErrnoException & { status?: number }).status;
+    if (scanner.noMatchExitCode !== null && exitCode === scanner.noMatchExitCode) {
+      return [];
+    }
+    // Any other error (timeout, spawn failure, etc.) — scanner failed.
+    // The original error details (timeout vs EPERM vs syntax) are intentionally
+    // collapsed to null here; the caller surfaces the "scanner unavailable"
+    // CavendishError with user guidance to close Chrome manually.
+    return null;
+  }
+}
+
+/**
+ * Kill Chrome processes by PID with best-effort SIGTERM.
+ * Returns true if at least one process was signaled (or already exited).
+ *
+ * @internal Exported for testing only.
+ */
+export function killChromePids(pids: number[], quiet: boolean): boolean {
+  let killed = false;
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+      progress(`Killed Chrome process (PID ${String(pid)})`, quiet);
+      killed = true;
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH') {
+        // Process already exited — count as success
+        killed = true;
+      } else {
+        progress(
+          `Warning: failed to kill Chrome process (PID ${String(pid)}): ${error instanceof Error ? error.message : String(error)}`,
+          quiet,
+        );
+      }
+    }
+  }
+  return killed;
+}
+
+/** Check if a process has exited (ESRCH). Returns true only for ESRCH. */
+function hasProcessExited(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error: unknown) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/** Remove exited PIDs from the set. */
+function pruneExitedPids(remaining: Set<number>): void {
+  for (const pid of [...remaining]) {
+    if (hasProcessExited(pid)) {
+      remaining.delete(pid);
+    }
+  }
+}
+
+/** Send SIGKILL to all PIDs in the set (best-effort). */
+function sigkillPids(pids: Set<number>): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ESRCH') {
+        // EPERM or other failure — log but continue with remaining PIDs
+        progress(`Warning: SIGKILL failed for PID ${String(pid)}: ${code ?? 'unknown'}`, false);
+      }
+    }
+  }
+}
+
+/**
+ * Poll until all given PIDs have exited, or until timeoutMs elapses.
+ * Uses `process.kill(pid, 0)` which throws ESRCH when the process no longer exists.
+ *
+ * If PIDs survive the timeout, escalates to SIGKILL and re-checks.
+ * Throws CavendishError if any process still remains after escalation.
+ *
+ * Note: PID recycling (a new process reusing a recently-freed PID) is theoretically
+ * possible but practically negligible here — the window between findChromeByProfileDir()
+ * and kill is milliseconds, and the PIDs were just verified as Chrome via command-line
+ * pattern matching. OS PID allocation is typically monotonically increasing with a large
+ * wrap-around range (32k+ on Linux, 99999 on macOS).
+ *
+ * @internal Exported for testing only.
+ */
+export async function waitForPidExit(pids: number[], timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const remaining = new Set(pids);
+
+  while (remaining.size > 0 && Date.now() < deadline) {
+    pruneExitedPids(remaining);
+    if (remaining.size > 0) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+
+  if (remaining.size === 0) {
+    return;
+  }
+
+  // Escalate to SIGKILL for survivors
+  sigkillPids(remaining);
+  await new Promise((r) => setTimeout(r, 500));
+  pruneExitedPids(remaining);
+
+  if (remaining.size > 0) {
+    throw new CavendishError(
+      `Chrome process(es) did not exit in time: ${[...remaining].join(', ')}`,
+      'chrome_close_failed',
+      'Close Chrome manually before running --reset.',
+    );
+  }
+}
+
+/**
+ * Scan for Chrome processes by profile directory and kill them.
+ *
+ * - If scanner is unavailable and `throwOnScannerFailure` is true, throws CavendishError.
+ * - If scanner is unavailable and `throwOnScannerFailure` is false, silently returns.
+ * - If Chrome processes are found but cannot be killed, throws CavendishError.
+ */
+async function killChromeByProfileScan(quiet: boolean, throwOnScannerFailure: boolean): Promise<void> {
+  const pids = findChromeByProfileDir();
+  if (pids === null) {
+    if (throwOnScannerFailure) {
+      throw new CavendishError(
+        'Cannot detect running Chrome processes (process scanner unavailable).',
+        'chrome_close_failed',
+        'Close Chrome manually before running --reset.',
+      );
+    }
+    return;
+  }
+  if (pids.length === 0) {
+    progress('No running Chrome found for this profile', quiet);
+    return;
+  }
+  const killed = killChromePids(pids, quiet);
+  if (!killed) {
+    throw new CavendishError(
+      'Found Chrome process(es) but failed to stop them.',
+      'chrome_close_failed',
+      'Close Chrome manually before running --reset.',
+    );
+  }
+  await waitForPidExit(pids, 5_000);
+}
+
 async function killExistingChrome(quiet: boolean): Promise<void> {
   const endpoint = readCdpEndpoint();
   if (!endpoint) {
-    throw new CavendishError(
-      'CDP endpoint file is missing — cannot identify the running Chrome process.',
-      'cdp_unavailable',
-      'Close Chrome manually before running --reset, or run `cavendish init` without --reset first.',
-    );
+    // CDP endpoint file is missing — try to find Chrome by its profile dir argument.
+    progress('CDP endpoint file not found — scanning for Chrome process by profile directory...', quiet);
+    await killChromeByProfileScan(quiet, true);
+    return;
   }
   const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
 
@@ -307,7 +545,10 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
   } catch (error: unknown) {
     const msg = errorMessage(error);
     if (msg.includes('ECONNREFUSED')) {
-      progress('No running Chrome found', quiet);
+      // Stale endpoint — CDP port no longer active. Chrome may still be running
+      // with a different port (e.g. after a restart), so scan by profile dir.
+      progress('CDP connection refused — scanning for Chrome process by profile directory...', quiet);
+      await killChromeByProfileScan(quiet, true);
       return;
     }
     throw new CavendishError(
