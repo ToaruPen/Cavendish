@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 
-import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { outputList, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -21,6 +21,8 @@ export const listCommand = defineCommand({
     const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
+
+    if (!rejectUnknownFlags(args, format)) {return;}
 
     if (args.dryRun === true) {
       progress(`[dry-run] Would list conversations (format: ${format})`, false);

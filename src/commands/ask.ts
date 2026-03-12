@@ -3,7 +3,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { acquireLock, releaseLock } from '../core/process-lock.js';
@@ -121,6 +121,8 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   // Resolve format first so all subsequent validation errors respect --format json
   const format = validateFormat(args.format as string);
   if (format === undefined) {return undefined;}
+
+  if (!rejectUnknownFlags(args, format)) {return undefined;}
 
   const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
 

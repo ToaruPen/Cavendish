@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 
-import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { buildDoctorResult, collectDoctorChecks, formatTextOutput } from '../core/doctor.js';
 import { jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
@@ -20,6 +20,8 @@ export const statusCommand = defineCommand({
   async run({ args }): Promise<void> {
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
+
+    if (!rejectUnknownFlags(args, format)) {return;}
 
     if (args.dryRun === true) {
       progress('[dry-run] Would run doctor checks on CLI prerequisites and ChatGPT environment', false);

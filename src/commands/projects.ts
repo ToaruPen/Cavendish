@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 
-import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { failValidation, outputList, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -50,6 +50,9 @@ export const projectsCommand = defineCommand({
     const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
+
+    if (!rejectUnknownFlags(args, format)) {return;}
+
     const projectName = args.name;
     const showChats = args.chats === true;
     const createProject = args.create === true;
