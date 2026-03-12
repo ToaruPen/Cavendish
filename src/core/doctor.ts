@@ -8,7 +8,7 @@
 
 import { existsSync } from 'node:fs';
 
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 

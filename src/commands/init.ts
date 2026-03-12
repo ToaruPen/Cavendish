@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 
 import { defineCommand } from 'citty';
-import { type Browser, type Page, errors } from 'playwright';
+import { type Browser, type Page, errors } from 'playwright-core';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CHROME_PROFILE_DIR, readCdpEndpoint, resolveCdpBaseUrl } from '../core/browser-manager.js';
@@ -535,7 +535,7 @@ async function killExistingChrome(quiet: boolean): Promise<void> {
   }
   const cdpUrl = `http://127.0.0.1:${String(endpoint.port)}`;
 
-  const { chromium } = await import('playwright');
+  const { chromium } = await import('playwright-core');
 
   progress('Stopping existing Chrome process...', quiet);
 

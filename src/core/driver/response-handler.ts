@@ -6,7 +6,7 @@
  * DOM selectors are sourced from constants/selectors.ts.
  */
 
-import type { Locator, Page } from 'playwright';
+import type { Locator, Page } from 'playwright-core';
 
 import { SELECTORS } from '../../constants/selectors.js';
 import type { WaitForResponseOptions, WaitForResponseResult } from '../chatgpt-types.js';

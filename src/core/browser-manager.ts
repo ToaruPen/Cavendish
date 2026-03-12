@@ -10,7 +10,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { type Browser, type BrowserContext, type Page, chromium, errors } from 'playwright';
+import { type Browser, type BrowserContext, type Page, chromium, errors } from 'playwright-core';
 
 import { CHATGPT_BASE_URL } from '../constants/selectors.js';
 

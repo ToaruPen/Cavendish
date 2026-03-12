@@ -81,7 +81,7 @@ async function importWithMocks(
     contexts: (): { pages: () => never[] }[] => [{ pages: (): never[] => [] }],
     close: (): Promise<void> => Promise.resolve(),
   };
-  vi.doMock('playwright', () => ({
+  vi.doMock('playwright-core', () => ({
     chromium: {
       connectOverCDP: (): Promise<MinimalBrowser> => Promise.resolve(stubBrowser),
     },
