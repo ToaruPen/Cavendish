@@ -225,12 +225,20 @@ export function findUnknownFlag(
   argv: string[],
   declaredArgKeys: string[],
 ): string | undefined {
-  // Build the set of known flag names (both camelCase and kebab-case)
+  // Build the set of known flag names (both camelCase and kebab-case).
+  // For each key we also add --no-<key> / --no-<kebab> because citty
+  // supports boolean negation (e.g. --no-verbose sets verbose to false).
+  // Adding --no-* for non-boolean keys is harmless — citty itself will
+  // reject them — but omitting --no-* for boolean keys would cause a
+  // false "unknown option" error.
   const knownFlags = new Set<string>();
   for (const key of declaredArgKeys) {
     knownFlags.add(`--${key}`);
+    knownFlags.add(`--no-${key}`);
     // citty also accepts kebab-case (e.g., --dry-run for dryRun)
-    knownFlags.add(`--${camelToKebab(key)}`);
+    const kebab = camelToKebab(key);
+    knownFlags.add(`--${kebab}`);
+    knownFlags.add(`--no-${kebab}`);
   }
 
   // Walk argv, skipping the node binary and script path.
