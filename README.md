@@ -33,6 +33,7 @@ cavendish deep-research --export pdf "State of WebAssembly in 2025"
 
 - **Node.js** >= 20
 - **Google Chrome** (stable channel)
+- **ChatGPT Plus, Team, or Enterprise account** (required for Pro models and Deep Research)
 - **OS**: macOS, Linux, or Windows
 
 ## Installation
@@ -155,13 +156,14 @@ cavendish init --reset        # Reset profile and re-authenticate
 cavendish doctor              # Health diagnostics (CDP, auth, selectors)
 cavendish doctor --json       # JSON output
 cavendish status              # Alias for doctor
+cavendish status --json       # JSON output (same as doctor --json)
 ```
 
 ### Common Options
 
 | Flag | Scope | Description |
 |------|-------|-------------|
-| `--format text\|json` | ask, deep-research, list, read, projects, status | Output format (default: `json`) |
+| `--format text\|json` | ask, deep-research, list, read, projects | Output format (default: `json`) |
 | `--stream` | ask, deep-research | NDJSON streaming output |
 | `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: 120, Pro: 2400, DR: 1800) |
 | `--quiet` | all | Suppress progress output |
@@ -243,6 +245,29 @@ src/
 
 </details>
 
+## Exit Codes
+
+Cavendish uses structured exit codes so calling agents can handle errors programmatically.
+
+| Code | Category | Description | Suggested Action |
+|------|----------|-------------|------------------|
+| 0 | — | Success | — |
+| 1 | `unknown` | Unclassified error | Check the error message for details |
+| 2 | `cdp_unavailable` | Chrome CDP not reachable | Run `cavendish init` to start Chrome |
+| 3 | `chrome_not_found` | Chrome binary not found | Install Google Chrome and ensure it is in your PATH |
+| 4 | `auth_expired` | ChatGPT session expired | Open Chrome and log in to ChatGPT |
+| 5 | `cloudflare_blocked` | Cloudflare challenge detected | Solve the challenge in the Chrome tab |
+| 6 | `selector_miss` | DOM selector not found | ChatGPT UI may have changed; run `cavendish status` |
+| 7 | `timeout` | Operation timed out | Increase `--timeout` or check ChatGPT in the browser |
+| 8 | `chrome_launch_failed` | Chrome failed to launch | Check permissions; run `cavendish init` |
+| 9 | `chrome_close_failed` | Chrome failed to close | Close Chrome manually |
+
+With `--format json`, errors are written to stderr as structured JSON:
+
+```json
+{ "error": true, "category": "cdp_unavailable", "message": "...", "exitCode": 2, "action": "Run \"cavendish init\"..." }
+```
+
 ## Security
 
 Cavendish is designed for **single-user, local-machine use**. The security model assumes you are the only user on the machine.
@@ -266,7 +291,7 @@ Cavendish uses an **atomic file-based lock** (`~/.cavendish/cavendish.lock`) to 
 
 ### Clipboard Permissions
 
-Cavendish grants `clipboard-read` and `clipboard-write` permissions to `chatgpt.com` via the Playwright browser context because Deep Research's export feature uses the system clipboard to retrieve report content.
+The `deep-research` command only requests `clipboard-read` and `clipboard-write` permissions for `chatgpt.com` when `--export` is specified, because the export workflow uses the system clipboard to retrieve clean report content. In the shared browser context, permissions granted by a prior export run may still persist.
 
 <details>
 <summary>Multi-user Environments</summary>

@@ -1,4 +1,4 @@
-import { isAbsolute } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -13,7 +13,8 @@ describe('extractFileArgs()', () => {
   it('extracts a single --file argument', () => {
     const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file', '/home/user/a.ts', 'hello']);
     expect(result).toHaveLength(1);
-    expect(result[0]).toBe('/home/user/a.ts');
+    // resolve() adds drive letter on Windows (e.g. D:\home\user\a.ts)
+    expect(result[0]).toBe(resolve('/home/user/a.ts'));
   });
 
   it('extracts multiple --file arguments', () => {
@@ -24,8 +25,8 @@ describe('extractFileArgs()', () => {
       'hello',
     ]);
     expect(result).toHaveLength(2);
-    expect(result[0]).toBe('/home/user/a.ts');
-    expect(result[1]).toBe('/home/user/b.ts');
+    expect(result[0]).toBe(resolve('/home/user/a.ts'));
+    expect(result[1]).toBe(resolve('/home/user/b.ts'));
   });
 
   it('throws when --file is at end of argv (no value)', () => {
@@ -51,7 +52,7 @@ describe('extractFileArgs()', () => {
   it('extracts --file= (equals) form', () => {
     const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file=/home/user/a.ts', 'hello']);
     expect(result).toHaveLength(1);
-    expect(result[0]).toBe('/home/user/a.ts');
+    expect(result[0]).toBe(resolve('/home/user/a.ts'));
   });
 
   it('throws when --file= has empty value', () => {
@@ -63,8 +64,7 @@ describe('extractFileArgs()', () => {
   it('resolves relative paths to absolute', () => {
     const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file', './src/index.ts']);
     expect(result).toHaveLength(1);
-    expect(isAbsolute(result[0])).toBe(true);
-    expect(result[0]).toContain('src/index.ts');
+    expect(result[0]).toBe(resolve('./src/index.ts'));
   });
 });
 

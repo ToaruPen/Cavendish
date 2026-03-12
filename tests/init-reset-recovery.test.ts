@@ -96,7 +96,8 @@ function stubProcessKill(killOverride?: (pid: number, signal?: NodeJS.Signals | 
  * findChromeByProfileDir — process scanning tests
  * ================================================================ */
 
-describe('findChromeByProfileDir — scans for Chrome by profile dir (#146)', () => {
+// pgrep is Unix-only; these tests mock pgrep-specific behavior.
+describe.skipIf(process.platform === 'win32')('findChromeByProfileDir — scans for Chrome by profile dir (#146)', () => {
   it('returns PIDs when pgrep finds matching processes', async () => {
     mockFsForProcessScanner();
     vi.doMock('node:child_process', () => ({

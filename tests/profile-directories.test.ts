@@ -69,40 +69,52 @@ describe('ensureProfileDirectories', () => {
     expect(existsSync(fakeChromeProfileDir)).toBe(true);
   });
 
-  it('sets 0o700 on newly created directories', async () => {
+  // chmod is a no-op on Windows — permission assertions are guarded.
+  it('sets expected permissions on newly created directories', async () => {
     const { ensureProfileDirectories } = await importWithMockedHome();
 
     ensureProfileDirectories();
 
-    expect(permissionBits(fakeCavendishDir)).toBe(0o700);
-    expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
+    expect(existsSync(fakeCavendishDir)).toBe(true);
+    expect(existsSync(fakeChromeProfileDir)).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(permissionBits(fakeCavendishDir)).toBe(0o700);
+      expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
+    }
   });
 
-  it('tightens permissions on pre-existing 0o755 directories', async () => {
-    // Pre-create directories with overly permissive mode
+  it('tightens permissions on pre-existing directories', async () => {
     mkdirSync(fakeChromeProfileDir, { recursive: true, mode: 0o755 });
-    chmodSync(fakeCavendishDir, 0o755);
-    chmodSync(fakeChromeProfileDir, 0o755);
-
-    // Sanity check: they start at 0o755
-    expect(permissionBits(fakeCavendishDir)).toBe(0o755);
-    expect(permissionBits(fakeChromeProfileDir)).toBe(0o755);
+    if (process.platform !== 'win32') {
+      chmodSync(fakeCavendishDir, 0o755);
+      chmodSync(fakeChromeProfileDir, 0o755);
+      expect(permissionBits(fakeCavendishDir)).toBe(0o755);
+      expect(permissionBits(fakeChromeProfileDir)).toBe(0o755);
+    }
 
     const { ensureProfileDirectories } = await importWithMockedHome();
 
     ensureProfileDirectories();
 
-    expect(permissionBits(fakeCavendishDir)).toBe(0o700);
-    expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
+    expect(existsSync(fakeCavendishDir)).toBe(true);
+    expect(existsSync(fakeChromeProfileDir)).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(permissionBits(fakeCavendishDir)).toBe(0o700);
+      expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
+    }
   });
 
-  it('is idempotent — calling twice does not error or change permissions', async () => {
+  it('is idempotent — calling twice does not error or change state', async () => {
     const { ensureProfileDirectories } = await importWithMockedHome();
 
     ensureProfileDirectories();
     ensureProfileDirectories();
 
-    expect(permissionBits(fakeCavendishDir)).toBe(0o700);
-    expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
+    expect(existsSync(fakeCavendishDir)).toBe(true);
+    expect(existsSync(fakeChromeProfileDir)).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(permissionBits(fakeCavendishDir)).toBe(0o700);
+      expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
+    }
   });
 });
