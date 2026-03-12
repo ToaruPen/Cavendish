@@ -116,14 +116,30 @@ describe('findUnknownFlag', () => {
 });
 
 describe('rejectUnknownFlags', () => {
-  // rejectUnknownFlags reads process.argv and calls failValidation on error.
+  // rejectUnknownFlags reads process.argv and checks against the declared
+  // args definition object (NOT citty's runtime parsed args).
   // We stub process.argv and capture stderr output (failValidation writes there).
+
+  // Declaration-style args objects (only declared keys, no runtime '_' key)
+  const askDeclaredArgs = {
+    prompt: { type: 'positional' },
+    quiet: { type: 'boolean' },
+    verbose: { type: 'boolean' },
+    dryRun: { type: 'boolean' },
+    format: { type: 'string' },
+  };
+
+  const readDeclaredArgs = {
+    chatId: { type: 'positional' },
+    quiet: { type: 'boolean' },
+    format: { type: 'string' },
+  };
 
   it('returns true when all flags are known', () => {
     const origArgv = process.argv;
     try {
       process.argv = ['node', 'index.mjs', 'ask', '--quiet', '--format', 'json'];
-      const result = rejectUnknownFlags({ quiet: true, format: 'json', verbose: false, _: [] });
+      const result = rejectUnknownFlags(askDeclaredArgs);
       expect(result).toBe(true);
     } finally {
       process.argv = origArgv;
@@ -136,7 +152,7 @@ describe('rejectUnknownFlags', () => {
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       process.argv = ['node', 'index.mjs', 'ask', '--bogus'];
-      const result = rejectUnknownFlags({ quiet: false, format: 'json', _: [] });
+      const result = rejectUnknownFlags(askDeclaredArgs);
       expect(result).toBe(false);
       expect(process.exitCode).toBe(1);
     } finally {
@@ -146,14 +162,13 @@ describe('rejectUnknownFlags', () => {
     }
   });
 
-  it('excludes citty internal _ key from known flags', () => {
+  it('rejects --_ as unknown (no _ key in declared args)', () => {
     const origArgv = process.argv;
     const origExitCode = process.exitCode;
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
-      // --_ should not be accepted even though '_' is in parsedArgs
       process.argv = ['node', 'index.mjs', 'ask', '--_'];
-      const result = rejectUnknownFlags({ quiet: false, _: [] });
+      const result = rejectUnknownFlags(askDeclaredArgs);
       expect(result).toBe(false);
     } finally {
       process.argv = origArgv;
@@ -166,24 +181,21 @@ describe('rejectUnknownFlags', () => {
     const origArgv = process.argv;
     try {
       process.argv = ['node', 'index.mjs', 'ask', '--no-verbose', '--no-dry-run'];
-      const result = rejectUnknownFlags({ verbose: false, dryRun: false, _: [] });
+      const result = rejectUnknownFlags(askDeclaredArgs);
       expect(result).toBe(true);
     } finally {
       process.argv = origArgv;
     }
   });
 
-  it('rejects --chat-id when chatId is a positional key', () => {
+  it('rejects --chat-id when chatId is a positional key (auto-detected)', () => {
     const origArgv = process.argv;
     const origExitCode = process.exitCode;
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       process.argv = ['node', 'index.mjs', 'read', '--chat-id', 'abc123'];
-      const result = rejectUnknownFlags(
-        { chatId: 'abc123', quiet: false, format: 'json', _: [] },
-        'json',
-        ['chatId'],
-      );
+      // positionalKeys are auto-detected from type: 'positional'
+      const result = rejectUnknownFlags(readDeclaredArgs, 'json');
       expect(result).toBe(false);
       expect(process.exitCode).toBe(1);
     } finally {
@@ -193,17 +205,14 @@ describe('rejectUnknownFlags', () => {
     }
   });
 
-  it('rejects --prompt when prompt is a positional key', () => {
+  it('rejects --prompt when prompt is a positional key (auto-detected)', () => {
     const origArgv = process.argv;
     const origExitCode = process.exitCode;
     const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
       process.argv = ['node', 'index.mjs', 'ask', '--prompt', 'hello'];
-      const result = rejectUnknownFlags(
-        { prompt: 'hello', quiet: false, format: 'json', _: [] },
-        'json',
-        ['prompt'],
-      );
+      // positionalKeys are auto-detected from type: 'positional'
+      const result = rejectUnknownFlags(askDeclaredArgs, 'json');
       expect(result).toBe(false);
       expect(process.exitCode).toBe(1);
     } finally {
@@ -213,18 +222,32 @@ describe('rejectUnknownFlags', () => {
     }
   });
 
-  it('still accepts known flags when positionalKeys are excluded', () => {
+  it('still accepts known flags when positional keys are auto-excluded', () => {
     const origArgv = process.argv;
     try {
       process.argv = ['node', 'index.mjs', 'read', '--quiet', '--format', 'json'];
-      const result = rejectUnknownFlags(
-        { chatId: 'abc123', quiet: true, format: 'json', _: [] },
-        'json',
-        ['chatId'],
-      );
+      const result = rejectUnknownFlags(readDeclaredArgs, 'json');
       expect(result).toBe(true);
     } finally {
       process.argv = origArgv;
+    }
+  });
+
+  it('rejects unknown flags that citty would add to parsed args (the core bug)', () => {
+    const origArgv = process.argv;
+    const origExitCode = process.exitCode;
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      // This is the exact scenario: --bogus is unknown, but citty would add
+      // it to parsed args. Using declared args means it's NOT in the known set.
+      process.argv = ['node', 'index.mjs', 'ask', '--bogus', '--dry-run', 'test'];
+      const result = rejectUnknownFlags(askDeclaredArgs, 'json');
+      expect(result).toBe(false);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.argv = origArgv;
+      process.exitCode = origExitCode;
+      stderrSpy.mockRestore();
     }
   });
 });

@@ -258,28 +258,31 @@ export function findUnknownFlag(
 /**
  * Reject unknown flags by checking process.argv against declared args.
  * Call at the start of each command's run() before any other validation.
- * Pass the parsed `args` object from citty — only the keys are used.
  *
- * @param parsedArgs - the parsed args object from citty's run callback
+ * IMPORTANT: Pass the command's **args definition** object (the static object
+ * with `type`/`description` fields), NOT citty's runtime parsed `args`.
+ * citty adds undeclared flags to the parsed args, so using parsed args
+ * would make every flag appear "known" and bypass the check entirely.
+ *
+ * Positional args (type: 'positional') are automatically excluded from the
+ * known-flag whitelist so that their kebab-case variants (e.g. --chat-id
+ * for chatId) are not incorrectly accepted as valid flags.
+ *
+ * @param declaredArgs - the command's args definition object (e.g. ASK_ARGS)
  * @param format - output format for error messages
- * @param positionalKeys - keys that are positional args (type: 'positional')
- *   in the command definition. These must be excluded from the known-flag
- *   whitelist so that their kebab-case variants (e.g. --chat-id for chatId)
- *   are not incorrectly accepted as valid flags.
  * @returns true if all flags are known, false if an unknown flag was found
  */
 export function rejectUnknownFlags(
-  parsedArgs: Record<string, unknown>,
+  declaredArgs: Record<string, unknown>,
   format?: 'json' | 'text',
-  positionalKeys?: string[],
 ): boolean {
-  // Filter out citty's internal '_' key (positional/rest args) and any
-  // declared positional keys so that their flag forms are not accepted.
-  const excludeKeys = new Set(['_', ...(positionalKeys ?? [])]);
-  const unknown = findUnknownFlag(
-    process.argv,
-    Object.keys(parsedArgs).filter(k => !excludeKeys.has(k)),
-  );
+  // Auto-detect positional keys from the args definition and exclude them
+  // so that their flag forms (e.g. --chat-id for chatId) are not accepted.
+  const flagKeys = Object.keys(declaredArgs).filter(k => {
+    const def = declaredArgs[k];
+    return !(typeof def === 'object' && def !== null && 'type' in def && (def as { type: string }).type === 'positional');
+  });
+  const unknown = findUnknownFlag(process.argv, flagKeys);
   if (unknown !== undefined) {
     failValidation(`Unknown option: ${unknown}`, format);
     return false;

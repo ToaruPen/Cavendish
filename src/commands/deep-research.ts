@@ -10,6 +10,41 @@ import { withDriver } from '../core/with-driver.js';
 
 const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
 
+const DEEP_RESEARCH_ARGS = {
+  prompt: {
+    type: 'positional' as const,
+    description: 'The prompt to send to Deep Research',
+    required: false,
+  },
+  chat: {
+    type: 'string' as const,
+    description: 'Chat ID of an existing DR session to send a follow-up',
+  },
+  refresh: {
+    type: 'boolean' as const,
+    description: 'Re-run the same prompt on an existing DR session (requires --chat)',
+  },
+  timeout: {
+    type: 'string' as const,
+    description: `Response timeout in seconds (default: ${String(DEFAULT_TIMEOUT_SEC)})`,
+  },
+  file: {
+    type: 'string' as const,
+    description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
+  },
+  export: {
+    type: 'string' as const,
+    description: 'Export report to file: markdown, word, or pdf (e.g. --export markdown)',
+  },
+  exportPath: {
+    type: 'string' as const,
+    description: 'Path to save exported file (default: ./deep-research-report.{ext})',
+  },
+  ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
+  ...STREAM_ARG,
+};
+
 const VALID_EXPORT_FORMATS: readonly DeepResearchExportFormat[] = ['markdown', 'word', 'pdf'];
 
 const EXPORT_EXTENSIONS: Record<DeepResearchExportFormat, string> = {
@@ -125,7 +160,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const format = validateFormat(args.format as string);
   if (format === undefined) { return undefined; }
 
-  if (!rejectUnknownFlags(args, format, ['prompt'])) { return undefined; }
+  if (!rejectUnknownFlags(DEEP_RESEARCH_ARGS, format)) { return undefined; }
 
   // Validate flags, timeout, export, and file args BEFORE reading
   // stdin so obviously invalid invocations fail fast without blocking on EOF.
@@ -294,40 +329,7 @@ export const deepResearchCommand = defineCommand({
       + '  cavendish deep-research --chat <id> --refresh\n'
       + '  cavendish deep-research "Query" --export markdown --exportPath report.md',
   },
-  args: {
-    prompt: {
-      type: 'positional',
-      description: 'The prompt to send to Deep Research',
-      required: false,
-    },
-    chat: {
-      type: 'string',
-      description: 'Chat ID of an existing DR session to send a follow-up',
-    },
-    refresh: {
-      type: 'boolean',
-      description: 'Re-run the same prompt on an existing DR session (requires --chat)',
-    },
-    timeout: {
-      type: 'string',
-      description: `Response timeout in seconds (default: ${String(DEFAULT_TIMEOUT_SEC)})`,
-    },
-    file: {
-      type: 'string',
-      description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
-    },
-    export: {
-      type: 'string',
-      description: 'Export report to file: markdown, word, or pdf (e.g. --export markdown)',
-    },
-    exportPath: {
-      type: 'string',
-      description: 'Path to save exported file (default: ./deep-research-report.{ext})',
-    },
-    ...GLOBAL_ARGS,
-    ...FORMAT_ARG,
-    ...STREAM_ARG,
-  },
+  args: DEEP_RESEARCH_ARGS,
   async run({ args }): Promise<void> {
     const v = validateArgs(args);
     if (v === undefined) { return; }

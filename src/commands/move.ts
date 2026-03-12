@@ -8,26 +8,28 @@ import { withDriver } from '../core/with-driver.js';
 /**
  * `cavendish move <chat-id> --project "Name"` — move a conversation to a project.
  */
+const MOVE_ARGS = {
+  chatId: {
+    type: 'positional' as const,
+    description: 'The conversation ID to move',
+    required: true as const,
+  },
+  project: {
+    type: 'string' as const,
+    description: 'Target project name',
+    required: true as const,
+  },
+  ...GLOBAL_ARGS,
+};
+
 export const moveCommand = defineCommand({
   meta: {
     name: 'move',
     description: 'Move a conversation to a project',
   },
-  args: {
-    chatId: {
-      type: 'positional',
-      description: 'The conversation ID to move',
-      required: true,
-    },
-    project: {
-      type: 'string',
-      description: 'Target project name',
-      required: true,
-    },
-    ...GLOBAL_ARGS,
-  },
+  args: MOVE_ARGS,
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(args, undefined, ['chatId'])) { return; }
+    if (!rejectUnknownFlags(MOVE_ARGS)) { return; }
 
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;

@@ -13,6 +13,58 @@ const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
 const PRO_TIMEOUT_SEC = 2400;
 
+const ASK_ARGS = {
+  prompt: {
+    type: 'positional' as const,
+    description: 'The prompt to send to ChatGPT (can also be provided via stdin pipe)',
+    required: false,
+  },
+  timeout: {
+    type: 'string' as const,
+    description: 'Response timeout in seconds (model-dependent; default: 120, Pro: 2400)',
+  },
+  model: {
+    type: 'string' as const,
+    description: 'ChatGPT model to use (default: Pro)',
+    default: DEFAULT_MODEL,
+  },
+  file: {
+    type: 'string' as const,
+    description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
+  },
+  thinkingEffort: {
+    type: 'string' as const,
+    description: 'Thinking effort level: light, standard, extended, deep',
+  },
+  continue: {
+    type: 'boolean' as const,
+    description: 'Continue the most recent chat (deterministic; use --chat <id> for a specific chat)',
+  },
+  chat: {
+    type: 'string' as const,
+    description: 'Chat ID to continue (implies --continue; e.g. --chat abc123)',
+  },
+  project: {
+    type: 'string' as const,
+    description: 'Project name to ask within',
+  },
+  gdrive: {
+    type: 'string' as const,
+    description: 'Google Drive file(s) to attach (repeatable: --gdrive "file1" --gdrive "file2")',
+  },
+  github: {
+    type: 'string' as const,
+    description: 'GitHub repo(s) as context (repeatable: --github "owner/repo")',
+  },
+  agent: {
+    type: 'boolean' as const,
+    description: 'Enable agent mode (code execution, file operations)',
+  },
+  ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
+  ...STREAM_ARG,
+};
+
 /**
  * Resolve the effective timeout: use explicit --timeout if provided,
  * otherwise pick a model-appropriate default.
@@ -122,7 +174,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const format = validateFormat(args.format as string);
   if (format === undefined) {return undefined;}
 
-  if (!rejectUnknownFlags(args, format, ['prompt'])) {return undefined;}
+  if (!rejectUnknownFlags(ASK_ARGS, format)) {return undefined;}
 
   const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
 
@@ -282,57 +334,7 @@ export const askCommand = defineCommand({
       + '  cavendish ask "Continue" --continue\n'
       + '  cavendish ask "Follow up" --chat <id>',
   },
-  args: {
-    prompt: {
-      type: 'positional',
-      description: 'The prompt to send to ChatGPT (can also be provided via stdin pipe)',
-      required: false,
-    },
-    timeout: {
-      type: 'string',
-      description: 'Response timeout in seconds (model-dependent; default: 120, Pro: 2400)',
-    },
-    model: {
-      type: 'string',
-      description: 'ChatGPT model to use (default: Pro)',
-      default: DEFAULT_MODEL,
-    },
-    file: {
-      type: 'string',
-      description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
-    },
-    thinkingEffort: {
-      type: 'string',
-      description: 'Thinking effort level: light, standard, extended, deep',
-    },
-    continue: {
-      type: 'boolean',
-      description: 'Continue the most recent chat (deterministic; use --chat <id> for a specific chat)',
-    },
-    chat: {
-      type: 'string',
-      description: 'Chat ID to continue (implies --continue; e.g. --chat abc123)',
-    },
-    project: {
-      type: 'string',
-      description: 'Project name to ask within',
-    },
-    gdrive: {
-      type: 'string',
-      description: 'Google Drive file(s) to attach (repeatable: --gdrive "file1" --gdrive "file2")',
-    },
-    github: {
-      type: 'string',
-      description: 'GitHub repo(s) as context (repeatable: --github "owner/repo")',
-    },
-    agent: {
-      type: 'boolean',
-      description: 'Enable agent mode (code execution, file operations)',
-    },
-    ...GLOBAL_ARGS,
-    ...FORMAT_ARG,
-    ...STREAM_ARG,
-  },
+  args: ASK_ARGS,
   async run({ args }): Promise<void> {
     const validated = validateArgs(args);
     if (validated === undefined) {return;}

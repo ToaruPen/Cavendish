@@ -13,20 +13,22 @@ import { jsonRaw, progress, text } from '../core/output-handler.js';
  *
  * Use `--json` for structured JSON output (default is human-readable text).
  */
+const DOCTOR_ARGS = {
+  ...GLOBAL_ARGS,
+  json: {
+    type: 'boolean' as const,
+    description: 'Output results as JSON (default: human-readable text)',
+  },
+};
+
 export const doctorCommand = defineCommand({
   meta: {
     name: 'doctor',
     description: 'Run diagnostic checks on CLI prerequisites, authentication, and integrations',
   },
-  args: {
-    ...GLOBAL_ARGS,
-    json: {
-      type: 'boolean' as const,
-      description: 'Output results as JSON (default: human-readable text)',
-    },
-  },
+  args: DOCTOR_ARGS,
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(args)) { return; }
+    if (!rejectUnknownFlags(DOCTOR_ARGS)) { return; }
 
     if (args.dryRun === true) {
       progress('[dry-run] Would run diagnostic checks on CLI prerequisites, auth, and integrations', false);

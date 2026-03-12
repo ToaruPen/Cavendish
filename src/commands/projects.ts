@@ -24,34 +24,36 @@ export function validateProjectArgs(
 /**
  * `cavendish projects` — list projects, project chats, or create a project.
  */
+const PROJECTS_ARGS = {
+  name: {
+    type: 'string' as const,
+    description: 'Project name to filter, navigate to, or create',
+  },
+  chats: {
+    type: 'boolean' as const,
+    description: 'List chats within the specified project (requires --name)',
+  },
+  create: {
+    type: 'boolean' as const,
+    description: 'Create a new project (requires --name)',
+  },
+  ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
+};
+
 export const projectsCommand = defineCommand({
   meta: {
     name: 'projects',
     description: 'List ChatGPT projects, chats within a project, or create a project',
   },
-  args: {
-    name: {
-      type: 'string',
-      description: 'Project name to filter, navigate to, or create',
-    },
-    chats: {
-      type: 'boolean',
-      description: 'List chats within the specified project (requires --name)',
-    },
-    create: {
-      type: 'boolean',
-      description: 'Create a new project (requires --name)',
-    },
-    ...GLOBAL_ARGS,
-    ...FORMAT_ARG,
-  },
+  args: PROJECTS_ARGS,
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
 
-    if (!rejectUnknownFlags(args, format)) {return;}
+    if (!rejectUnknownFlags(PROJECTS_ARGS, format)) {return;}
 
     const projectName = args.name;
     const showChats = args.chats === true;
