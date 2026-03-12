@@ -1,3 +1,4 @@
+import type { CommandMeta } from 'citty';
 import { describe, expect, it } from 'vitest';
 
 import { doctorCommand } from '../src/commands/doctor.js';
@@ -11,9 +12,19 @@ function getArgs(cmd: typeof doctorCommand): Record<string, { type: string }> {
   return (cmd.args ?? {}) as Record<string, { type: string }>;
 }
 
+/** Narrow a Resolvable<CommandMeta> to a plain CommandMeta at runtime. */
+function getMeta(cmd: typeof doctorCommand): CommandMeta {
+  return cmd.meta as CommandMeta;
+}
+
 describe('status / doctor command compatibility', () => {
-  it('status re-exports the exact doctor command instance', () => {
-    expect(statusCommand).toBe(doctorCommand);
+  it('status delegates to the doctor run function', () => {
+    expect(statusCommand.run).toBe(doctorCommand.run);
+  });
+
+  it('status has meta.name "status" (not "doctor")', () => {
+    expect(getMeta(statusCommand).name).toBe('status');
+    expect(getMeta(doctorCommand).name).toBe('doctor');
   });
 
   it('status and doctor accept the same argument names', () => {
