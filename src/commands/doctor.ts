@@ -28,7 +28,7 @@ export const doctorCommand = defineCommand({
   },
   args: DOCTOR_ARGS,
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(DOCTOR_ARGS)) { return; }
+    if (!rejectUnknownFlags(DOCTOR_ARGS, args.json === true ? 'json' : 'text')) { return; }
 
     if (args.dryRun === true) {
       progress('[dry-run] Would run diagnostic checks on CLI prerequisites, auth, and integrations', false);
