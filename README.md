@@ -290,7 +290,7 @@ Cavendish uses an **atomic file-based lock** (`~/.cavendish/cavendish.lock`) to 
 
 ### Clipboard Permissions
 
-Cavendish grants `clipboard-read` and `clipboard-write` permissions to `chatgpt.com` via the Playwright browser context because Deep Research's export feature uses the system clipboard to retrieve report content.
+The `deep-research` command only requests `clipboard-read` and `clipboard-write` permissions for `chatgpt.com` when `--export` is specified, because the export workflow uses the system clipboard to retrieve clean report content. In the shared browser context, permissions granted by a prior export run may still persist.
 
 <details>
 <summary>Multi-user Environments</summary>
