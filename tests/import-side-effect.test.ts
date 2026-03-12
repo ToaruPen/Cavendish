@@ -4,6 +4,13 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+// Integration-level test: the dist/index.mjs import test only runs when the
+// build output exists. In CI, `npm test` runs before `npm run build`, so this
+// test is intentionally skipped there. It provides value in local development
+// and can be run manually after building.
+const distEntry = resolve('dist/index.mjs');
+const distExists = existsSync(distEntry);
+
 describe('index.ts import safety', () => {
   it('does not have a "main" field in package.json that would resolve imports to CLI entry', () => {
     // Verify that importing the package by name does not resolve to the CLI
@@ -21,13 +28,7 @@ describe('index.ts import safety', () => {
     );
   });
 
-  it('importing dist/index.mjs does not trigger CLI side effects', () => {
-    const distEntry = resolve('dist/index.mjs');
-    if (!existsSync(distEntry)) {
-      // Skip when dist/ hasn't been built (CI may run tests before build)
-      return;
-    }
-
+  it.skipIf(!distExists)('importing dist/index.mjs does not trigger CLI side effects', () => {
     // Dynamically import the built module in a subprocess.
     // If the direct-run guard is broken, runMain() would parse argv and
     // potentially call process.exit or produce CLI output.

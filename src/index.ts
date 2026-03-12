@@ -43,7 +43,12 @@ const main = defineCommand({
 // Only execute CLI when run directly (not when imported as a module).
 // Use realpathSync on both sides to resolve symlinks from global npm
 // installs (e.g. /usr/local/bin/cavendish → ~/.npm/.../dist/index.mjs).
-const currentFile = realpathSync(fileURLToPath(import.meta.url));
+let currentFile: string;
+try {
+  currentFile = realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  currentFile = fileURLToPath(import.meta.url);
+}
 let entryFile: string;
 try {
   entryFile = process.argv[1] ? realpathSync(process.argv[1]) : '';
