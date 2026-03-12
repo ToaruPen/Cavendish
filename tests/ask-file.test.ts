@@ -1,4 +1,4 @@
-import { isAbsolute, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -64,8 +64,7 @@ describe('extractFileArgs()', () => {
   it('resolves relative paths to absolute', () => {
     const result = extractFileArgs(['node', 'index.mjs', 'ask', '--file', './src/index.ts']);
     expect(result).toHaveLength(1);
-    expect(isAbsolute(result[0])).toBe(true);
-    expect(result[0]).toContain(`src${sep}index.ts`);
+    expect(result[0]).toBe(resolve('./src/index.ts'));
   });
 });
 
