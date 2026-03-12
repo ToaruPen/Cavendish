@@ -47,7 +47,7 @@ export const readCommand = defineCommand({
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
 
-    if (!rejectUnknownFlags(args, format)) {return;}
+    if (!rejectUnknownFlags(args, format, ['chatId'])) {return;}
 
     try {
       assertValidChatId(args.chatId);

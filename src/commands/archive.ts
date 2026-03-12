@@ -22,7 +22,7 @@ export const archiveCommand = defineCommand({
     ...GLOBAL_ARGS,
   },
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(args)) { return; }
+    if (!rejectUnknownFlags(args, undefined, ['chatId'])) { return; }
 
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;

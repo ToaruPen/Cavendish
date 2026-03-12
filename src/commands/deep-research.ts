@@ -125,7 +125,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const format = validateFormat(args.format as string);
   if (format === undefined) { return undefined; }
 
-  if (!rejectUnknownFlags(args, format)) { return undefined; }
+  if (!rejectUnknownFlags(args, format, ['prompt'])) { return undefined; }
 
   // Validate flags, timeout, export, and file args BEFORE reading
   // stdin so obviously invalid invocations fail fast without blocking on EOF.

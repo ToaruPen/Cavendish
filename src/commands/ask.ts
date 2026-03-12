@@ -122,7 +122,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const format = validateFormat(args.format as string);
   if (format === undefined) {return undefined;}
 
-  if (!rejectUnknownFlags(args, format)) {return undefined;}
+  if (!rejectUnknownFlags(args, format, ['prompt'])) {return undefined;}
 
   const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
 

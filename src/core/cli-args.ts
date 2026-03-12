@@ -259,15 +259,27 @@ export function findUnknownFlag(
  * Reject unknown flags by checking process.argv against declared args.
  * Call at the start of each command's run() before any other validation.
  * Pass the parsed `args` object from citty — only the keys are used.
- * Returns true if all flags are known, false if an unknown flag was found.
+ *
+ * @param parsedArgs - the parsed args object from citty's run callback
+ * @param format - output format for error messages
+ * @param positionalKeys - keys that are positional args (type: 'positional')
+ *   in the command definition. These must be excluded from the known-flag
+ *   whitelist so that their kebab-case variants (e.g. --chat-id for chatId)
+ *   are not incorrectly accepted as valid flags.
+ * @returns true if all flags are known, false if an unknown flag was found
  */
 export function rejectUnknownFlags(
   parsedArgs: Record<string, unknown>,
   format?: 'json' | 'text',
+  positionalKeys?: string[],
 ): boolean {
-  // Filter out citty's internal '_' key (positional/rest args) so that
-  // '--_' is not mistakenly accepted as a known flag.
-  const unknown = findUnknownFlag(process.argv, Object.keys(parsedArgs).filter(k => k !== '_'));
+  // Filter out citty's internal '_' key (positional/rest args) and any
+  // declared positional keys so that their flag forms are not accepted.
+  const excludeKeys = new Set(['_', ...(positionalKeys ?? [])]);
+  const unknown = findUnknownFlag(
+    process.argv,
+    Object.keys(parsedArgs).filter(k => !excludeKeys.has(k)),
+  );
   if (unknown !== undefined) {
     failValidation(`Unknown option: ${unknown}`, format);
     return false;

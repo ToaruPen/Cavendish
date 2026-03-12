@@ -98,6 +98,21 @@ describe('findUnknownFlag', () => {
     const argv = ['node', 'index.mjs', 'ask', '--no-format=json'];
     expect(findUnknownFlag(argv, declaredKeys)).toBeUndefined();
   });
+
+  it('accepts --chatId when chatId is in declaredKeys (demonstrates the problem without exclusion)', () => {
+    // When chatId is included in declaredKeys, --chatId and --chat-id are both accepted.
+    // This is the bug: positional keys should NOT be in the whitelist.
+    const keys = ['chatId', 'format', 'quiet'];
+    const argv = ['node', 'index.mjs', 'read', '--chat-id', 'abc123'];
+    expect(findUnknownFlag(argv, keys)).toBeUndefined();
+  });
+
+  it('rejects --chat-id when chatId is excluded from declaredKeys', () => {
+    // After exclusion, --chat-id is no longer accepted as a known flag.
+    const keys = ['format', 'quiet'];
+    const argv = ['node', 'index.mjs', 'read', '--chat-id', 'abc123'];
+    expect(findUnknownFlag(argv, keys)).toBe('--chat-id');
+  });
 });
 
 describe('rejectUnknownFlags', () => {
@@ -152,6 +167,61 @@ describe('rejectUnknownFlags', () => {
     try {
       process.argv = ['node', 'index.mjs', 'ask', '--no-verbose', '--no-dry-run'];
       const result = rejectUnknownFlags({ verbose: false, dryRun: false, _: [] });
+      expect(result).toBe(true);
+    } finally {
+      process.argv = origArgv;
+    }
+  });
+
+  it('rejects --chat-id when chatId is a positional key', () => {
+    const origArgv = process.argv;
+    const origExitCode = process.exitCode;
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      process.argv = ['node', 'index.mjs', 'read', '--chat-id', 'abc123'];
+      const result = rejectUnknownFlags(
+        { chatId: 'abc123', quiet: false, format: 'json', _: [] },
+        'json',
+        ['chatId'],
+      );
+      expect(result).toBe(false);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.argv = origArgv;
+      process.exitCode = origExitCode;
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('rejects --prompt when prompt is a positional key', () => {
+    const origArgv = process.argv;
+    const origExitCode = process.exitCode;
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      process.argv = ['node', 'index.mjs', 'ask', '--prompt', 'hello'];
+      const result = rejectUnknownFlags(
+        { prompt: 'hello', quiet: false, format: 'json', _: [] },
+        'json',
+        ['prompt'],
+      );
+      expect(result).toBe(false);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.argv = origArgv;
+      process.exitCode = origExitCode;
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('still accepts known flags when positionalKeys are excluded', () => {
+    const origArgv = process.argv;
+    try {
+      process.argv = ['node', 'index.mjs', 'read', '--quiet', '--format', 'json'];
+      const result = rejectUnknownFlags(
+        { chatId: 'abc123', quiet: true, format: 'json', _: [] },
+        'json',
+        ['chatId'],
+      );
       expect(result).toBe(true);
     } finally {
       process.argv = origArgv;
