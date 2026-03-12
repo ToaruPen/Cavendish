@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -32,8 +33,9 @@ describe('index.ts import safety', () => {
     // Dynamically import the built module in a subprocess.
     // If the direct-run guard is broken, runMain() would parse argv and
     // potentially call process.exit or produce CLI output.
+    const importUrl = pathToFileURL(distEntry).href;
     const script = [
-      `import('${distEntry.replace(/\\/g, '/')}')`,
+      `import('${importUrl}')`,
       `.then(() => console.log('__IMPORT_OK__'))`,
       `.catch(e => { console.error(e); process.exit(1); })`,
     ].join('');
