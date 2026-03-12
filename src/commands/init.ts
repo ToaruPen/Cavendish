@@ -6,7 +6,7 @@ import { type Browser, type Page, errors } from 'playwright-core';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
 import { BrowserManager, CHROME_PROFILE_DIR, readCdpEndpoint, resolveCdpBaseUrl } from '../core/browser-manager.js';
-import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
 import { errorMessage, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 import { acquireLock, releaseLock } from '../core/process-lock.js';
@@ -684,6 +684,8 @@ export const initCommand = defineCommand({
     if (format === undefined) {
       return;
     }
+
+    if (!rejectUnknownFlags(args, format)) { return; }
 
     const skipLogin = args.skipLogin === true;
 

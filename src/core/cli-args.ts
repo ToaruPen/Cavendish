@@ -205,6 +205,88 @@ export function buildPrompt(prompt: string, stdinData: string): string {
   return `${stdinData}\n\n${prompt}`;
 }
 
+// ── Unknown-flag detection ───────────────────────────────────────────
+
+/** Convert a camelCase string to kebab-case. */
+function camelToKebab(str: string): string {
+  return str.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+}
+
+/**
+ * Check process.argv for flags not declared in the command's args definition.
+ * Ignores positional args (tokens not starting with `--`) and `--` separator.
+ * Returns the first unknown flag found, or undefined if all flags are known.
+ *
+ * @param argv - process.argv to scan
+ * @param declaredArgKeys - keys from the command's declared args
+ *   (e.g. Object.keys(args) from citty's run callback, or from the args definition)
+ */
+export function findUnknownFlag(
+  argv: string[],
+  declaredArgKeys: string[],
+): string | undefined {
+  // Build the set of known flag names (both camelCase and kebab-case).
+  // For each key we also add --no-<key> / --no-<kebab> because citty
+  // supports boolean negation (e.g. --no-verbose sets verbose to false).
+  // Adding --no-* for non-boolean keys is harmless — citty itself will
+  // reject them — but omitting --no-* for boolean keys would cause a
+  // false "unknown option" error.
+  const knownFlags = new Set<string>();
+  for (const key of declaredArgKeys) {
+    knownFlags.add(`--${key}`);
+    knownFlags.add(`--no-${key}`);
+    // citty also accepts kebab-case (e.g., --dry-run for dryRun)
+    const kebab = camelToKebab(key);
+    knownFlags.add(`--${kebab}`);
+    knownFlags.add(`--no-${kebab}`);
+  }
+
+  // Walk argv, skipping the node binary and script path.
+  // Positional args and subcommand names don't start with '--' so they are ignored.
+  for (const arg of argv.slice(2)) {
+    if (arg === '--') { break; }
+    if (!arg.startsWith('--')) { continue; }
+
+    const flagName = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
+    if (!knownFlags.has(flagName)) {
+      return flagName;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Reject unknown flags by checking process.argv against declared args.
+ * Call at the start of each command's run() before any other validation.
+ * Pass the parsed `args` object from citty — only the keys are used.
+ *
+ * @param parsedArgs - the parsed args object from citty's run callback
+ * @param format - output format for error messages
+ * @param positionalKeys - keys that are positional args (type: 'positional')
+ *   in the command definition. These must be excluded from the known-flag
+ *   whitelist so that their kebab-case variants (e.g. --chat-id for chatId)
+ *   are not incorrectly accepted as valid flags.
+ * @returns true if all flags are known, false if an unknown flag was found
+ */
+export function rejectUnknownFlags(
+  parsedArgs: Record<string, unknown>,
+  format?: 'json' | 'text',
+  positionalKeys?: string[],
+): boolean {
+  // Filter out citty's internal '_' key (positional/rest args) and any
+  // declared positional keys so that their flag forms are not accepted.
+  const excludeKeys = new Set(['_', ...(positionalKeys ?? [])]);
+  const unknown = findUnknownFlag(
+    process.argv,
+    Object.keys(parsedArgs).filter(k => !excludeKeys.has(k)),
+  );
+  if (unknown !== undefined) {
+    failValidation(`Unknown option: ${unknown}`, format);
+    return false;
+  }
+  return true;
+}
+
 /**
  * Validate --file arguments from process.argv.
  * Returns resolved absolute paths, or undefined on validation error.

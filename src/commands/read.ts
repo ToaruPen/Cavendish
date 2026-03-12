@@ -2,7 +2,7 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
 import type { ConversationMessage } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { errorMessage, failValidation, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -46,6 +46,8 @@ export const readCommand = defineCommand({
     const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
+
+    if (!rejectUnknownFlags(args, format, ['chatId'])) {return;}
 
     try {
       assertValidChatId(args.chatId);

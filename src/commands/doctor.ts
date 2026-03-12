@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 
-import { GLOBAL_ARGS } from '../core/cli-args.js';
+import { GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { buildDoctorResult, collectDoctorChecks, formatTextOutput } from '../core/doctor.js';
 import { jsonRaw, progress, text } from '../core/output-handler.js';
 
@@ -26,6 +26,8 @@ export const doctorCommand = defineCommand({
     },
   },
   async run({ args }): Promise<void> {
+    if (!rejectUnknownFlags(args)) { return; }
+
     if (args.dryRun === true) {
       progress('[dry-run] Would run diagnostic checks on CLI prerequisites, auth, and integrations', false);
       return;

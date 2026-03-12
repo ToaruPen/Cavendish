@@ -39,6 +39,7 @@ vi.mock('../src/core/cli-args.js', () => ({
   buildPrompt: vi.fn((prompt: string): string => prompt),
   extractArgsOrFail: vi.fn().mockReturnValue([]),
   readStdin: vi.fn().mockReturnValue(''),
+  rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([]),
 }));
 

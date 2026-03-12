@@ -1,7 +1,7 @@
 import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
-import { GLOBAL_ARGS } from '../core/cli-args.js';
+import { GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { errorMessage, fail, progress } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -27,6 +27,8 @@ export const deleteCommand = defineCommand({
     ...GLOBAL_ARGS,
   },
   async run({ args }): Promise<void> {
+    if (!rejectUnknownFlags(args, undefined, ['chatId'])) { return; }
+
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
     const projectName = args.project;
