@@ -11,7 +11,7 @@
  * All DOM selectors are sourced from constants/selectors.ts.
  */
 
-import type { Locator, Page } from 'playwright';
+import type { Locator, Page } from 'playwright-core';
 
 import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversationLinkByIdBroad, projectConversationLinkById, SELECTORS } from '../constants/selectors.js';
 

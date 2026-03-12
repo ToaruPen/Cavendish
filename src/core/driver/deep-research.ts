@@ -5,7 +5,7 @@
  * DOM selectors are sourced from constants/selectors.ts.
  */
 
-import type { Frame, Page } from 'playwright';
+import type { Frame, Page } from 'playwright-core';
 
 import { CHATGPT_BASE_URL, SELECTORS } from '../../constants/selectors.js';
 import type { DeepResearchExportFormat, WaitForResponseResult } from '../chatgpt-types.js';

@@ -5,7 +5,7 @@
  * DOM selectors are sourced from constants/selectors.ts.
  */
 
-import type { FrameLocator, Locator, Page } from 'playwright';
+import type { FrameLocator, Locator, Page } from 'playwright-core';
 
 import { MENU_LABELS, SELECTORS } from '../../constants/selectors.js';
 import { progress } from '../output-handler.js';

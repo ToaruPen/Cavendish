@@ -2,7 +2,7 @@
  * Shared helper functions for ChatGPTDriver sub-modules.
  */
 
-import { errors } from 'playwright';
+import { errors } from 'playwright-core';
 
 export const DEFAULT_TIMEOUT_MS = 2_400_000;
 export const POLL_INTERVAL_MS = 200;

@@ -7,6 +7,7 @@ import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, re
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { acquireLock, releaseLock } from '../core/process-lock.js';
+import { registerCleanup } from '../core/shutdown.js';
 
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
@@ -352,6 +353,12 @@ export const askCommand = defineCommand({
 
     const browser = new BrowserManager();
 
+    // Register cleanup before getPage() so SIGINT/SIGTERM during page
+    // acquisition can still close the tab. closePage() is idempotent.
+    const unregisterPageCleanup = registerCleanup(async (): Promise<void> => {
+      await browser.closePage();
+    });
+
     try {
       verbose('Acquiring process lock...', isVerbose);
       acquireLock();
@@ -422,6 +429,11 @@ export const askCommand = defineCommand({
         try {
           await browser.closePage();
         } finally {
+          // Unregister AFTER closePage completes — if a signal arrived during
+          // closePage, the cleanup callback's redundant close is harmless
+          // (closePage is idempotent). Unregistering before closePage would
+          // leave a window where the tab leaks on signal.
+          unregisterPageCleanup();
           await browser.close();
         }
       } finally {

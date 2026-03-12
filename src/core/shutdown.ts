@@ -120,16 +120,18 @@ function handleSigint(): void {
   // Use writeSync so the message is guaranteed to flush even when stderr
   // is piped (process.stderr.write is async on POSIX pipes).
   writeSync(2, '\n[cavendish] Shutting down (SIGINT)...\n');
-  releaseLock();
+  // Run cleanup BEFORE releasing the lock so another process cannot
+  // acquire the lock while this one is still closing tabs/pages.
   void runCleanupCallbacks().finally(() => {
+    releaseLock();
     process.exit(SIGINT_EXIT_CODE);
   });
 }
 
 function handleSigterm(): void {
   writeSync(2, '[cavendish] Shutting down (SIGTERM)...\n');
-  releaseLock();
   void runCleanupCallbacks().finally(() => {
+    releaseLock();
     process.exit(SIGTERM_EXIT_CODE);
   });
 }

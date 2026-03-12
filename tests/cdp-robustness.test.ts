@@ -203,7 +203,7 @@ async function importWithMocks(options: {
     close: (): Promise<void> => Promise.resolve(),
   };
 
-  vi.doMock('playwright', () => ({
+  vi.doMock('playwright-core', () => ({
     chromium: {
       connectOverCDP: (): Promise<MinimalBrowser> => {
         if (connectFails) {
