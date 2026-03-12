@@ -69,7 +69,9 @@ describe('ensureProfileDirectories', () => {
     expect(existsSync(fakeChromeProfileDir)).toBe(true);
   });
 
-  it('sets 0o700 on newly created directories', async () => {
+  // chmod is a no-op on Windows — POSIX permission bits don't apply.
+  // These tests verify chmod behavior and are only meaningful on Unix.
+  it.skipIf(process.platform === 'win32')('sets 0o700 on newly created directories', async () => {
     const { ensureProfileDirectories } = await importWithMockedHome();
 
     ensureProfileDirectories();
@@ -78,7 +80,7 @@ describe('ensureProfileDirectories', () => {
     expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
   });
 
-  it('tightens permissions on pre-existing 0o755 directories', async () => {
+  it.skipIf(process.platform === 'win32')('tightens permissions on pre-existing 0o755 directories', async () => {
     // Pre-create directories with overly permissive mode
     mkdirSync(fakeChromeProfileDir, { recursive: true, mode: 0o755 });
     chmodSync(fakeCavendishDir, 0o755);
@@ -96,7 +98,7 @@ describe('ensureProfileDirectories', () => {
     expect(permissionBits(fakeChromeProfileDir)).toBe(0o700);
   });
 
-  it('is idempotent — calling twice does not error or change permissions', async () => {
+  it.skipIf(process.platform === 'win32')('is idempotent — calling twice does not error or change permissions', async () => {
     const { ensureProfileDirectories } = await importWithMockedHome();
 
     ensureProfileDirectories();
