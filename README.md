@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/node/v/cavendish)](https://nodejs.org/)
 [![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
 
-**Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command.
+**Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command. Production-ready since v1.0.0.
 
 ```bash
 # Ask ChatGPT from the terminal
@@ -28,6 +28,7 @@ cavendish deep-research --export pdf "State of WebAssembly in 2025"
 - **Streaming output** — real-time NDJSON streaming for integration with other tools
 - **Health diagnostics** — built-in `doctor` command to verify CDP, auth, and selectors
 - **Process safety** — exclusive lock prevents concurrent access; signal-safe cleanup
+- **CLI robustness** — unknown flag detection, structured exit codes, cross-platform support (macOS / Linux / Windows)
 
 ## Prerequisites
 
