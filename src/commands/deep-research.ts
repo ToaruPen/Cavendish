@@ -235,6 +235,31 @@ function writeDRResult(
   }
 }
 
+/**
+ * Attempt to copy clean Markdown via the clipboard when --export is specified.
+ * Falls back to the raw text if the clipboard operation fails or is skipped.
+ */
+async function tryClipboardCopy(
+  driver: ChatGPTDriver,
+  rawText: string,
+  exportFormat: DeepResearchExportFormat | undefined,
+  completed: boolean,
+  quiet: boolean,
+): Promise<string> {
+  if (exportFormat === undefined || !completed) {
+    return rawText;
+  }
+  try {
+    const markdown = await driver.copyDeepResearchContent();
+    if (markdown.length > 0) {
+      return markdown;
+    }
+  } catch (error: unknown) {
+    progress(`Copy content failed, using raw text: ${errorMessage(error)}`, quiet);
+  }
+  return rawText;
+}
+
 function resolveChatId(driver: ChatGPTDriver, mode: RunMode, quiet: boolean): string | undefined {
   if (mode.kind === 'followup' || mode.kind === 'refresh') {
     return mode.chatId;
@@ -324,8 +349,9 @@ export const deepResearchCommand = defineCommand({
       verbose(`Export: ${exportFormat}${exportTarget}`, isVerbose);
     }
 
-    /** Permissions required for the copy-content clipboard operation. */
-    const permissions = ['clipboard-read', 'clipboard-write'];
+    // Clipboard permissions are only needed when --export is specified,
+    // because copyDeepResearchContent() uses the clipboard to get clean Markdown.
+    const permissions = exportFormat !== undefined ? ['clipboard-read', 'clipboard-write'] : [];
 
     await withDriver(quiet, async (driver) => {
       if (stream) { emitState('sending'); }
@@ -350,18 +376,9 @@ export const deepResearchCommand = defineCommand({
       if (stream) { emitState('generating'); }
       verbose(`Research completed: ${result.completed ? 'full' : 'partial'}`, isVerbose);
 
-      // Get clean Markdown text via copy-content when available (best-effort)
-      let reportText = result.text;
-      if (result.completed) {
-        try {
-          const markdown = await driver.copyDeepResearchContent();
-          if (markdown.length > 0) {
-            reportText = markdown;
-          }
-        } catch (error: unknown) {
-          progress(`Copy content failed, using raw text: ${errorMessage(error)}`, quiet);
-        }
-      }
+      // Get clean Markdown text via clipboard copy when --export is specified
+      // (requires clipboard permissions granted above). Without --export, use raw text.
+      const reportText = await tryClipboardCopy(driver, result.text, exportFormat, result.completed, quiet);
 
       // Export to file if requested (after copy, so export menu state is clean).
       // On incomplete reports, skip export but still output the partial result.

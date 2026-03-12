@@ -66,7 +66,8 @@ describe('acquireLock', () => {
     expect(content).toBe(String(process.pid));
   });
 
-  it('throws when another live process holds the lock', async () => {
+  // PID 1 (init/launchd) is always alive on Unix but not on Windows.
+  it.skipIf(process.platform === 'win32')('throws when another live process holds the lock', async () => {
     const { acquireLock } = await importWithMockedHome();
 
     // Write a lock file with PID 1 (init/launchd — always alive)
@@ -121,7 +122,8 @@ describe('acquireLock', () => {
     expect(content).toBe(String(process.pid));
   });
 
-  it('throws CavendishError with cdp_unavailable category', async () => {
+  // PID 1 (init/launchd) is always alive on Unix but not on Windows.
+  it.skipIf(process.platform === 'win32')('throws CavendishError with cdp_unavailable category', async () => {
     const { acquireLock } = await importWithMockedHome();
     const { CavendishError } = await import('../src/core/errors.js');
 
