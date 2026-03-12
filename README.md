@@ -33,6 +33,7 @@ cavendish deep-research --export pdf "State of WebAssembly in 2025"
 
 - **Node.js** >= 20
 - **Google Chrome** (stable channel)
+- **ChatGPT Plus, Team, or Enterprise account** (required for Pro models and Deep Research)
 - **OS**: macOS, Linux, or Windows
 
 ## Installation
@@ -242,6 +243,29 @@ src/
 ```
 
 </details>
+
+## Exit Codes
+
+Cavendish uses structured exit codes so calling agents can handle errors programmatically.
+
+| Code | Category | Description | Suggested Action |
+|------|----------|-------------|------------------|
+| 0 | — | Success | — |
+| 1 | `unknown` | Unclassified error | Check the error message for details |
+| 2 | `cdp_unavailable` | Chrome CDP not reachable | Run `cavendish init` to start Chrome |
+| 3 | `chrome_not_found` | Chrome binary not found | Install Google Chrome and ensure it is in your PATH |
+| 4 | `auth_expired` | ChatGPT session expired | Open Chrome and log in to ChatGPT |
+| 5 | `cloudflare_blocked` | Cloudflare challenge detected | Solve the challenge in the Chrome tab |
+| 6 | `selector_miss` | DOM selector not found | ChatGPT UI may have changed; run `cavendish status` |
+| 7 | `timeout` | Operation timed out | Increase `--timeout` or check ChatGPT in the browser |
+| 8 | `chrome_launch_failed` | Chrome failed to launch | Check permissions; run `cavendish init` |
+| 9 | `chrome_close_failed` | Chrome failed to close | Close Chrome manually |
+
+With `--format json`, errors are written to stderr as structured JSON:
+
+```json
+{ "error": true, "category": "cdp_unavailable", "message": "...", "exitCode": 2, "action": "Run \"cavendish init\"..." }
+```
 
 ## Security
 
