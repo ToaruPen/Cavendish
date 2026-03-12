@@ -116,11 +116,19 @@ describe('ask command cleanup registration', () => {
 
   it('registers a cleanup callback before acquiring the lock', async () => {
     const { registerCleanup } = await import('../src/core/shutdown.js');
+    const { acquireLock } = await import('../src/core/process-lock.js');
 
     await runAsk();
 
     expect(registerCleanup).toHaveBeenCalledOnce();
     expect(typeof (registerCleanup as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('function');
+
+    // registerCleanup must be invoked BEFORE acquireLock — reversing the
+    // order in ask.ts would leave a window where SIGINT during lock
+    // acquisition has no cleanup registered.
+    const cleanupOrder = (registerCleanup as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    const lockOrder = (acquireLock as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(cleanupOrder).toBeLessThan(lockOrder);
   });
 
   it('unregisters the cleanup callback in the finally block', async () => {
