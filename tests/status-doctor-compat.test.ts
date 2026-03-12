@@ -12,6 +12,10 @@ function getArgs(cmd: typeof doctorCommand): Record<string, { type: string }> {
 }
 
 describe('status / doctor command compatibility', () => {
+  it('status re-exports the exact doctor command instance', () => {
+    expect(statusCommand).toBe(doctorCommand);
+  });
+
   it('status and doctor accept the same argument names', () => {
     const doctorArgNames = Object.keys(getArgs(doctorCommand)).sort((a, b) => a.localeCompare(b));
     const statusArgNames = Object.keys(getArgs(statusCommand)).sort((a, b) => a.localeCompare(b));
