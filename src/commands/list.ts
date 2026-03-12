@@ -7,22 +7,24 @@ import { withDriver } from '../core/with-driver.js';
 /**
  * `cavendish list` — list conversations from the ChatGPT sidebar.
  */
+const LIST_ARGS = {
+  ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
+};
+
 export const listCommand = defineCommand({
   meta: {
     name: 'list',
     description: 'List conversations from the ChatGPT sidebar',
   },
-  args: {
-    ...GLOBAL_ARGS,
-    ...FORMAT_ARG,
-  },
+  args: LIST_ARGS,
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
 
-    if (!rejectUnknownFlags(args, format)) {return;}
+    if (!rejectUnknownFlags(LIST_ARGS, format)) {return;}
 
     if (args.dryRun === true) {
       progress(`[dry-run] Would list conversations (format: ${format})`, false);

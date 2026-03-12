@@ -27,27 +27,29 @@ function formatAsText(messages: readonly ConversationMessage[]): string {
 /**
  * `cavendish read <chat-id>` — read messages from an existing conversation.
  */
+const READ_ARGS = {
+  chatId: {
+    type: 'positional' as const,
+    description: 'The conversation ID to read',
+    required: true as const,
+  },
+  ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
+};
+
 export const readCommand = defineCommand({
   meta: {
     name: 'read',
     description: 'Read messages from an existing ChatGPT conversation',
   },
-  args: {
-    chatId: {
-      type: 'positional',
-      description: 'The conversation ID to read',
-      required: true,
-    },
-    ...GLOBAL_ARGS,
-    ...FORMAT_ARG,
-  },
+  args: READ_ARGS,
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
     const format = validateFormat(args.format);
     if (format === undefined) {return;}
 
-    if (!rejectUnknownFlags(args, format, ['chatId'])) {return;}
+    if (!rejectUnknownFlags(READ_ARGS, format)) {return;}
 
     try {
       assertValidChatId(args.chatId);

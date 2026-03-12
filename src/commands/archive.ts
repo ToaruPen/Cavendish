@@ -8,21 +8,23 @@ import { withDriver } from '../core/with-driver.js';
 /**
  * `cavendish archive <chat-id>` — archive a conversation.
  */
+const ARCHIVE_ARGS = {
+  chatId: {
+    type: 'positional' as const,
+    description: 'The conversation ID to archive',
+    required: true as const,
+  },
+  ...GLOBAL_ARGS,
+};
+
 export const archiveCommand = defineCommand({
   meta: {
     name: 'archive',
     description: 'Archive a conversation by ID',
   },
-  args: {
-    chatId: {
-      type: 'positional',
-      description: 'The conversation ID to archive',
-      required: true,
-    },
-    ...GLOBAL_ARGS,
-  },
+  args: ARCHIVE_ARGS,
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(args, undefined, ['chatId'])) { return; }
+    if (!rejectUnknownFlags(ARCHIVE_ARGS)) { return; }
 
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;

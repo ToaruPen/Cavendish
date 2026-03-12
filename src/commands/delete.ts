@@ -9,25 +9,27 @@ import { withDriver } from '../core/with-driver.js';
  * `cavendish delete <chat-id>` — delete a conversation.
  * Use `--project "Name"` to delete a project conversation.
  */
+const DELETE_ARGS = {
+  chatId: {
+    type: 'positional' as const,
+    description: 'The conversation ID to delete',
+    required: true as const,
+  },
+  project: {
+    type: 'string' as const,
+    description: 'Project name (required for project conversations)',
+  },
+  ...GLOBAL_ARGS,
+};
+
 export const deleteCommand = defineCommand({
   meta: {
     name: 'delete',
     description: 'Delete a conversation by ID',
   },
-  args: {
-    chatId: {
-      type: 'positional',
-      description: 'The conversation ID to delete',
-      required: true,
-    },
-    project: {
-      type: 'string',
-      description: 'Project name (required for project conversations)',
-    },
-    ...GLOBAL_ARGS,
-  },
+  args: DELETE_ARGS,
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(args, undefined, ['chatId'])) { return; }
+    if (!rejectUnknownFlags(DELETE_ARGS)) { return; }
 
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;

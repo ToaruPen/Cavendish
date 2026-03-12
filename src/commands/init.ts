@@ -661,23 +661,25 @@ function outputResult(result: InitResult, format: 'json' | 'text'): void {
 /**
  * `cavendish init` — initialize Chrome profile and verify ChatGPT login.
  */
+const INIT_ARGS = {
+  reset: {
+    type: 'boolean' as const,
+    description: 'Delete and recreate the Chrome profile directory',
+  },
+  skipLogin: {
+    type: 'boolean' as const,
+    description: 'Skip auto-navigation to Google login (manual login only)',
+  },
+  ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
+};
+
 export const initCommand = defineCommand({
   meta: {
     name: 'init',
     description: 'Initialize Chrome profile and verify ChatGPT login',
   },
-  args: {
-    reset: {
-      type: 'boolean',
-      description: 'Delete and recreate the Chrome profile directory',
-    },
-    skipLogin: {
-      type: 'boolean',
-      description: 'Skip auto-navigation to Google login (manual login only)',
-    },
-    ...GLOBAL_ARGS,
-    ...FORMAT_ARG,
-  },
+  args: INIT_ARGS,
   async run({ args }): Promise<void> {
     const quiet = args.quiet === true;
     const format = validateFormat(args.format);
@@ -685,7 +687,7 @@ export const initCommand = defineCommand({
       return;
     }
 
-    if (!rejectUnknownFlags(args, format)) { return; }
+    if (!rejectUnknownFlags(INIT_ARGS, format)) { return; }
 
     const skipLogin = args.skipLogin === true;
 
