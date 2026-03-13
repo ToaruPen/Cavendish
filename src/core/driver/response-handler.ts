@@ -142,8 +142,10 @@ async function getResponseSnapshot(
   try {
     stopButtonVisible = await page.locator(SELECTORS.STOP_BUTTON).isVisible();
   } catch (error: unknown) {
-    throw new Error(
+    throw new CavendishError(
       `Failed to inspect stop button visibility (selector: ${SELECTORS.STOP_BUTTON}): ${errorMessage(error)}`,
+      'selector_miss',
+      'Run "cavendish status" to verify selectors and inspect the ChatGPT tab for UI changes.',
     );
   }
   const messageCount = await page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
@@ -233,6 +235,10 @@ function isCompletedSnapshot(
   const requiredSettleDelay = sawStopButton
     ? settleDelayMs
     : Math.max(settleDelayMs * 4, NO_STOP_SETTLE_DELAY_MS);
+
+  if (!sawStopButton) {
+    return false;
+  }
 
   return started
     && snapshot.text.length > 0
