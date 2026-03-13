@@ -4,6 +4,7 @@ import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { CavendishError } from '../core/errors.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { acquireLock, releaseLock } from '../core/process-lock.js';
@@ -285,6 +286,61 @@ function writeResult(
   }
 }
 
+async function applyComposerOptions(
+  driver: ChatGPTDriver,
+  validated: ValidatedArgs,
+): Promise<void> {
+  const {
+    quiet,
+    model,
+    continueChat,
+    thinkingEffort,
+    filePaths,
+    gdriveFiles,
+    githubRepos,
+    agentMode,
+  } = validated;
+
+  if (!continueChat) {
+    await driver.selectModel(model, quiet);
+  }
+
+  if (thinkingEffort !== undefined) {
+    await driver.setThinkingEffort(thinkingEffort, model, quiet);
+  }
+
+  if (filePaths.length > 0) {
+    await driver.attachFiles(filePaths, quiet);
+  }
+
+  for (const gdFile of gdriveFiles) {
+    await driver.attachGoogleDriveFile(gdFile, quiet);
+  }
+
+  for (const repo of githubRepos) {
+    await driver.attachGitHubRepo(repo, quiet);
+  }
+
+  if (agentMode) {
+    await driver.enableAgentMode(quiet);
+  }
+}
+
+function assertCompletedResponse(
+  result: WaitForResponseResult,
+  timeoutSec: number,
+): void {
+  if (result.completed) {
+    return;
+  }
+
+  throw new CavendishError(
+    `Timed out waiting for a final response after ${String(timeoutSec)}s.`,
+    'timeout',
+    'Retry with a larger --timeout if ChatGPT is still generating, or inspect the browser tab for a stalled response.',
+  );
+}
+
 /**
  * Handle navigation based on --continue, --chat, and --project flags.
  *
@@ -345,9 +401,7 @@ export const askCommand = defineCommand({
     }
 
     const {
-      quiet, isVerbose, model, timeoutMs, timeoutSec, format, stream,
-      filePaths, gdriveFiles, githubRepos, agentMode, thinkingEffort, prompt, continueChat,
-      project,
+      quiet, isVerbose, model, timeoutMs, timeoutSec, format, stream, prompt, project,
     } = validated;
 
     verbose(`Model: ${model}, timeout: ${String(timeoutSec)}s, format: ${format}`, isVerbose);
@@ -373,31 +427,8 @@ export const askCommand = defineCommand({
       verbose('Navigating...', isVerbose);
       await navigate(driver, validated);
 
-      // Skip model selection when continuing an existing chat
-      if (!continueChat) {
-        verbose(`Selecting model: ${model}`, isVerbose);
-        await driver.selectModel(model, quiet);
-      }
-
-      if (thinkingEffort !== undefined) {
-        await driver.setThinkingEffort(thinkingEffort, model, quiet);
-      }
-
-      if (filePaths.length > 0) {
-        await driver.attachFiles(filePaths, quiet);
-      }
-
-      for (const gdFile of gdriveFiles) {
-        await driver.attachGoogleDriveFile(gdFile, quiet);
-      }
-
-      for (const repo of githubRepos) {
-        await driver.attachGitHubRepo(repo, quiet);
-      }
-
-      if (agentMode) {
-        await driver.enableAgentMode(quiet);
-      }
+      verbose(`Selecting model: ${model}`, isVerbose);
+      await applyComposerOptions(driver, validated);
 
       progress('Sending message...', quiet);
       verbose(`Sending message (prompt length: ${String(prompt.length)} chars)...`, isVerbose);
@@ -413,6 +444,7 @@ export const askCommand = defineCommand({
         initialMsgCount,
         onChunk,
       });
+      assertCompletedResponse(result, timeoutSec);
 
       const chatId = driver.extractChatId();
       const url = driver.getCurrentUrl();
@@ -420,7 +452,7 @@ export const askCommand = defineCommand({
       writeResult(result, {
         format,
         stream,
-        model: continueChat ? undefined : model,
+        model: validated.continueChat ? undefined : model,
         chatId,
         url,
         project,

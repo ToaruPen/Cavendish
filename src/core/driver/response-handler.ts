@@ -1,20 +1,27 @@
 /**
- * Response handling: wait for completion using stop-button as primary signal,
- * chunk polling, and response extraction.
- *
- * All functions receive a Playwright Page and operate on it directly.
- * DOM selectors are sourced from constants/selectors.ts.
+ * Response handling: poll ChatGPT response state until a final answer is
+ * complete, a stall is detected, or the overall timeout expires.
  */
 
-import type { Locator, Page } from 'playwright-core';
+import type { Page } from 'playwright-core';
 
 import { SELECTORS } from '../../constants/selectors.js';
 import type { WaitForResponseOptions, WaitForResponseResult } from '../chatgpt-types.js';
-import { progress } from '../output-handler.js';
+import { CavendishError } from '../errors.js';
+import { errorMessage, progress } from '../output-handler.js';
 
-import { DEFAULT_TIMEOUT_MS, delay, isTimeoutError, POLL_INTERVAL_MS } from './helpers.js';
+import { DEFAULT_TIMEOUT_MS, delay, POLL_INTERVAL_MS } from './helpers.js';
 
-type StopButtonResult = 'attached' | 'message' | 'timeout';
+const DEFAULT_SETTLE_DELAY_MS = 1_500;
+const MIN_STALL_TIMEOUT_MS = 15_000;
+const NO_STOP_SETTLE_DELAY_MS = 5_000;
+
+interface ResponseSnapshot {
+  text: string;
+  messageCount: number;
+  stopButtonVisible: boolean;
+  copyButtonVisible: boolean;
+}
 
 export async function waitForResponse(
   page: Page,
@@ -22,6 +29,8 @@ export async function waitForResponse(
 ): Promise<WaitForResponseResult> {
   const {
     timeout = DEFAULT_TIMEOUT_MS,
+    stallTimeoutMs = resolveStallTimeout(timeout),
+    settleDelayMs = DEFAULT_SETTLE_DELAY_MS,
     onChunk,
     quiet = false,
     initialMsgCount,
@@ -30,25 +39,23 @@ export async function waitForResponse(
 
   progress(`Waiting for ${label}...`, quiet);
 
-  const completed = await waitForCompletionWithChunks(
+  const result = await monitorResponse(
     page,
     initialMsgCount,
     timeout,
+    stallTimeoutMs,
+    settleDelayMs,
     quiet,
     onChunk,
   );
 
-  if (completed) {
+  if (result.completed) {
     progress(`${label} complete`, quiet);
   } else {
-    progress(
-      `${label} timed out after ${String(Math.round(timeout / 1000))}s — returning partial response`,
-      quiet,
-    );
+    progress(`${label} timed out after ${String(Math.round(timeout / 1000))}s`, quiet);
   }
 
-  const text = await getResponseAfter(page, initialMsgCount);
-  return { text, completed };
+  return result;
 }
 
 export async function getLastResponse(page: Page): Promise<string> {
@@ -66,242 +73,193 @@ export async function getAssistantMessageCount(page: Page): Promise<number> {
   return page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
 }
 
-// ── Private helpers ─────────────────────────────────────────
-
-async function getResponseAfter(page: Page, previousCount: number): Promise<string> {
-  return page.evaluate(
-    ({ selector, offset }: { selector: string; offset: number }) => {
-      const messages = document.querySelectorAll(selector);
-      if (messages.length <= offset) {
-        return '';
-      }
-      const target = messages[messages.length - 1];
-      return target.textContent.trim();
-    },
-    { selector: SELECTORS.ASSISTANT_MESSAGE, offset: previousCount },
+function resolveStallTimeout(timeout: number): number {
+  return Math.min(
+    timeout,
+    Math.max(MIN_STALL_TIMEOUT_MS, Math.floor(timeout / 4)),
   );
 }
 
-async function waitForCompletionWithChunks(
+async function monitorResponse(
   page: Page,
   msgCountBefore: number,
   timeout: number,
+  stallTimeoutMs: number,
+  settleDelayMs: number,
   quiet: boolean,
   onChunk?: (text: string) => void,
-): Promise<boolean> {
-  let done = false;
-  const stopBtn = page.locator(SELECTORS.STOP_BUTTON);
+): Promise<WaitForResponseResult> {
   const deadline = Date.now() + timeout;
+  let lastSnapshot: ResponseSnapshot = {
+    text: '',
+    messageCount: msgCountBefore,
+    stopButtonVisible: false,
+    copyButtonVisible: false,
+  };
+  let started = false;
+  let sawStopButton = false;
+  let lastActivityAt = Date.now();
+  let lastTextChangeAt: number | undefined;
+  let lastEmittedText = '';
 
-  const completionPromise = (async (): Promise<boolean> => {
-    const phase1Ok = await waitForStopButtonAttach(
-      page, stopBtn, msgCountBefore, timeout, deadline, quiet,
-    );
-    if (!phase1Ok) {
-      return false;
+  while (Date.now() < deadline) {
+    const snapshot = await getResponseSnapshot(page, msgCountBefore);
+    const now = Date.now();
+    sawStopButton = sawStopButton || snapshot.stopButtonVisible;
+    if (hasResponseStarted(snapshot, msgCountBefore) && !started) {
+      started = true;
+      lastActivityAt = now;
+      progress('Response started', quiet);
     }
-    return waitForStopButtonCycle(
-      page, stopBtn, msgCountBefore, deadline, quiet,
-    );
-  })().finally((): void => {
-    done = true;
-  });
 
-  if (onChunk) {
-    await pollChunks(page, () => done, msgCountBefore, quiet, onChunk);
+    if (snapshotChanged(snapshot, lastSnapshot)) {
+      lastActivityAt = now;
+    }
+
+    if (snapshot.text !== lastSnapshot.text) {
+      lastTextChangeAt = now;
+      lastEmittedText = emitChunkIfChanged(snapshot.text, lastEmittedText, onChunk);
+    }
+
+    if (isCompletedSnapshot(snapshot, started, sawStopButton, lastTextChangeAt, now, settleDelayMs)) {
+      return { text: snapshot.text, completed: true };
+    }
+
+    assertNotStalled(started, now, lastActivityAt, stallTimeoutMs);
+
+    lastSnapshot = snapshot;
+    await delay(POLL_INTERVAL_MS);
   }
 
-  return completionPromise;
+  return { text: lastSnapshot.text, completed: false };
 }
 
-async function waitForStopButtonAttach(
+async function getResponseSnapshot(
   page: Page,
-  stopBtn: Locator,
-  msgCountBefore: number,
-  timeout: number,
-  deadline: number,
-  quiet: boolean,
-): Promise<boolean> {
-  const result = await raceStopButtonAndMessage(
-    page, stopBtn, msgCountBefore, timeout,
+  previousCount: number,
+): Promise<ResponseSnapshot> {
+  let stopButtonVisible: boolean;
+  try {
+    stopButtonVisible = await page.locator(SELECTORS.STOP_BUTTON).isVisible();
+  } catch (error: unknown) {
+    throw new CavendishError(
+      `Failed to inspect stop button visibility (selector: ${SELECTORS.STOP_BUTTON}): ${errorMessage(error)}`,
+      'selector_miss',
+      'Run "cavendish status" to verify selectors and inspect the ChatGPT tab for UI changes.',
+    );
+  }
+  const messageCount = await page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
+
+  const latest = await page.evaluate(
+    (
+      {
+        messageSelector,
+        copySelector,
+        offset,
+      }: {
+        messageSelector: string;
+        copySelector: string;
+        offset: number;
+      },
+    ) => {
+      const messages = document.querySelectorAll(messageSelector);
+      if (messages.length <= offset) {
+        return { text: '', copyButtonVisible: false };
+      }
+
+      const target = messages[messages.length - 1];
+      const text = target.textContent.trim();
+      const copyButton = target.querySelector<HTMLElement>(copySelector);
+      const copyButtonVisible = copyButton !== null && copyButton.getBoundingClientRect().height > 0;
+
+      return { text, copyButtonVisible };
+    },
+    {
+      messageSelector: SELECTORS.ASSISTANT_MESSAGE,
+      copySelector: SELECTORS.COPY_BUTTON,
+      offset: previousCount,
+    },
   );
 
-  if (result === 'timeout') {
-    progress(`Response not detected within ${String(timeout)}ms`, quiet);
-    return false;
-  }
+  return {
+    text: latest.text,
+    messageCount,
+    stopButtonVisible,
+    copyButtonVisible: latest.copyButtonVisible,
+  };
+}
 
-  if (result === 'attached') {
+function hasResponseStarted(
+  snapshot: ResponseSnapshot,
+  msgCountBefore: number,
+): boolean {
+  return snapshot.stopButtonVisible
+    || snapshot.messageCount > msgCountBefore
+    || snapshot.text.length > 0;
+}
+
+function snapshotChanged(
+  current: ResponseSnapshot,
+  previous: ResponseSnapshot,
+): boolean {
+  return current.text !== previous.text
+    || current.messageCount !== previous.messageCount
+    || current.stopButtonVisible !== previous.stopButtonVisible
+    || current.copyButtonVisible !== previous.copyButtonVisible;
+}
+
+function emitChunkIfChanged(
+  text: string,
+  lastEmittedText: string,
+  onChunk: ((text: string) => void) | undefined,
+): string {
+  if (onChunk && text.length > 0 && text !== lastEmittedText) {
+    onChunk(text);
+    return text;
+  }
+  return lastEmittedText;
+}
+
+function isCompletedSnapshot(
+  snapshot: ResponseSnapshot,
+  started: boolean,
+  sawStopButton: boolean,
+  lastTextChangeAt: number | undefined,
+  now: number,
+  settleDelayMs: number,
+): boolean {
+  if (snapshot.copyButtonVisible && snapshot.text.length > 0) {
     return true;
   }
 
-  // 'message' — assistant message appeared before stop button (Pro thinking).
-  // Wait for the stop button to appear; if it never does, time out.
-  const remaining = Math.max(deadline - Date.now(), 0);
-  if (remaining <= 0) {
+  const requiredSettleDelay = sawStopButton
+    ? settleDelayMs
+    : Math.max(settleDelayMs * 4, NO_STOP_SETTLE_DELAY_MS);
+
+  if (!sawStopButton) {
     return false;
   }
-  const stopOrTimeout = await awaitStopButton(stopBtn, remaining);
-  if (stopOrTimeout === 'stop') {
-    return true;
-  }
-  // timeout
-  return false;
+
+  return started
+    && snapshot.text.length > 0
+    && !snapshot.stopButtonVisible
+    && lastTextChangeAt !== undefined
+    && now - lastTextChangeAt >= requiredSettleDelay;
 }
 
-async function waitForStopButtonCycle(
-  page: Page,
-  stopBtn: Locator,
-  msgCountBefore: number,
-  deadline: number,
-  quiet: boolean,
-): Promise<boolean> {
-  while (Date.now() < deadline) {
-    const remaining = Math.max(deadline - Date.now(), 0);
-    try {
-      await stopBtn.waitFor({ state: 'detached', timeout: remaining });
-    } catch (error: unknown) {
-      if (!isTimeoutError(error)) {
-        throw error;
-      }
-      return false;
-    }
-
-    const responseText = await getResponseAfter(page, msgCountBefore);
-    if (responseText.length > 0) {
-      return true;
-    }
-
-    progress('Waiting for response to render...', quiet);
-    const nextSignal = await waitForStopButtonOrResponse(
-      page, stopBtn, msgCountBefore, deadline,
-    );
-    if (nextSignal === 'timeout') {
-      return false;
-    }
-    if (nextSignal === 'response') {
-      return true;
-    }
-    // nextSignal === 'stop-button' — loop back
-  }
-  return false;
-}
-
-async function raceStopButtonAndMessage(
-  page: Page,
-  stopBtn: Locator,
-  msgCountBefore: number,
-  timeout: number,
-): Promise<StopButtonResult> {
-  const deadline = Date.now() + timeout;
-  const race = { settled: false };
-
-  const stopPromise = stopBtn
-    .waitFor({ state: 'attached', timeout })
-    .then((): StopButtonResult => 'attached')
-    .catch((error: unknown): StopButtonResult => {
-      if (isTimeoutError(error)) {
-        return 'timeout';
-      }
-      throw error;
-    });
-
-  const messagePromise = (async (): Promise<StopButtonResult> => {
-    while (!race.settled && Date.now() < deadline) {
-      const count = await page
-        .locator(SELECTORS.ASSISTANT_MESSAGE)
-        .count();
-      if (count > msgCountBefore) {
-        return 'message';
-      }
-      await delay(POLL_INTERVAL_MS);
-    }
-    return 'timeout';
-  })();
-
-  try {
-    return await Promise.race([stopPromise, messagePromise]);
-  } finally {
-    race.settled = true;
-  }
-}
-
-async function waitForStopButtonOrResponse(
-  page: Page,
-  stopBtn: Locator,
-  msgCountBefore: number,
-  deadline: number,
-): Promise<'stop-button' | 'response' | 'timeout'> {
-  const race = { settled: false };
-
-  const remaining = Math.max(deadline - Date.now(), 0);
-  if (remaining <= 0) {
-    return 'timeout';
+function assertNotStalled(
+  started: boolean,
+  now: number,
+  lastActivityAt: number,
+  stallTimeoutMs: number,
+): void {
+  if (!started || now - lastActivityAt < stallTimeoutMs) {
+    return;
   }
 
-  const stopPromise = stopBtn
-    .waitFor({ state: 'attached', timeout: remaining })
-    .then((): 'stop-button' => 'stop-button')
-    .catch((error: unknown): 'timeout' => {
-      if (isTimeoutError(error)) {
-        return 'timeout';
-      }
-      throw error;
-    });
-
-  const responsePromise = (async (): Promise<'response' | 'timeout'> => {
-    while (!race.settled && Date.now() < deadline) {
-      const text = await getResponseAfter(page, msgCountBefore);
-      if (text.length > 0) {
-        return 'response';
-      }
-      await delay(POLL_INTERVAL_MS);
-    }
-    return 'timeout';
-  })();
-
-  try {
-    return await Promise.race([stopPromise, responsePromise]);
-  } finally {
-    race.settled = true;
-  }
-}
-
-async function awaitStopButton(
-  stopBtn: Locator,
-  timeout: number,
-): Promise<'stop' | 'timeout'> {
-  return stopBtn
-    .waitFor({ state: 'attached', timeout })
-    .then((): 'stop' => 'stop')
-    .catch((error: unknown): 'timeout' => {
-      if (isTimeoutError(error)) { return 'timeout'; }
-      throw error;
-    });
-}
-
-async function pollChunks(
-  page: Page,
-  isDone: () => boolean,
-  msgCountBefore: number,
-  quiet: boolean,
-  onChunk: (text: string) => void,
-): Promise<void> {
-  let lastText = '';
-
-  while (!isDone()) {
-    try {
-      const currentText = await getResponseAfter(page, msgCountBefore);
-      if (currentText && currentText !== lastText) {
-        lastText = currentText;
-        onChunk(currentText);
-      }
-    } catch (error: unknown) {
-      progress(`Poll error (transient): ${String(error)}`, quiet);
-    }
-
-    if (!isDone()) {
-      await delay(POLL_INTERVAL_MS);
-    }
-  }
+  throw new CavendishError(
+    `Response stalled for ${String(Math.round(stallTimeoutMs / 1000))}s after activity started.`,
+    'timeout',
+    'Retry the command. If the browser still shows progress, rerun with a higher --timeout.',
+  );
 }

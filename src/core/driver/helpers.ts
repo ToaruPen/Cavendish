@@ -2,10 +2,14 @@
  * Shared helper functions for ChatGPTDriver sub-modules.
  */
 
+import type { Locator, Page } from 'playwright-core';
 import { errors } from 'playwright-core';
+
+import { SELECTORS } from '../../constants/selectors.js';
 
 export const DEFAULT_TIMEOUT_MS = 2_400_000;
 export const POLL_INTERVAL_MS = 200;
+export const SEND_BUTTON_TIMEOUT_MS = 60_000;
 
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -15,6 +19,87 @@ export function delay(ms: number): Promise<void> {
 
 export function isTimeoutError(error: unknown): boolean {
   return error instanceof errors.TimeoutError;
+}
+
+interface ReadySendButton {
+  selector: string;
+  index: number;
+}
+
+function sendButtonSelectors(
+  preferredSelector?: string,
+): string[] {
+  const selectors = [
+    preferredSelector,
+    SELECTORS.SEND_BUTTON,
+    SELECTORS.SUBMIT_BUTTON,
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  return [...new Set(selectors)];
+}
+
+async function isReadySendButton(locator: Locator): Promise<boolean> {
+  const visible = await locator.isVisible().catch((): boolean => false);
+  if (!visible) {
+    return false;
+  }
+
+  return locator.evaluate((el) => {
+    const node = el as HTMLElement;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0
+      && rect.height > 0
+      && !el.hasAttribute('disabled')
+      && el.getAttribute('aria-disabled') !== 'true';
+  }).catch((): boolean => false);
+}
+
+export async function resolveReadySendButton(
+  page: Page,
+  preferredSelector?: string,
+): Promise<ReadySendButton | null> {
+  for (const selector of sendButtonSelectors(preferredSelector)) {
+    const matches = page.locator(selector);
+    const count = await matches.count().catch((): number => 0);
+
+    for (let index = 0; index < count; index++) {
+      if (await isReadySendButton(matches.nth(index))) {
+        return { selector, index };
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function waitForReadySendButton(
+  page: Page,
+  preferredSelector?: string,
+  timeoutMs: number = SEND_BUTTON_TIMEOUT_MS,
+): Promise<ReadySendButton> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const ready = await resolveReadySendButton(page, preferredSelector);
+    if (ready !== null) {
+      return ready;
+    }
+    await delay(POLL_INTERVAL_MS);
+  }
+
+  throw new errors.TimeoutError(
+    `No enabled send button became available within ${String(Math.round(timeoutMs / 1000))}s. `
+    + `Tried selectors: ${sendButtonSelectors(preferredSelector).join(', ')}`,
+  );
+}
+
+export async function clickReadySendButton(
+  page: Page,
+  preferredSelector?: string,
+  timeoutMs: number = SEND_BUTTON_TIMEOUT_MS,
+): Promise<void> {
+  const target = await waitForReadySendButton(page, preferredSelector, timeoutMs);
+  await page.locator(target.selector).nth(target.index).click();
 }
 
 /**

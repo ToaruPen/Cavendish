@@ -18,7 +18,7 @@ import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversation
 import type { ConversationItem, ConversationMessage, DeepResearchExportFormat, ProjectItem, WaitForResponseOptions, WaitForResponseResult } from './chatgpt-types.js';
 import { attachFiles as attachFilesImpl, attachGitHubRepo as attachGitHubRepoImpl, attachGoogleDriveFile as attachGoogleDriveFileImpl, enableAgentMode as enableAgentModeImpl } from './driver/attachments.js';
 import { copyDeepResearchContent as copyDRContent, exportDeepResearch as exportDR, getDeepResearchResponse as getDRResponse, navigateToDeepResearch as navToDR, refreshDeepResearch as refreshDR, sendDeepResearchFollowUp as sendDRFollowUp, sendDeepResearchMessage as sendDRMsg, waitForDeepResearchResponse as waitForDRResponse } from './driver/deep-research.js';
-import { delay, isTimeoutError, POLL_INTERVAL_MS } from './driver/helpers.js';
+import { clickReadySendButton, delay, isTimeoutError, POLL_INTERVAL_MS } from './driver/helpers.js';
 import { getAssistantMessageCount as getAssistantMsgCount, getLastResponse as getLastResp, waitForResponse as waitForResp } from './driver/response-handler.js';
 import { EFFORT_LABEL_CANDIDATES, MODEL_EFFORT_LEVELS, resolveModelCategory } from './model-config.js';
 import type { ThinkingEffortLevel } from './model-config.js';
@@ -494,7 +494,7 @@ export class ChatGPTDriver {
     await this.waitForReady();
     const input = this.page.locator(SELECTORS.PROMPT_INPUT);
     await input.fill(text);
-    await this.page.locator(SELECTORS.SUBMIT_BUTTON).click();
+    await clickReadySendButton(this.page, SELECTORS.SUBMIT_BUTTON);
   }
 
   async getAssistantMessageCount(): Promise<number> {
@@ -550,37 +550,17 @@ export class ChatGPTDriver {
   async readConversation(chatId: string, quiet = false): Promise<ConversationMessage[]> {
     await this.navigateToChat(chatId, quiet);
 
-    const messageSelector = `${SELECTORS.USER_MESSAGE}, ${SELECTORS.ASSISTANT_MESSAGE}`;
-    await this.page.locator(messageSelector).first().waitFor({
-      state: 'visible',
-      timeout: 10_000,
-    });
+    const typedSelector = `${SELECTORS.USER_MESSAGE}, ${SELECTORS.ASSISTANT_MESSAGE}`;
+    await this.waitForConversationMessages(typedSelector, quiet);
 
     progress('Reading conversation messages...', quiet);
+    const rawMessages = await this.extractConversationMessages();
 
-    const rawMessages = await this.page.evaluate(
-      ({ userSel, assistantSel }: { userSel: string; assistantSel: string }) => {
-        const allowedRoles = new Set(['user', 'assistant']);
-        const allElements = document.querySelectorAll(
-          `${userSel}, ${assistantSel}`,
-        );
-        const result: { role: 'user' | 'assistant'; content: string }[] = [];
-        for (const el of allElements) {
-          const role = el.getAttribute('data-message-author-role');
-          if (!role || !allowedRoles.has(role)) {
-            throw new Error(
-              `Unexpected data-message-author-role: "${String(role)}". Expected "user" or "assistant".`,
-            );
-          }
-          result.push({ role: role as 'user' | 'assistant', content: (el.textContent || '').trim() });
-        }
-        return result;
-      },
-      {
-        userSel: SELECTORS.USER_MESSAGE,
-        assistantSel: SELECTORS.ASSISTANT_MESSAGE,
-      },
-    );
+    if (rawMessages.length === 0) {
+      throw new Error(
+        `Conversation messages not found. Tried selectors: ${typedSelector}, ${SELECTORS.CONVERSATION_TURN}`,
+      );
+    }
 
     progress(`Read ${String(rawMessages.length)} message(s)`, quiet);
     return rawMessages;
@@ -609,6 +589,135 @@ export class ChatGPTDriver {
       throw error;
     }
     progress('Sidebar ready', quiet);
+  }
+
+  private async waitForConversationMessages(
+    typedSelector: string,
+    quiet: boolean,
+  ): Promise<void> {
+    const timeoutMs = 10_000;
+    try {
+      await this.page.locator(typedSelector).first().waitFor({
+        state: 'visible',
+        timeout: timeoutMs,
+      });
+      const rolesReady = await this.waitForTypedConversationRoles(timeoutMs);
+      if (rolesReady) {
+        return;
+      }
+    } catch (error: unknown) {
+      if (!isTimeoutError(error)) {
+        throw error;
+      }
+    }
+
+    await this.page.locator(SELECTORS.CONVERSATION_TURN).first().waitFor({
+      state: 'visible',
+      timeout: timeoutMs,
+    });
+    progress(
+      'Conversation role selectors were not found; using broad turn fallback.',
+      quiet,
+    );
+  }
+
+  private async waitForTypedConversationRoles(timeoutMs: number): Promise<boolean> {
+    const [userCount, assistantCount] = await Promise.all([
+      this.page.locator(SELECTORS.USER_MESSAGE).count(),
+      this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count(),
+    ]);
+    if (userCount > 0 || assistantCount > 0) {
+      return true;
+    }
+
+    return this.isConversationRoleVisible(SELECTORS.USER_MESSAGE, timeoutMs);
+  }
+
+  private async isConversationRoleVisible(
+    selector: string,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    try {
+      await this.page.locator(selector).first().waitFor({
+        state: 'visible',
+        timeout: timeoutMs,
+      });
+      return true;
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  private async extractConversationMessages(): Promise<ConversationMessage[]> {
+    return this.page.evaluate(
+      (
+        {
+          userSel,
+          assistantSel,
+          fallbackSel,
+          userBubbleSel,
+          roleNodeSel,
+        }: {
+          userSel: string;
+          assistantSel: string;
+          fallbackSel: string;
+          userBubbleSel: string;
+          roleNodeSel: string;
+        },
+      ): ConversationMessage[] => {
+        const typedMessages = document.querySelectorAll(`${userSel}, ${assistantSel}`);
+        if (typedMessages.length > 0) {
+          return Array.from(typedMessages)
+            .map((el): ConversationMessage => {
+              const role = el.getAttribute('data-message-author-role');
+              if (role !== 'user' && role !== 'assistant') {
+                throw new Error(
+                  `Unexpected data-message-author-role: "${String(role)}". Expected "user" or "assistant".`,
+                );
+              }
+
+              const bubble = role === 'user'
+                ? el.querySelector<HTMLElement>(userBubbleSel)
+                : null;
+              const content = bubble === null
+                ? (el.textContent || '').trim()
+                : bubble.textContent.trim();
+
+              return {
+                role,
+                content,
+              };
+            })
+            .filter((message) => message.content.length > 0);
+        }
+
+        return Array.from(document.querySelectorAll(fallbackSel))
+          .flatMap((el): ConversationMessage[] => {
+            const role = el.getAttribute('data-message-author-role')
+              ?? el.getAttribute('data-turn')
+              ?? el.querySelector(roleNodeSel)?.getAttribute('data-message-author-role');
+            if (role !== 'user' && role !== 'assistant') {
+              return [];
+            }
+
+            return [{
+              role,
+              content: el.textContent.trim(),
+            }];
+          })
+          .filter((message) => message.content.length > 0);
+      },
+      {
+        userSel: SELECTORS.USER_MESSAGE,
+        assistantSel: SELECTORS.ASSISTANT_MESSAGE,
+        fallbackSel: SELECTORS.CONVERSATION_TURN,
+        userBubbleSel: SELECTORS.USER_MESSAGE_BUBBLE_TEXT,
+        roleNodeSel: SELECTORS.MESSAGE_ROLE_NODE,
+      },
+    );
   }
 
   private async openConversationMenu(id: string, quiet = false): Promise<Locator> {

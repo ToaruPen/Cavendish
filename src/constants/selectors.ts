@@ -39,6 +39,18 @@ export const SELECTORS = {
   /** All user messages */
   USER_MESSAGE: '[data-message-author-role="user"]',
 
+  /** Text node inside the rendered user message bubble */
+  USER_MESSAGE_BUBBLE_TEXT: '.whitespace-pre-wrap',
+
+  /** Any descendant that explicitly exposes a message role */
+  MESSAGE_ROLE_NODE: '[data-message-author-role]',
+
+  /** Broad fallback for rendered conversation turns when role attributes drift */
+  CONVERSATION_TURN: 'main article',
+
+  /** Attachment tile still uploading (live DOM: remove button has cursor-wait) */
+  UPLOAD_IN_PROGRESS: '.group\\/file-tile button.cursor-wait',
+
   // ── Response completion ──────────────────────────────────
   /** Copy button that appears when the response is complete */
   COPY_BUTTON: '[data-testid="copy-turn-action-button"]',
