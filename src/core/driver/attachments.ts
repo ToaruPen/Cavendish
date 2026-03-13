@@ -10,7 +10,7 @@ import type { FrameLocator, Locator, Page } from 'playwright-core';
 import { MENU_LABELS, SELECTORS } from '../../constants/selectors.js';
 import { progress } from '../output-handler.js';
 
-import { delay, isTimeoutError } from './helpers.js';
+import { delay, isTimeoutError, SEND_BUTTON_TIMEOUT_MS, waitForReadySendButton } from './helpers.js';
 
 type OpenMenuFn = (labelPath: (string | string[])[], quiet?: boolean) => Promise<void>;
 
@@ -164,25 +164,15 @@ export async function waitForAttachmentTiles(
     { timeout: 10_000 },
   );
 
-  // Wait for upload completion: the submit button becomes enabled once all
-  // files finish uploading.  Without this, sendMessage() can fire before
-  // the server has processed the attachment, sending a prompt without the file.
-  // Check that the button is both visible AND not disabled.
+  // Wait for upload completion: ChatGPT has used multiple send-button variants
+  // in the composer, so accept any visible enabled send button.
   try {
-    await page.waitForFunction(
-      (selector: string) => {
-        const btn = document.querySelector(selector);
-        return btn !== null
-          && btn.getBoundingClientRect().height > 0
-          && !btn.hasAttribute('disabled');
-      },
-      sendButtonSelector,
-      { timeout: 30_000 },
-    );
+    await waitForReadySendButton(page, sendButtonSelector, SEND_BUTTON_TIMEOUT_MS);
   } catch (err: unknown) {
     if (isTimeoutError(err)) {
       throw new Error(
-        `Send button did not become enabled within 30s after file upload (selector: ${sendButtonSelector}). `
+        `Send button did not become enabled within ${String(Math.round(SEND_BUTTON_TIMEOUT_MS / 1000))}s after file upload. `
+        + `Tried selectors: ${sendButtonSelector}, ${SELECTORS.SEND_BUTTON}, ${SELECTORS.SUBMIT_BUTTON}. `
         + 'The file may still be uploading or the composer UI may have changed.',
       );
     }

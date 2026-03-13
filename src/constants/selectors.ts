@@ -39,6 +39,12 @@ export const SELECTORS = {
   /** All user messages */
   USER_MESSAGE: '[data-message-author-role="user"]',
 
+  /** Text node inside the rendered user message bubble */
+  USER_MESSAGE_BUBBLE_TEXT: '.whitespace-pre-wrap',
+
+  /** Broad fallback for rendered conversation turns when role attributes drift */
+  CONVERSATION_TURN: 'main article',
+
   // ── Response completion ──────────────────────────────────
   /** Copy button that appears when the response is complete */
   COPY_BUTTON: '[data-testid="copy-turn-action-button"]',

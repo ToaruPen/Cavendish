@@ -23,6 +23,10 @@ export interface ConversationMessage {
 export interface WaitForResponseOptions {
   /** Timeout in milliseconds (default: 2_400_000). */
   timeout?: number;
+  /** Fail if response activity stops for longer than this after it starts. */
+  stallTimeoutMs?: number;
+  /** Stable-text fallback used when the stop button never appears. */
+  settleDelayMs?: number;
   /** Called with cumulative response text as it streams in. */
   onChunk?: (text: string) => void;
   /** Suppress stderr progress messages. */
