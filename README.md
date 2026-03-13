@@ -130,6 +130,8 @@ cavendish deep-research --export pdf --exportPath ./report.pdf "Research topic"
 cavendish deep-research --stream "Research topic"
 ```
 
+> **Note**: Deep Research on broad or complex topics can exceed 30 minutes. If ChatGPT is still researching, rerun with a larger `--timeout`.
+
 ### Chat Management
 
 ```bash
