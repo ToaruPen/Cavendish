@@ -75,16 +75,16 @@ describe('waitForResponse()', () => {
     vi.clearAllMocks();
   });
 
-  it('completes when a response appears without ever showing the stop button', async () => {
+  it('completes when a copy button appears even if the stop button never shows', async () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const page = new FakePage([
       { text: '', count: 0, stopVisible: false, copyVisible: false },
       { text: 'Final answer', count: 1, stopVisible: false, copyVisible: false },
+      { text: 'Final answer', count: 1, stopVisible: false, copyVisible: true },
     ]) as unknown as Parameters<typeof waitForResponse>[0];
 
     const result = await waitForResponse(page, {
       timeout: 5_000,
-      settleDelayMs: 0,
       initialMsgCount: 0,
       quiet: true,
     });

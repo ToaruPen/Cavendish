@@ -97,6 +97,7 @@ async function monitorResponse(
     copyButtonVisible: false,
   };
   let started = false;
+  let sawStopButton = false;
   let lastActivityAt = Date.now();
   let lastTextChangeAt: number | undefined;
   let lastEmittedText = '';
@@ -104,6 +105,7 @@ async function monitorResponse(
   while (Date.now() < deadline) {
     const snapshot = await getResponseSnapshot(page, msgCountBefore);
     const now = Date.now();
+    sawStopButton = sawStopButton || snapshot.stopButtonVisible;
     if (hasResponseStarted(snapshot, msgCountBefore) && !started) {
       started = true;
       lastActivityAt = now;
@@ -119,7 +121,7 @@ async function monitorResponse(
       lastEmittedText = emitChunkIfChanged(snapshot.text, lastEmittedText, onChunk);
     }
 
-    if (isCompletedSnapshot(snapshot, started, lastTextChangeAt, now, settleDelayMs)) {
+    if (isCompletedSnapshot(snapshot, started, sawStopButton, lastTextChangeAt, now, settleDelayMs)) {
       return { text: snapshot.text, completed: true };
     }
 
@@ -214,6 +216,7 @@ function emitChunkIfChanged(
 function isCompletedSnapshot(
   snapshot: ResponseSnapshot,
   started: boolean,
+  sawStopButton: boolean,
   lastTextChangeAt: number | undefined,
   now: number,
   settleDelayMs: number,
@@ -223,6 +226,7 @@ function isCompletedSnapshot(
   }
 
   return started
+    && sawStopButton
     && snapshot.text.length > 0
     && !snapshot.stopButtonVisible
     && lastTextChangeAt !== undefined

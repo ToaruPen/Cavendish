@@ -96,7 +96,7 @@ export async function waitForReadySendButton(
 export async function clickReadySendButton(
   page: Page,
   preferredSelector?: string,
-  timeoutMs = 5_000,
+  timeoutMs: number = SEND_BUTTON_TIMEOUT_MS,
 ): Promise<void> {
   const target = await waitForReadySendButton(page, preferredSelector, timeoutMs);
   await page.locator(target.selector).nth(target.index).click();
