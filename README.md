@@ -26,6 +26,7 @@ cavendish deep-research --export pdf "State of WebAssembly in 2025"
 - **Chat management** — list, read, continue, archive, move, and delete conversations
 - **Agent mode** — enable ChatGPT's code execution and file operations
 - **Streaming output** — real-time NDJSON streaming for integration with other tools
+- **Detached jobs** — submit long-running work and collect completion later via job state and notifications
 - **Health diagnostics** — built-in `doctor` command to verify CDP, auth, and selectors
 - **Process safety** — exclusive lock prevents concurrent access; signal-safe cleanup
 - **CLI robustness** — unknown flag detection, structured exit codes, cross-platform support (macOS / Linux / Windows)
@@ -100,6 +101,9 @@ cavendish ask --model thinking --thinking-effort extended "Hard problem"
 # Streaming output (NDJSON)
 cavendish ask --stream "Your question here"
 
+# Detached background job
+cavendish ask --detach --notify-file ./cavendish-jobs.ndjson "Your question here"
+
 # JSON output with metadata (chatId, url, model, timeoutSec)
 cavendish ask --format json "Your question here"
 
@@ -128,6 +132,22 @@ cavendish deep-research --export pdf --exportPath ./report.pdf "Research topic"
 
 # Streaming output
 cavendish deep-research --stream "Research topic"
+
+# Detached background job
+cavendish deep-research --detach --notify-file ./cavendish-jobs.ndjson "Research topic"
+```
+
+### Detached Jobs
+
+```bash
+# List detached jobs
+cavendish jobs list
+
+# Inspect job status
+cavendish jobs status <job-id>
+
+# Wait for completion and print the final content
+cavendish jobs wait <job-id>
 ```
 
 ### Chat Management
@@ -166,6 +186,8 @@ cavendish status --json       # JSON output (same as doctor --json)
 |------|-------|-------------|
 | `--format text\|json` | ask, deep-research, list, read, projects | Output format (default: `json`) |
 | `--stream` | ask, deep-research | NDJSON streaming output |
+| `--detach` | ask, deep-research | Submit a background job and return immediately |
+| `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
 | `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: 120, Pro: 2400, DR: 1800) |
 | `--quiet` | all | Suppress progress output |
 | `--dry-run` | all | Validate args without executing |
@@ -177,6 +199,7 @@ cavendish status --json       # JSON output (same as doctor --json)
 ```text
 CLI (citty)
   -> ProcessLock (exclusive access via ~/.cavendish/cavendish.lock)
+  -> JobStore (detached job metadata under ~/.cavendish/jobs)
   -> BrowserManager (Chrome launch/connect via CDP, dynamic port)
     -> ChatGPTDriver (DOM operations)
       -> OutputHandler (text/json/ndjson to stdout)
@@ -217,6 +240,7 @@ src/
 │   ├── init.ts                 # init command
 │   ├── doctor.ts               # doctor command
 │   ├── status.ts               # status command
+│   ├── jobs.ts                 # detached job commands
 │   ├── list.ts                 # list command
 │   ├── read.ts                 # read command
 │   ├── delete.ts               # delete command
@@ -235,6 +259,7 @@ src/
 │   ├── model-config.ts         # Model classification and thinking effort
 │   ├── output-handler.ts       # Response formatting
 │   ├── process-lock.ts         # Atomic file-based process lock
+│   ├── jobs/                   # Detached job store, worker, notifications
 │   ├── shutdown.ts             # Signal handlers and cleanup callbacks
 │   ├── cli-args.ts             # Shared CLI argument definitions
 │   ├── doctor.ts               # Health check logic

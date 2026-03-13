@@ -9,6 +9,7 @@ import { deepResearchCommand } from './commands/deep-research.js';
 import { deleteCommand } from './commands/delete.js';
 import { doctorCommand } from './commands/doctor.js';
 import { initCommand } from './commands/init.js';
+import { jobsCommand } from './commands/jobs.js';
 import { listCommand } from './commands/list.js';
 import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
@@ -32,6 +33,7 @@ const main = defineCommand({
     delete: deleteCommand,
     doctor: doctorCommand,
     init: initCommand,
+    jobs: jobsCommand,
     list: listCommand,
     move: moveCommand,
     projects: projectsCommand,

@@ -13,6 +13,7 @@ let unregisterFns: ReturnType<typeof vi.fn>[];
 /* ---------- static mocks ---------- */
 
 vi.mock('../src/core/browser-manager.js', () => ({
+  CAVENDISH_DIR: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/cavendish',
   BrowserManager: vi.fn(() => ({
     getPage: vi.fn().mockResolvedValue({ url: (): string => 'https://chatgpt.com' }),
     closePage: vi.fn().mockResolvedValue(undefined),

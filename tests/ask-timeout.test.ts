@@ -5,6 +5,7 @@ let jsonMock: ReturnType<typeof vi.fn>;
 let textMock: ReturnType<typeof vi.fn>;
 
 vi.mock('../src/core/browser-manager.js', () => ({
+  CAVENDISH_DIR: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/cavendish',
   BrowserManager: vi.fn(() => ({
     getPage: vi.fn().mockResolvedValue({ url: (): string => 'https://chatgpt.com' }),
     closePage: vi.fn().mockResolvedValue(undefined),

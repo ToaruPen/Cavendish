@@ -1,0 +1,203 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const SAFE_CONTEXT_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/context.txt';
+const SAFE_JOB_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/job.json';
+const SAFE_EVENTS_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/events.ndjson';
+
+let jsonRawMock: ReturnType<typeof vi.fn>;
+let failValidationMock: ReturnType<typeof vi.fn>;
+let submitDetachedJobMock: ReturnType<typeof vi.fn>;
+
+vi.mock('../src/core/browser-manager.js', () => ({
+  BrowserManager: vi.fn(() => ({
+    getPage: vi.fn(),
+    closePage: vi.fn(),
+    close: vi.fn(),
+  })),
+}));
+
+vi.mock('../src/core/chatgpt-driver.js', () => ({
+  ChatGPTDriver: vi.fn(() => ({})),
+}));
+
+vi.mock('../src/core/cli-args.js', () => ({
+  FORMAT_ARG: {},
+  GLOBAL_ARGS: {},
+  STREAM_ARG: {},
+  buildPrompt: vi.fn((prompt: string): string => prompt),
+  extractArgsOrFail: vi.fn((flag: string) => (flag === 'gdrive' ? ['drive-doc'] : [])),
+  readStdin: vi.fn().mockReturnValue(''),
+  rejectUnknownFlags: vi.fn().mockReturnValue(true),
+  validateFileArgs: vi.fn().mockReturnValue([SAFE_CONTEXT_PATH]),
+}));
+
+vi.mock('../src/core/model-config.js', () => ({
+  allowedThinkingEfforts: vi.fn().mockReturnValue(['light', 'standard', 'extended', 'deep']),
+  supportsGitHub: vi.fn().mockReturnValue(true),
+  THINKING_EFFORT_LEVELS: ['light', 'standard', 'extended', 'deep'],
+}));
+
+vi.mock('../src/core/jobs/store.js', () => ({
+  getJobFilePath: vi.fn(() => SAFE_JOB_PATH),
+}));
+
+vi.mock('../src/core/jobs/submit.js', () => {
+  submitDetachedJobMock = vi.fn(() => ({
+    jobId: 'job-ask-1',
+    kind: 'ask',
+    status: 'queued',
+    submittedAt: '2026-03-14T00:00:00.000Z',
+    eventsPath: SAFE_EVENTS_PATH,
+  }));
+  return {
+    submitDetachedJob: submitDetachedJobMock,
+  };
+});
+
+vi.mock('../src/core/output-handler.js', () => {
+  jsonRawMock = vi.fn();
+  failValidationMock = vi.fn();
+  return {
+    emitChunk: vi.fn(),
+    emitFinal: vi.fn(),
+    errorMessage: vi.fn((e: unknown): string => (e instanceof Error ? e.message : String(e))),
+    failStructured: vi.fn(),
+    failValidation: failValidationMock,
+    json: vi.fn(),
+    jsonRaw: jsonRawMock,
+    progress: vi.fn(),
+    text: vi.fn(),
+    validateFormat: vi.fn().mockReturnValue('json'),
+    verbose: vi.fn(),
+  };
+});
+
+vi.mock('../src/core/process-lock.js', () => ({
+  acquireLock: vi.fn(),
+  releaseLock: vi.fn(),
+}));
+
+vi.mock('../src/core/shutdown.js', () => ({
+  registerCleanup: vi.fn(() => vi.fn()),
+}));
+
+vi.mock('../src/constants/selectors.js', () => ({
+  assertValidChatId: vi.fn(),
+}));
+
+interface DetachedRequest {
+  kind: string;
+  notifyFile?: string;
+  argv: string[];
+}
+
+interface SubmitPayload {
+  jobId: string;
+  kind: string;
+  status: string;
+  submittedAt: string;
+  jobPath: string;
+  eventsPath: string;
+  notifyFile?: string;
+}
+
+describe('ask --detach', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('submits a detached ask job and returns job metadata', async () => {
+    const { askCommand } = await import('../src/commands/ask.js');
+    const run = askCommand.run;
+    if (run === undefined) {
+      throw new Error('askCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'hello',
+        model: 'Pro',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+        continue: false,
+        agent: true,
+        detach: true,
+        notifyFile: './notify.ndjson',
+        thinkingEffort: 'standard',
+        github: 'owner/repo',
+      } as never,
+      rawArgs: [],
+      cmd: askCommand,
+    });
+
+    expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    const request = submitDetachedJobMock.mock.calls[0]?.[0] as DetachedRequest | undefined;
+    expect(request).toBeDefined();
+    if (request === undefined) {
+      throw new Error('Detached ask request was not captured');
+    }
+    expect(request.kind).toBe('ask');
+    expect(request.notifyFile).toMatch(/notify\.ndjson$/);
+    expect(request.argv).toEqual([
+      'ask',
+      'hello',
+      '--model',
+      'Pro',
+      '--timeout',
+      '2400',
+      '--file',
+      SAFE_CONTEXT_PATH,
+      '--gdrive',
+      'drive-doc',
+      '--agent',
+      '--thinking-effort',
+      'standard',
+    ]);
+
+    const payload = jsonRawMock.mock.calls[0]?.[0] as SubmitPayload | undefined;
+    expect(payload).toBeDefined();
+    if (payload === undefined) {
+      throw new Error('Detached ask payload was not emitted');
+    }
+    expect(payload.jobId).toBe('job-ask-1');
+    expect(payload.kind).toBe('ask');
+    expect(payload.status).toBe('queued');
+    expect(payload.submittedAt).toBe('2026-03-14T00:00:00.000Z');
+    expect(payload.jobPath).toBe(SAFE_JOB_PATH);
+    expect(payload.eventsPath).toBe(SAFE_EVENTS_PATH);
+    expect(payload.notifyFile).toMatch(/notify\.ndjson$/);
+  });
+
+  it('rejects --stream together with --detach', async () => {
+    const { askCommand } = await import('../src/commands/ask.js');
+    const run = askCommand.run;
+    if (run === undefined) {
+      throw new Error('askCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'hello',
+        model: 'Pro',
+        quiet: false,
+        verbose: false,
+        stream: true,
+        dryRun: false,
+        format: 'json',
+        continue: false,
+        agent: false,
+        detach: true,
+      } as never,
+      rawArgs: [],
+      cmd: askCommand,
+    });
+
+    expect(failValidationMock).toHaveBeenCalledWith('--stream cannot be used with --detach', 'json');
+    expect(submitDetachedJobMock).not.toHaveBeenCalled();
+  });
+});
