@@ -595,24 +595,51 @@ export class ChatGPTDriver {
     typedSelector: string,
     quiet: boolean,
   ): Promise<void> {
+    const timeoutMs = 10_000;
     try {
       await this.page.locator(typedSelector).first().waitFor({
         state: 'visible',
-        timeout: 10_000,
+        timeout: timeoutMs,
       });
+      const rolesReady = await this.waitForTypedConversationRoles(timeoutMs);
+      if (rolesReady) {
+        return;
+      }
     } catch (error: unknown) {
       if (!isTimeoutError(error)) {
         throw error;
       }
+    }
 
-      await this.page.locator(SELECTORS.CONVERSATION_TURN).first().waitFor({
+    await this.page.locator(SELECTORS.CONVERSATION_TURN).first().waitFor({
+      state: 'visible',
+      timeout: timeoutMs,
+    });
+    progress(
+      'Conversation role selectors were not found; using broad turn fallback.',
+      quiet,
+    );
+  }
+
+  private async waitForTypedConversationRoles(timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    try {
+      await this.page.locator(SELECTORS.USER_MESSAGE).first().waitFor({
         state: 'visible',
-        timeout: 10_000,
+        timeout: timeoutMs,
       });
-      progress(
-        'Conversation role selectors were not found; using broad turn fallback.',
-        quiet,
-      );
+
+      const remaining = Math.max(deadline - Date.now(), 0);
+      await this.page.locator(SELECTORS.ASSISTANT_MESSAGE).first().waitFor({
+        state: 'visible',
+        timeout: remaining,
+      });
+      return true;
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        return false;
+      }
+      throw error;
     }
   }
 
@@ -624,15 +651,19 @@ export class ChatGPTDriver {
           assistantSel,
           fallbackSel,
           userBubbleSel,
+          roleNodeSel,
         }: {
           userSel: string;
           assistantSel: string;
           fallbackSel: string;
           userBubbleSel: string;
+          roleNodeSel: string;
         },
       ): ConversationMessage[] => {
-        const typedMessages = document.querySelectorAll(`${userSel}, ${assistantSel}`);
-        if (typedMessages.length > 0) {
+        const userMessages = document.querySelectorAll(userSel);
+        const assistantMessages = document.querySelectorAll(assistantSel);
+        if (userMessages.length > 0 && assistantMessages.length > 0) {
+          const typedMessages = document.querySelectorAll(`${userSel}, ${assistantSel}`);
           return Array.from(typedMessages)
             .map((el): ConversationMessage => {
               const role = el.getAttribute('data-message-author-role');
@@ -658,10 +689,21 @@ export class ChatGPTDriver {
         }
 
         return Array.from(document.querySelectorAll(fallbackSel))
-          .map((el, index): ConversationMessage => ({
-            role: index % 2 === 0 ? 'user' : 'assistant',
-            content: (el.textContent || '').trim(),
-          }))
+          .map((el): ConversationMessage => {
+            const role = el.getAttribute('data-message-author-role')
+              ?? el.getAttribute('data-turn')
+              ?? el.querySelector(roleNodeSel)?.getAttribute('data-message-author-role');
+            if (role !== 'user' && role !== 'assistant') {
+              throw new Error(
+                `Explicit conversation role not found in fallback selector "${fallbackSel}".`,
+              );
+            }
+
+            return {
+              role,
+              content: el.textContent.trim(),
+            };
+          })
           .filter((message) => message.content.length > 0);
       },
       {
@@ -669,6 +711,7 @@ export class ChatGPTDriver {
         assistantSel: SELECTORS.ASSISTANT_MESSAGE,
         fallbackSel: SELECTORS.CONVERSATION_TURN,
         userBubbleSel: SELECTORS.USER_MESSAGE_BUBBLE_TEXT,
+        roleNodeSel: SELECTORS.MESSAGE_ROLE_NODE,
       },
     );
   }

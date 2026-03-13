@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SELECTORS } from '../src/constants/selectors.js';
+
 vi.mock('../src/core/driver/helpers.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../src/core/driver/helpers.js')>();
   return {
@@ -49,10 +51,10 @@ class FakePage {
   }
 
   locator(selector: string): FakeCountLocator {
-    if (selector === '[data-message-author-role="assistant"]') {
+    if (selector === SELECTORS.ASSISTANT_MESSAGE) {
       return new FakeCountLocator(this.sequence, this.indexRef);
     }
-    if (selector === '[data-testid="stop-button"]') {
+    if (selector === SELECTORS.STOP_BUTTON) {
       return new FakeCountLocator(this.sequence, this.indexRef);
     }
     throw new Error(`Unexpected selector: ${selector}`);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { SELECTORS } from '../src/constants/selectors.js';
 import { clickReadySendButton, resolveReadySendButton } from '../src/core/driver/helpers.js';
 
 interface FakeButtonState {
@@ -77,40 +78,40 @@ class FakePage {
 describe('send button helpers', () => {
   it('prefers the enabled data-testid send button when the legacy button is disabled', async () => {
     const page = new FakePage({
-      '[data-testid="send-button"]': [{ visible: true }],
-      '.composer-submit-button-color': [{ visible: true, disabled: true }],
+      [SELECTORS.SEND_BUTTON]: [{ visible: true }],
+      [SELECTORS.SUBMIT_BUTTON]: [{ visible: true, disabled: true }],
     }) as unknown as Parameters<typeof resolveReadySendButton>[0];
 
-    const result = await resolveReadySendButton(page, '.composer-submit-button-color');
+    const result = await resolveReadySendButton(page, SELECTORS.SUBMIT_BUTTON);
 
     expect(result).toEqual({
-      selector: '[data-testid="send-button"]',
+      selector: SELECTORS.SEND_BUTTON,
       index: 0,
     });
   });
 
   it('treats aria-disabled buttons as not ready', async () => {
     const page = new FakePage({
-      '[data-testid="send-button"]': [{ visible: true, ariaDisabled: true }],
-      '.composer-submit-button-color': [{ visible: true }],
+      [SELECTORS.SEND_BUTTON]: [{ visible: true, ariaDisabled: true }],
+      [SELECTORS.SUBMIT_BUTTON]: [{ visible: true }],
     }) as unknown as Parameters<typeof resolveReadySendButton>[0];
 
-    const result = await resolveReadySendButton(page, '[data-testid="send-button"]');
+    const result = await resolveReadySendButton(page, SELECTORS.SEND_BUTTON);
 
     expect(result).toEqual({
-      selector: '.composer-submit-button-color',
+      selector: SELECTORS.SUBMIT_BUTTON,
       index: 0,
     });
   });
 
   it('clicks the resolved ready button', async () => {
     const states: Record<string, FakeButtonState[]> = {
-      '[data-testid="send-button"]': [{ visible: true }],
+      [SELECTORS.SEND_BUTTON]: [{ visible: true }],
     };
     const page = new FakePage(states) as unknown as Parameters<typeof clickReadySendButton>[0];
 
-    await clickReadySendButton(page, '.composer-submit-button-color');
+    await clickReadySendButton(page, SELECTORS.SUBMIT_BUTTON);
 
-    expect(states['[data-testid="send-button"]'][0].clicked).toBe(true);
+    expect(states[SELECTORS.SEND_BUTTON][0].clicked).toBe(true);
   });
 });

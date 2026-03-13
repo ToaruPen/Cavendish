@@ -125,7 +125,7 @@ async function monitorResponse(
       return { text: snapshot.text, completed: true };
     }
 
-    assertNotStalled(started, now, lastActivityAt, stallTimeoutMs);
+    assertNotStalled(started, snapshot.stopButtonVisible, now, lastActivityAt, stallTimeoutMs);
 
     lastSnapshot = snapshot;
     await delay(POLL_INTERVAL_MS);
@@ -235,11 +235,12 @@ function isCompletedSnapshot(
 
 function assertNotStalled(
   started: boolean,
+  stopButtonVisible: boolean,
   now: number,
   lastActivityAt: number,
   stallTimeoutMs: number,
 ): void {
-  if (!started || now - lastActivityAt < stallTimeoutMs) {
+  if (!started || stopButtonVisible || now - lastActivityAt < stallTimeoutMs) {
     return;
   }
 

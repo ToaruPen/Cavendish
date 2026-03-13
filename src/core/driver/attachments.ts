@@ -168,11 +168,17 @@ export async function waitForAttachmentTiles(
   // in the composer, so accept any visible enabled send button.
   try {
     await waitForReadySendButton(page, sendButtonSelector, SEND_BUTTON_TIMEOUT_MS);
+    await page.waitForFunction(
+      (selector: string) => document.querySelectorAll(selector).length === 0,
+      SELECTORS.UPLOAD_IN_PROGRESS,
+      { timeout: SEND_BUTTON_TIMEOUT_MS },
+    );
   } catch (err: unknown) {
     if (isTimeoutError(err)) {
       throw new Error(
         `Send button did not become enabled within ${String(Math.round(SEND_BUTTON_TIMEOUT_MS / 1000))}s after file upload. `
         + `Tried selectors: ${sendButtonSelector}, ${SELECTORS.SEND_BUTTON}, ${SELECTORS.SUBMIT_BUTTON}. `
+        + `Pending upload selector: ${SELECTORS.UPLOAD_IN_PROGRESS}. `
         + 'The file may still be uploading or the composer UI may have changed.',
       );
     }
