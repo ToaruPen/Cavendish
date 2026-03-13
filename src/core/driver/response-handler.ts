@@ -13,8 +13,8 @@ import { progress } from '../output-handler.js';
 import { DEFAULT_TIMEOUT_MS, delay, POLL_INTERVAL_MS } from './helpers.js';
 
 const DEFAULT_SETTLE_DELAY_MS = 1_500;
-const MAX_STALL_TIMEOUT_MS = 90_000;
 const MIN_STALL_TIMEOUT_MS = 15_000;
+const NO_STOP_SETTLE_DELAY_MS = 5_000;
 
 interface ResponseSnapshot {
   text: string;
@@ -75,7 +75,7 @@ export async function getAssistantMessageCount(page: Page): Promise<number> {
 
 function resolveStallTimeout(timeout: number): number {
   return Math.min(
-    MAX_STALL_TIMEOUT_MS,
+    timeout,
     Math.max(MIN_STALL_TIMEOUT_MS, Math.floor(timeout / 4)),
   );
 }
@@ -225,12 +225,15 @@ function isCompletedSnapshot(
     return true;
   }
 
+  const requiredSettleDelay = sawStopButton
+    ? settleDelayMs
+    : Math.max(settleDelayMs * 4, NO_STOP_SETTLE_DELAY_MS);
+
   return started
-    && sawStopButton
     && snapshot.text.length > 0
     && !snapshot.stopButtonVisible
     && lastTextChangeAt !== undefined
-    && now - lastTextChangeAt >= settleDelayMs;
+    && now - lastTextChangeAt >= requiredSettleDelay;
 }
 
 function assertNotStalled(

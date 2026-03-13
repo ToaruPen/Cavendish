@@ -96,4 +96,35 @@ describe('waitForResponse()', () => {
       completed: true,
     });
   });
+
+  it('completes after a longer stable period when no stop or copy button is present', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const now = vi.spyOn(Date, 'now');
+    let tick = 0;
+    now.mockImplementation(() => {
+      tick += 3_000;
+      return tick;
+    });
+
+    try {
+      const page = new FakePage([
+        { text: '', count: 0, stopVisible: false, copyVisible: false },
+        { text: 'Final answer', count: 1, stopVisible: false, copyVisible: false },
+        { text: 'Final answer', count: 1, stopVisible: false, copyVisible: false },
+      ]) as unknown as Parameters<typeof waitForResponse>[0];
+
+      const result = await waitForResponse(page, {
+        timeout: 30_000,
+        initialMsgCount: 0,
+        quiet: true,
+      });
+
+      expect(result).toEqual({
+        text: 'Final answer',
+        completed: true,
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
 });
