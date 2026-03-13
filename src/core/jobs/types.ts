@@ -14,6 +14,7 @@ export type JobStatus =
 export interface DetachedJobRequest {
   kind: JobKind;
   argv: string[];
+  stdinData?: string;
   notifyFile?: string;
 }
 
@@ -22,6 +23,7 @@ export interface JobRecord {
   kind: JobKind;
   status: JobStatus;
   argv: string[];
+  stdinData?: string;
   notifyFile?: string;
   submittedAt: string;
   updatedAt: string;

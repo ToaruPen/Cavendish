@@ -1,5 +1,3 @@
-import { resolve } from 'node:path';
-
 import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
@@ -7,10 +5,11 @@ import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
+import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
-import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, jsonRaw, progress, text, validateFormat, verbose } from '../core/output-handler.js';
+import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { acquireLock, releaseLock } from '../core/process-lock.js';
 import { registerCleanup } from '../core/shutdown.js';
 
@@ -111,26 +110,6 @@ interface ValidatedArgs {
   project: string | undefined;
   detach: boolean;
   notifyFile: string | undefined;
-}
-
-function validateDetachedOptions(
-  args: Record<string, unknown>,
-  format: 'json' | 'text',
-  stream: boolean,
-): { detach: boolean; notifyFile: string | undefined } | undefined {
-  const detach = args.detach === true;
-  if (stream && detach) {
-    failValidation('--stream cannot be used with --detach', format);
-    return undefined;
-  }
-  const notifyFile = typeof args.notifyFile === 'string' && args.notifyFile.length > 0
-    ? resolve(args.notifyFile)
-    : undefined;
-  if (args.notifyFile !== undefined && notifyFile === undefined) {
-    failValidation('--notify-file cannot be empty. Use: --notify-file <path>', format);
-    return undefined;
-  }
-  return { detach, notifyFile };
 }
 
 /**
@@ -305,7 +284,7 @@ function dryRunMessage(v: ValidatedArgs): string {
 }
 
 function buildAskJobArgv(validated: ValidatedArgs): string[] {
-  const argv = ['ask', validated.prompt, '--model', validated.model, '--timeout', String(validated.timeoutSec)];
+  const argv = ['ask', '--model', validated.model, '--timeout', String(validated.timeoutSec)];
   if (validated.continueChat) {
     argv.push('--continue');
   }
@@ -333,18 +312,11 @@ function buildAskJobArgv(validated: ValidatedArgs): string[] {
   return argv;
 }
 
-function submitDetachedAskJob(validated: ValidatedArgs): {
-  jobId: string;
-  status: string;
-  kind: string;
-  submittedAt: string;
-  jobPath: string;
-  eventsPath: string;
-  notifyFile?: string;
-} {
+function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
   const record = submitDetachedJob({
     kind: 'ask',
     argv: buildAskJobArgv(validated),
+    stdinData: validated.prompt,
     notifyFile: validated.notifyFile,
   });
   return {
@@ -356,35 +328,6 @@ function submitDetachedAskJob(validated: ValidatedArgs): {
     eventsPath: record.eventsPath,
     notifyFile: validated.notifyFile,
   };
-}
-
-function writeDetachedSubmit(
-  payload: {
-    jobId: string;
-    status: string;
-    kind: string;
-    submittedAt: string;
-    jobPath: string;
-    eventsPath: string;
-    notifyFile?: string;
-  },
-  format: 'json' | 'text',
-): void {
-  if (format === 'text') {
-    const lines = [
-      `jobId: ${payload.jobId}`,
-      `kind: ${payload.kind}`,
-      `status: ${payload.status}`,
-      `jobPath: ${payload.jobPath}`,
-      `eventsPath: ${payload.eventsPath}`,
-    ];
-    if (payload.notifyFile !== undefined) {
-      lines.push(`notifyFile: ${payload.notifyFile}`);
-    }
-    text(lines.join('\n'));
-    return;
-  }
-  jsonRaw(payload);
 }
 
 function handleDryRunOrDetach(

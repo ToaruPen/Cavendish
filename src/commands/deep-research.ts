@@ -5,9 +5,10 @@ import { defineCommand } from 'citty';
 import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
-import { emitFinal, emitState, errorMessage, failValidation, json, jsonRaw, progress, text, validateFormat, verbose } from '../core/output-handler.js';
+import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
@@ -84,26 +85,6 @@ interface ValidatedArgs {
   exportPath: string | undefined;
   detach: boolean;
   notifyFile: string | undefined;
-}
-
-function validateDetachedOptions(
-  args: Record<string, unknown>,
-  format: 'json' | 'text',
-  stream: boolean,
-): { detach: boolean; notifyFile: string | undefined } | undefined {
-  const detach = args.detach === true;
-  if (stream && detach) {
-    failValidation('--stream cannot be used with --detach', format);
-    return undefined;
-  }
-  const notifyFile = typeof args.notifyFile === 'string' && args.notifyFile.length > 0
-    ? resolve(args.notifyFile)
-    : undefined;
-  if (args.notifyFile !== undefined && notifyFile === undefined) {
-    failValidation('--notify-file cannot be empty. Use: --notify-file <path>', format);
-    return undefined;
-  }
-  return { detach, notifyFile };
 }
 
 function validateTimeout(raw: unknown, format: 'json' | 'text'): number | undefined {
@@ -256,9 +237,8 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
   if (v.mode.kind === 'refresh') {
     argv.push('--chat', v.mode.chatId, '--refresh');
   } else if (v.mode.kind === 'followup') {
-    argv.push('--chat', v.mode.chatId, v.mode.prompt);
+    argv.push('--chat', v.mode.chatId);
   } else {
-    argv.push(v.mode.prompt);
     for (const filePath of v.mode.filePaths) {
       argv.push('--file', filePath);
     }
@@ -272,18 +252,11 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
   return argv;
 }
 
-function submitDetachedDeepResearchJob(v: ValidatedArgs): {
-  jobId: string;
-  status: string;
-  kind: string;
-  submittedAt: string;
-  jobPath: string;
-  eventsPath: string;
-  notifyFile?: string;
-} {
+function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload {
   const record = submitDetachedJob({
     kind: 'deep-research',
     argv: buildDeepResearchJobArgv(v),
+    stdinData: v.mode.kind === 'refresh' ? undefined : v.mode.prompt,
     notifyFile: v.notifyFile,
   });
   return {
@@ -295,35 +268,6 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): {
     eventsPath: record.eventsPath,
     notifyFile: v.notifyFile,
   };
-}
-
-function writeDetachedSubmit(
-  payload: {
-    jobId: string;
-    status: string;
-    kind: string;
-    submittedAt: string;
-    jobPath: string;
-    eventsPath: string;
-    notifyFile?: string;
-  },
-  format: 'json' | 'text',
-): void {
-  if (format === 'text') {
-    const lines = [
-      `jobId: ${payload.jobId}`,
-      `kind: ${payload.kind}`,
-      `status: ${payload.status}`,
-      `jobPath: ${payload.jobPath}`,
-      `eventsPath: ${payload.eventsPath}`,
-    ];
-    if (payload.notifyFile !== undefined) {
-      lines.push(`notifyFile: ${payload.notifyFile}`);
-    }
-    text(lines.join('\n'));
-    return;
-  }
-  jsonRaw(payload);
 }
 
 function dryRunMessage(v: ValidatedArgs): string {

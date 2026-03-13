@@ -54,12 +54,13 @@ vi.mock('../src/core/with-driver.js', () => ({
   withDriver: vi.fn(),
 }));
 
-vi.mock('../src/constants/selectors.js', () => ({
-  assertValidChatId: vi.fn(),
-  SELECTORS: {
-    SEND_BUTTON: '[data-testid="send-button"]',
-  },
-}));
+vi.mock('../src/constants/selectors.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/constants/selectors.js')>('../src/constants/selectors.js');
+  return {
+    ...actual,
+    assertValidChatId: vi.fn(),
+  };
+});
 
 interface DetachedRequest {
   kind: string;
@@ -119,7 +120,6 @@ describe('deep-research --detach', () => {
       'deep-research',
       '--timeout',
       '1800',
-      'research topic',
       '--file',
       SAFE_RESEARCH_PATH,
       '--export',

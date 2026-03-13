@@ -60,7 +60,11 @@ async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exc
   while (Date.now() < deadline) {
     const job = readJob(jobId);
     if (job === undefined) {
-      throw new Error(`Job not found: ${jobId}`);
+      throw new CavendishError(
+        `Job not found: ${jobId}`,
+        'unknown',
+        'Run `cavendish jobs` to list valid job IDs.',
+      );
     }
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
@@ -69,7 +73,11 @@ async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exc
       setTimeout(resolve, 200);
     });
   }
-  throw new Error(`Timed out waiting for job ${jobId}`);
+  throw new CavendishError(
+    `Timed out waiting for job ${jobId}`,
+    'timeout',
+    `Increase --timeout and retry waiting for job ${jobId}.`,
+  );
 }
 
 const listCommand = defineCommand({
@@ -86,10 +94,10 @@ const listCommand = defineCommand({
   },
 });
 
-const statusCommand = defineCommand({
+const readCommand = defineCommand({
   meta: {
-    name: 'status',
-    description: 'Show detached job status',
+    name: 'read',
+    description: 'Read detached job metadata',
   },
   args: JOB_ID_ARGS,
   run({ args }): void {
@@ -106,6 +114,17 @@ const statusCommand = defineCommand({
       return;
     }
     text(formatJobText(job.jobId, job.kind, job.status));
+  },
+});
+
+const statusCommand = defineCommand({
+  meta: {
+    name: 'status',
+    description: 'Show detached job status',
+  },
+  args: JOB_ID_ARGS,
+  run({ args }): void {
+    readCommand.run?.({ args, rawArgs: [], cmd: readCommand });
   },
 });
 
@@ -176,6 +195,7 @@ const runWorkerCommand = defineCommand({
   },
   args: RUN_WORKER_ARGS,
   async run({ args }): Promise<void> {
+    if (!rejectUnknownFlags(RUN_WORKER_ARGS)) { return; }
     await runJobWorkerOrExit(args.jobId);
   },
 });
@@ -188,6 +208,7 @@ export const jobsCommand = defineCommand({
   args: JOBS_ARGS,
   subCommands: {
     list: listCommand,
+    read: readCommand,
     status: statusCommand,
     wait: waitCommand,
     'run-worker': runWorkerCommand,

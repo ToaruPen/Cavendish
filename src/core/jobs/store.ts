@@ -57,6 +57,7 @@ export function createJob(request: DetachedJobRequest): JobRecord {
     kind: request.kind,
     status: 'queued',
     argv: request.argv,
+    stdinData: request.stdinData,
     notifyFile: request.notifyFile,
     submittedAt,
     updatedAt: submittedAt,
@@ -90,12 +91,22 @@ export function updateJob(
   return next;
 }
 
+function readJsonFile(path: string, label: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[cavendish:jobs] failed to parse ${label} at "${path}": ${message}\n`);
+    return undefined;
+  }
+}
+
 export function readJob(jobId: string): JobRecord | undefined {
   const path = getJobFilePath(jobId);
   if (!existsSync(path)) {
     return undefined;
   }
-  return JSON.parse(readFileSync(path, 'utf8')) as JobRecord;
+  return readJsonFile(path, `job ${jobId}`) as JobRecord | undefined;
 }
 
 export function listJobs(): JobRecord[] {
@@ -123,7 +134,7 @@ export function readJobResult(jobId: string): JobResultRecord | undefined {
   if (!existsSync(path)) {
     return undefined;
   }
-  return JSON.parse(readFileSync(path, 'utf8')) as JobResultRecord;
+  return readJsonFile(path, `job result ${jobId}`) as JobResultRecord | undefined;
 }
 
 export function writeJobError(jobId: string, error: StructuredErrorPayload): void {
@@ -135,5 +146,5 @@ export function readJobError(jobId: string): StructuredErrorPayload | undefined 
   if (!existsSync(path)) {
     return undefined;
   }
-  return JSON.parse(readFileSync(path, 'utf8')) as StructuredErrorPayload;
+  return readJsonFile(path, `job error ${jobId}`) as StructuredErrorPayload | undefined;
 }

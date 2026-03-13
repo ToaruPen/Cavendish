@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let failStructuredMock: ReturnType<typeof vi.fn>;
@@ -5,7 +7,7 @@ let jsonMock: ReturnType<typeof vi.fn>;
 let textMock: ReturnType<typeof vi.fn>;
 
 vi.mock('../src/core/browser-manager.js', () => ({
-  CAVENDISH_DIR: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/cavendish',
+  CAVENDISH_DIR: join(process.cwd(), '.tmp-tests', 'cavendish'),
   BrowserManager: vi.fn(() => ({
     getPage: vi.fn().mockResolvedValue({ url: (): string => 'https://chatgpt.com' }),
     closePage: vi.fn().mockResolvedValue(undefined),

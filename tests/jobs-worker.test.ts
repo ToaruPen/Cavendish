@@ -13,7 +13,12 @@ function makeChild(
   stderrLines: string[],
   exitCode: number,
 ): EventEmitter & { stdout: PassThrough; stderr: PassThrough } {
-  const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+  };
+  child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   queueMicrotask(() => {

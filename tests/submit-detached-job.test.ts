@@ -12,6 +12,7 @@ let writeJobErrorMock: ReturnType<typeof vi.fn>;
 vi.mock('node:child_process', () => {
   unrefMock = vi.fn();
   spawnMock = vi.fn(() => ({
+    once: vi.fn(),
     unref: unrefMock,
   }));
   return {
@@ -47,12 +48,14 @@ describe('submitDetachedJob', () => {
       const record: { jobId: string; kind: string } = submitDetachedJob({
         kind: 'ask',
         argv: ['ask', 'hello'],
+        stdinData: 'hello from stdin',
         notifyFile: NOTIFY_FILE,
       });
 
       expect(createJobMock).toHaveBeenCalledWith({
         kind: 'ask',
         argv: ['ask', 'hello'],
+        stdinData: 'hello from stdin',
         notifyFile: NOTIFY_FILE,
       });
       const spawnCalls = spawnMock.mock.calls as [

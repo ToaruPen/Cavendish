@@ -144,7 +144,6 @@ describe('ask --detach', () => {
     expect(request.notifyFile).toMatch(/notify\.ndjson$/);
     expect(request.argv).toEqual([
       'ask',
-      'hello',
       '--model',
       'Pro',
       '--timeout',
@@ -157,6 +156,9 @@ describe('ask --detach', () => {
       '--thinking-effort',
       'standard',
     ]);
+    expect(submitDetachedJobMock).toHaveBeenCalledWith(expect.objectContaining({
+      stdinData: 'hello',
+    }));
 
     const payload = jsonRawMock.mock.calls[0]?.[0] as SubmitPayload | undefined;
     expect(payload).toBeDefined();

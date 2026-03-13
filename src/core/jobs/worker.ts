@@ -81,12 +81,13 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
   structuredError?: StructuredErrorPayload;
 }> {
   const child = spawn(process.execPath, [resolveCliEntrypoint(), ...buildWorkerArgs(job)], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
       CAVENDISH_ALLOW_PARTIAL: '1',
     },
   });
+  child.stdin.end(job.stdinData ?? '');
 
   let finalEvent: NdjsonEvent | undefined;
   let structuredError: StructuredErrorPayload | undefined;

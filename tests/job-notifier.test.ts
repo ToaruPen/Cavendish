@@ -46,5 +46,7 @@ describe('notifyJobCompletion', () => {
       url: 'https://chatgpt.com/c/chat-1',
       partial: false,
     });
+    expect(typeof payload.timestamp).toBe('string');
+    expect(Number.isNaN(Date.parse(String(payload.timestamp)))).toBe(false);
   });
 });
