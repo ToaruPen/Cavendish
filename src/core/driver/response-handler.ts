@@ -8,7 +8,7 @@ import type { Page } from 'playwright-core';
 import { SELECTORS } from '../../constants/selectors.js';
 import type { WaitForResponseOptions, WaitForResponseResult } from '../chatgpt-types.js';
 import { CavendishError } from '../errors.js';
-import { progress } from '../output-handler.js';
+import { errorMessage, progress } from '../output-handler.js';
 
 import { DEFAULT_TIMEOUT_MS, delay, POLL_INTERVAL_MS } from './helpers.js';
 
@@ -138,9 +138,14 @@ async function getResponseSnapshot(
   page: Page,
   previousCount: number,
 ): Promise<ResponseSnapshot> {
-  const stopButtonVisible = await page.locator(SELECTORS.STOP_BUTTON)
-    .isVisible()
-    .catch((): boolean => false);
+  let stopButtonVisible: boolean;
+  try {
+    stopButtonVisible = await page.locator(SELECTORS.STOP_BUTTON).isVisible();
+  } catch (error: unknown) {
+    throw new Error(
+      `Failed to inspect stop button visibility (selector: ${SELECTORS.STOP_BUTTON}): ${errorMessage(error)}`,
+    );
+  }
   const messageCount = await page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
 
   const latest = await page.evaluate(

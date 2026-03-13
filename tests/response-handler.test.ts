@@ -127,4 +127,31 @@ describe('waitForResponse()', () => {
       now.mockRestore();
     }
   });
+
+  it('surfaces stop-button visibility probe failures with selector context', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const page = {
+      locator(selector: string) {
+        if (selector === SELECTORS.STOP_BUTTON) {
+          return {
+            isVisible: () => Promise.reject(new Error('visibility failed')),
+          };
+        }
+        if (selector === SELECTORS.ASSISTANT_MESSAGE) {
+          return {
+            count: () => Promise.resolve(0),
+          };
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      },
+    } as unknown as Parameters<typeof waitForResponse>[0];
+
+    await expect(waitForResponse(page, {
+      timeout: 5_000,
+      initialMsgCount: 0,
+      quiet: true,
+    })).rejects.toThrow(
+      `Failed to inspect stop button visibility (selector: ${SELECTORS.STOP_BUTTON}): visibility failed`,
+    );
+  });
 });
