@@ -622,17 +622,21 @@ export class ChatGPTDriver {
   }
 
   private async waitForTypedConversationRoles(timeoutMs: number): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
+    const [userVisible, assistantVisible] = await Promise.all([
+      this.isConversationRoleVisible(SELECTORS.USER_MESSAGE, timeoutMs),
+      this.isConversationRoleVisible(SELECTORS.ASSISTANT_MESSAGE, timeoutMs),
+    ]);
+    return userVisible || assistantVisible;
+  }
+
+  private async isConversationRoleVisible(
+    selector: string,
+    timeoutMs: number,
+  ): Promise<boolean> {
     try {
-      await this.page.locator(SELECTORS.USER_MESSAGE).first().waitFor({
+      await this.page.locator(selector).first().waitFor({
         state: 'visible',
         timeout: timeoutMs,
-      });
-
-      const remaining = Math.max(deadline - Date.now(), 0);
-      await this.page.locator(SELECTORS.ASSISTANT_MESSAGE).first().waitFor({
-        state: 'visible',
-        timeout: remaining,
       });
       return true;
     } catch (error: unknown) {
@@ -660,10 +664,8 @@ export class ChatGPTDriver {
           roleNodeSel: string;
         },
       ): ConversationMessage[] => {
-        const userMessages = document.querySelectorAll(userSel);
-        const assistantMessages = document.querySelectorAll(assistantSel);
-        if (userMessages.length > 0 && assistantMessages.length > 0) {
-          const typedMessages = document.querySelectorAll(`${userSel}, ${assistantSel}`);
+        const typedMessages = document.querySelectorAll(`${userSel}, ${assistantSel}`);
+        if (typedMessages.length > 0) {
           return Array.from(typedMessages)
             .map((el): ConversationMessage => {
               const role = el.getAttribute('data-message-author-role');

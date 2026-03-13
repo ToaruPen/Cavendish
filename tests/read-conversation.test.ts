@@ -53,7 +53,7 @@ describe('ChatGPTDriver.readConversation()', () => {
     expect(locator).toHaveBeenCalledWith(SELECTORS.CONVERSATION_TURN);
   });
 
-  it('falls back to broad conversation turns when only one typed role is visible', async () => {
+  it('uses typed messages when only one typed role is visible', async () => {
     const typedSelector = `${SELECTORS.USER_MESSAGE}, ${SELECTORS.ASSISTANT_MESSAGE}`;
     const locator = vi.fn((selector: string) => {
       if (selector === typedSelector || selector === SELECTORS.USER_MESSAGE) {
@@ -85,7 +85,7 @@ describe('ChatGPTDriver.readConversation()', () => {
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'world' },
     ]);
-    expect(locator).toHaveBeenCalledWith(SELECTORS.CONVERSATION_TURN);
+    expect(locator).not.toHaveBeenCalledWith(SELECTORS.CONVERSATION_TURN);
   });
 
   it('prefers the user message bubble text over attachment tile text', async () => {

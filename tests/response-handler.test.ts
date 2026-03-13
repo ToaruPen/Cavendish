@@ -154,4 +154,32 @@ describe('waitForResponse()', () => {
       `Failed to inspect stop button visibility (selector: ${SELECTORS.STOP_BUTTON}): visibility failed`,
     );
   });
+
+  it('times out when activity stalls while the stop button remains visible', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const now = vi.spyOn(Date, 'now');
+    let tick = 0;
+    now.mockImplementation(() => {
+      tick += 3_000;
+      return tick;
+    });
+
+    try {
+      const page = new FakePage([
+        { text: '', count: 0, stopVisible: false, copyVisible: false },
+        { text: 'Thinking...', count: 1, stopVisible: true, copyVisible: false },
+        { text: 'Thinking...', count: 1, stopVisible: true, copyVisible: false },
+        { text: 'Thinking...', count: 1, stopVisible: true, copyVisible: false },
+      ]) as unknown as Parameters<typeof waitForResponse>[0];
+
+      await expect(waitForResponse(page, {
+        timeout: 30_000,
+        stallTimeoutMs: 5_000,
+        initialMsgCount: 0,
+        quiet: true,
+      })).rejects.toThrow('Response stalled');
+    } finally {
+      now.mockRestore();
+    }
+  });
 });
