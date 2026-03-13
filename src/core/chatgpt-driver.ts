@@ -622,11 +622,15 @@ export class ChatGPTDriver {
   }
 
   private async waitForTypedConversationRoles(timeoutMs: number): Promise<boolean> {
-    const [userVisible, assistantVisible] = await Promise.all([
-      this.isConversationRoleVisible(SELECTORS.USER_MESSAGE, timeoutMs),
-      this.isConversationRoleVisible(SELECTORS.ASSISTANT_MESSAGE, timeoutMs),
+    const [userCount, assistantCount] = await Promise.all([
+      this.page.locator(SELECTORS.USER_MESSAGE).count(),
+      this.page.locator(SELECTORS.ASSISTANT_MESSAGE).count(),
     ]);
-    return userVisible || assistantVisible;
+    if (userCount > 0 || assistantCount > 0) {
+      return true;
+    }
+
+    return this.isConversationRoleVisible(SELECTORS.USER_MESSAGE, timeoutMs);
   }
 
   private async isConversationRoleVisible(
@@ -691,20 +695,18 @@ export class ChatGPTDriver {
         }
 
         return Array.from(document.querySelectorAll(fallbackSel))
-          .map((el): ConversationMessage => {
+          .flatMap((el): ConversationMessage[] => {
             const role = el.getAttribute('data-message-author-role')
               ?? el.getAttribute('data-turn')
               ?? el.querySelector(roleNodeSel)?.getAttribute('data-message-author-role');
             if (role !== 'user' && role !== 'assistant') {
-              throw new Error(
-                `Explicit conversation role not found in fallback selector "${fallbackSel}".`,
-              );
+              return [];
             }
 
-            return {
+            return [{
               role,
               content: el.textContent.trim(),
-            };
+            }];
           })
           .filter((message) => message.content.length > 0);
       },

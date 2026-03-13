@@ -6,9 +6,11 @@ import { ChatGPTDriver } from '../src/core/chatgpt-driver.js';
 
 class WaitLocator {
   private readonly waitImpl: () => Promise<void>;
+  private readonly countValue: number;
 
-  constructor(waitImpl: () => Promise<void>) {
+  constructor(waitImpl: () => Promise<void>, countValue = 1) {
     this.waitImpl = waitImpl;
+    this.countValue = countValue;
   }
 
   first(): this {
@@ -18,6 +20,10 @@ class WaitLocator {
   async waitFor(): Promise<void> {
     await this.waitImpl();
   }
+
+  count(): Promise<number> {
+    return Promise.resolve(this.countValue);
+  }
 }
 
 describe('ChatGPTDriver.readConversation()', () => {
@@ -26,6 +32,9 @@ describe('ChatGPTDriver.readConversation()', () => {
     const locator = vi.fn((selector: string) => {
       if (selector === typedSelector) {
         return new WaitLocator(() => Promise.reject(new errors.TimeoutError('waiting for locator')));
+      }
+      if (selector === SELECTORS.USER_MESSAGE || selector === SELECTORS.ASSISTANT_MESSAGE) {
+        return new WaitLocator(() => Promise.resolve(), 0);
       }
       if (selector === SELECTORS.CONVERSATION_TURN) {
         return new WaitLocator(() => Promise.resolve());
@@ -56,11 +65,14 @@ describe('ChatGPTDriver.readConversation()', () => {
   it('uses typed messages when only one typed role is visible', async () => {
     const typedSelector = `${SELECTORS.USER_MESSAGE}, ${SELECTORS.ASSISTANT_MESSAGE}`;
     const locator = vi.fn((selector: string) => {
-      if (selector === typedSelector || selector === SELECTORS.USER_MESSAGE) {
+      if (selector === typedSelector) {
         return new WaitLocator(() => Promise.resolve());
       }
+      if (selector === SELECTORS.USER_MESSAGE) {
+        return new WaitLocator(() => Promise.resolve(), 1);
+      }
       if (selector === SELECTORS.ASSISTANT_MESSAGE) {
-        return new WaitLocator(() => Promise.reject(new errors.TimeoutError('assistant missing')));
+        return new WaitLocator(() => Promise.reject(new errors.TimeoutError('assistant missing')), 0);
       }
       if (selector === SELECTORS.CONVERSATION_TURN) {
         return new WaitLocator(() => Promise.resolve());
@@ -175,6 +187,11 @@ describe('ChatGPTDriver.readConversation()', () => {
       querySelector: (): null => null,
       textContent: 'hello',
     };
+    const untypedNode = {
+      getAttribute: (): null => null,
+      querySelector: (): null => null,
+      textContent: 'noise',
+    };
     const fallbackAssistant = {
       getAttribute: (name: string): string | null => (name === 'data-turn' ? 'assistant' : null),
       querySelector: (): null => null,
@@ -195,7 +212,7 @@ describe('ChatGPTDriver.readConversation()', () => {
           return [];
         }
         if (selector === SELECTORS.CONVERSATION_TURN) {
-          return [fallbackUser, fallbackAssistant];
+          return [fallbackUser, untypedNode, fallbackAssistant];
         }
         throw new Error(`Unexpected document selector: ${selector}`);
       },
