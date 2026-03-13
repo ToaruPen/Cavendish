@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const CLI_ENTRY = '/Users/sankenbisha/Dev/cavendish/dist/index.mjs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 const NOTIFY_FILE = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/notify.ndjson';
 
 let spawnMock: ReturnType<typeof vi.fn>;
@@ -8,6 +10,8 @@ let createJobMock: ReturnType<typeof vi.fn>;
 let unrefMock: ReturnType<typeof vi.fn>;
 let updateJobMock: ReturnType<typeof vi.fn>;
 let writeJobErrorMock: ReturnType<typeof vi.fn>;
+let testRoot: string;
+let cliEntry: string;
 
 vi.mock('node:child_process', () => {
   unrefMock = vi.fn();
@@ -38,11 +42,18 @@ vi.mock('../src/core/jobs/store.js', () => {
 describe('submitDetachedJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    testRoot = mkdtempSync(join(process.cwd(), '.tmp-submit-'));
+    cliEntry = join(testRoot, 'index.mjs');
+    writeFileSync(cliEntry, '');
+  });
+
+  afterEach(() => {
+    rmSync(testRoot, { recursive: true, force: true });
   });
 
   it('creates a job record and spawns a detached worker', async () => {
     const previousArgv1 = process.argv[1];
-    process.argv[1] = CLI_ENTRY;
+    process.argv[1] = cliEntry;
     try {
       const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
       const record: { jobId: string; kind: string } = submitDetachedJob({
@@ -58,14 +69,18 @@ describe('submitDetachedJob', () => {
         stdinData: 'hello from stdin',
         notifyFile: NOTIFY_FILE,
       });
-      const spawnCalls = spawnMock.mock.calls as [
-        [string, string[], { detached: boolean; stdio: string; env: Record<string, string | undefined> }],
-      ];
-      expect(spawnCalls[0][0]).toBe(process.execPath);
-      expect(spawnCalls[0][1]).toEqual([CLI_ENTRY, 'jobs', 'run-worker', 'job-123']);
-      expect(spawnCalls[0][2].detached).toBe(true);
-      expect(spawnCalls[0][2].stdio).toBe('ignore');
-      expect(spawnCalls[0][2].env.CAVENDISH_JOB_WORKER).toBe('1');
+      const spawnCall = spawnMock.mock.calls[0] as
+        | [string, string[], { detached: boolean; stdio: string; env: Record<string, string | undefined> }]
+        | undefined;
+      expect(spawnCall).toBeDefined();
+      if (spawnCall === undefined) {
+        throw new Error('Detached worker spawn call was not captured');
+      }
+      expect(spawnCall[0]).toBe(process.execPath);
+      expect(spawnCall[1]).toEqual([cliEntry, 'jobs', 'run-worker', 'job-123']);
+      expect(spawnCall[2].detached).toBe(true);
+      expect(spawnCall[2].stdio).toBe('ignore');
+      expect(spawnCall[2].env.CAVENDISH_JOB_WORKER).toBe('1');
       expect(unrefMock).toHaveBeenCalledOnce();
       expect(record).toMatchObject({
         jobId: 'job-123',
@@ -80,7 +95,7 @@ describe('submitDetachedJob', () => {
 
   it('marks the job failed when worker spawn throws', async () => {
     const previousArgv1 = process.argv[1];
-    process.argv[1] = CLI_ENTRY;
+    process.argv[1] = cliEntry;
     spawnMock.mockImplementationOnce(() => {
       throw new Error('spawn failed');
     });
