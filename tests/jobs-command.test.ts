@@ -115,6 +115,27 @@ describe('jobs command', () => {
     expect(jsonRawMock).not.toHaveBeenCalled();
   });
 
+  it('does not emit the root jobs list when options appear before a subcommand', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const run = jobsCommand.run;
+    if (run === undefined) {
+      throw new Error('jobsCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: ['read'],
+        format: 'json',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: ['--format', 'json', 'read', 'job-1'],
+      cmd: jobsCommand,
+    });
+
+    expect(jsonRawMock).not.toHaveBeenCalled();
+  });
+
   it('does not treat string option values as subcommand names', async () => {
     const { jobsCommand } = await import('../src/commands/jobs.js');
     const run = jobsCommand.run;
