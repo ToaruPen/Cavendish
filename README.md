@@ -11,19 +11,19 @@
 cavendish ask "Explain the Observer pattern with a TypeScript example"
 
 # Pipe code for review
-cat src/app.ts | cavendish ask --model pro "Review this code"
+cat src/app.ts | cavendish ask --model Pro "Review this code"
 
 # Deep Research with PDF export
-cavendish deep-research --export pdf "State of WebAssembly in 2025"
+cavendish deep-research --export pdf "State of WebAssembly in 2026"
 ```
 
 ## Features
 
-- **Multi-model support** — GPT-4o, o1-pro, o3-mini-high, thinking models with configurable effort
+- **Multi-model support** — Pro, Thinking, and other ChatGPT models with configurable thinking effort
 - **Deep Research** — long-running research with streaming progress and export (Markdown / Word / PDF)
 - **File attachments** — local files, Google Drive, and GitHub repos as context
 - **Project-aware** — ChatGPT Projects integration for organized workflows
-- **Chat management** — list, read, continue, archive, move, and delete conversations
+- **Chat management** — list, read, continue, archive, move, and delete conversations (batch support for delete/archive/move)
 - **Agent mode** — enable ChatGPT's code execution and file operations
 - **Streaming output** — real-time NDJSON streaming for integration with other tools
 - **Detached jobs** — submit long-running work and collect completion later via job state and notifications
@@ -35,13 +35,19 @@ cavendish deep-research --export pdf "State of WebAssembly in 2025"
 
 - **Node.js** >= 20
 - **Google Chrome** (stable channel)
-- **ChatGPT Plus, Team, or Enterprise account** (required for Pro models and Deep Research)
+- **ChatGPT Pro, Plus, Team, or Enterprise account** (required for Pro models and Deep Research)
 - **OS**: macOS, Linux, or Windows
 
 ## Installation
 
 ```bash
 npm install -g cavendish
+```
+
+Update to the latest version:
+
+```bash
+npm update -g cavendish
 ```
 
 ## Quick Start
@@ -158,9 +164,15 @@ cavendish jobs wait <job-id>
 cavendish list                                    # List chats
 cavendish read <chat-id>                          # Read a chat
 cavendish delete <chat-id>                        # Delete a chat
+cavendish delete id1 id2 id3                      # Batch delete
 cavendish delete <chat-id> --project "Project"    # Delete a project chat
 cavendish archive <chat-id>                       # Archive a chat
+cavendish archive id1 id2 id3                     # Batch archive
 cavendish move <chat-id> --project "Project"      # Move to a project
+cavendish move id1 id2 --project "Project"        # Batch move
+
+# Read IDs from stdin (pipe-friendly)
+cavendish list --format json | jq -r '.[].id' | cavendish delete --stdin
 ```
 
 ### Projects
@@ -186,11 +198,13 @@ cavendish status --json       # JSON output (same as doctor --json)
 
 | Flag | Scope | Description |
 |------|-------|-------------|
-| `--format text\|json` | ask, deep-research, delete, list, read, projects | Output / error format (default: `json`) |
+| `--format text\|json` | ask, deep-research, delete, init, jobs, list, read, projects | Output / error format (default: `json`) |
 | `--stream` | ask, deep-research | NDJSON streaming output |
 | `--detach` | ask, deep-research | Submit a background job and return immediately |
 | `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
 | `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: 120, Pro: 2400, DR: 1800) |
+| `--upload-timeout <sec>` | ask, deep-research | Upload timeout for file attachments (default: 180) |
+| `--stdin` | delete, archive, move | Read conversation IDs from stdin (one per line) |
 | `--quiet` | all | Suppress progress output |
 | `--dry-run` | all | Validate args without executing |
 
