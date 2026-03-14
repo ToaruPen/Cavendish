@@ -159,14 +159,48 @@ function isEagainError(error: unknown): boolean {
     && (error as { code: unknown }).code === 'EAGAIN';
 }
 
-/** Read all available chunks from fd 0 into `chunks`, tracking `totalBytes`. */
+/**
+ * Maximum consecutive EAGAIN retries before giving up.
+ * 20 retries × 5 ms = ~100 ms of patience — long enough for inter-chunk
+ * gaps in bursty writes, short enough for "no stdin at all" to fail fast.
+ */
+const EAGAIN_MAX_RETRIES = 20;
+const EAGAIN_RETRY_MS = 5;
+
+/** Synchronous sleep using {@link Atomics.wait}. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Read all available chunks from fd 0 into `chunks`, tracking total bytes.
+ *
+ * On non-blocking fds EAGAIN means "no data yet", not EOF. The loop retries
+ * up to {@link EAGAIN_MAX_RETRIES} consecutive times with a short sleep so
+ * bursty writes are not silently truncated.
+ */
 function readChunks(chunks: Buffer[], state: { totalBytes: number }): void {
   const scratch = Buffer.allocUnsafe(STDIN_CHUNK_SIZE);
+  let consecutiveEagain = 0;
   for (;;) {
-    const bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
+    let bytesRead: number;
+    try {
+      bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
+    } catch (error: unknown) {
+      if (isEagainError(error)) {
+        consecutiveEagain++;
+        if (consecutiveEagain > EAGAIN_MAX_RETRIES) {
+          return; // no more data coming
+        }
+        sleepSync(EAGAIN_RETRY_MS);
+        continue;
+      }
+      throw error;
+    }
     if (bytesRead === 0) {
       break;
     }
+    consecutiveEagain = 0;
     state.totalBytes += bytesRead;
     if (state.totalBytes > STDIN_MAX_BYTES) {
       throw new Error(
@@ -198,14 +232,6 @@ export function readStdin(): string {
   } catch (error: unknown) {
     if (error instanceof Error && error.message.startsWith('Stdin input exceeds')) {
       throw error;
-    }
-    // EAGAIN means no data is available on a non-blocking fd — common in
-    // subprocess / non-TTY contexts where stdin is reported as a pipe but
-    // has no actual data.  Return any partially buffered data, or empty string.
-    if (isEagainError(error)) {
-      return state.totalBytes === 0
-        ? ''
-        : Buffer.concat(chunks, state.totalBytes).toString('utf-8');
     }
     throw new Error(
       `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,

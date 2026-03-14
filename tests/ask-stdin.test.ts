@@ -106,7 +106,7 @@ describe('readStdin() size limit', () => {
     expect(readStdin()).toBe('detached worker stdin');
   });
 
-  it('returns empty string when readSync throws EAGAIN with no prior data', async () => {
+  it('returns empty string when readSync always throws EAGAIN (no stdin data)', async () => {
     vi.resetModules();
 
     vi.doMock('node:fs', async () => {
@@ -132,13 +132,14 @@ describe('readStdin() size limit', () => {
     expect(mod.readStdin()).toBe('');
   });
 
-  it('returns partial data when readSync throws EAGAIN after reading chunks', async () => {
+  it('retries on EAGAIN between bursts and returns concatenated data', async () => {
     vi.resetModules();
 
+    // Simulate bursty writes: chunk1 → EAGAIN × 2 → chunk2 → EOF
     vi.doMock('node:fs', async () => {
       const real = await vi.importActual<typeof import('node:fs')>('node:fs');
-      let callCount = 0;
-      const partialData = Buffer.from('partial');
+      const sequence = ['hello ', null, null, 'world'];
+      let idx = 0;
       return {
         ...real,
         fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean; isSocket: () => boolean } => ({
@@ -151,14 +152,16 @@ describe('readStdin() size limit', () => {
           target: Buffer,
           targetOffset: number,
         ): number => {
-          callCount++;
-          if (callCount === 1) {
-            partialData.copy(target, targetOffset);
-            return partialData.length;
+          if (idx >= sequence.length) { return 0; } // EOF
+          const item = sequence[idx++];
+          if (item === null) {
+            const err = new Error('EAGAIN') as NodeJS.ErrnoException;
+            err.code = 'EAGAIN';
+            throw err;
           }
-          const err = new Error('EAGAIN: resource temporarily unavailable, read') as NodeJS.ErrnoException;
-          err.code = 'EAGAIN';
-          throw err;
+          const buf = Buffer.from(item);
+          buf.copy(target, targetOffset);
+          return buf.length;
         },
       };
     });
@@ -166,6 +169,6 @@ describe('readStdin() size limit', () => {
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
     const mod = await import('../src/core/cli-args.js');
 
-    expect(mod.readStdin()).toBe('partial');
+    expect(mod.readStdin()).toBe('hello world');
   });
 });
