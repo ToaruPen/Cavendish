@@ -32,16 +32,6 @@ const RUN_WORKER_ARGS = {
 
 const RUN_RUNNER_ARGS = {};
 
-function hasSubCommandInvocation(positionals: string[]): boolean {
-  const firstPositional = positionals[0];
-  return firstPositional === 'list'
-    || firstPositional === 'read'
-    || firstPositional === 'status'
-    || firstPositional === 'wait'
-    || firstPositional === 'run-runner'
-    || firstPositional === 'run-worker';
-}
-
 function formatJobText(jobId: string, kind: string, status: string): string {
   return `${jobId}\t${kind}\t${status}`;
 }
@@ -244,20 +234,26 @@ const runRunnerCommand = defineCommand({
   },
 });
 
+const JOBS_SUB_COMMANDS = {
+  list: listCommand,
+  read: readCommand,
+  status: statusCommand,
+  wait: waitCommand,
+  'run-runner': runRunnerCommand,
+  'run-worker': runWorkerCommand,
+} as const;
+
+function hasSubCommandInvocation(positionals: string[]): boolean {
+  return Object.hasOwn(JOBS_SUB_COMMANDS, positionals[0] ?? '');
+}
+
 export const jobsCommand = defineCommand({
   meta: {
     name: 'jobs',
     description: 'Inspect and wait for detached jobs',
   },
   args: JOBS_ARGS,
-  subCommands: {
-    list: listCommand,
-    read: readCommand,
-    status: statusCommand,
-    wait: waitCommand,
-    'run-runner': runRunnerCommand,
-    'run-worker': runWorkerCommand,
-  },
+  subCommands: JOBS_SUB_COMMANDS,
   run({ args }): void {
     if (hasSubCommandInvocation(args._)) {
       return;
