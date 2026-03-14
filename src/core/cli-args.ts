@@ -280,8 +280,7 @@ const FLAGS_WITH_VALUES = new Set([
 function flagTokenCount(arg: string): number {
   if (!arg.startsWith('--')) { return 0; }
   if (arg.includes('=')) { return 1; }
-  const flagName = arg;
-  return FLAGS_WITH_VALUES.has(flagName) ? 2 : 1;
+  return FLAGS_WITH_VALUES.has(arg) ? 2 : 1;
 }
 
 /**
