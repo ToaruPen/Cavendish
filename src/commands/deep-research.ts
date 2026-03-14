@@ -421,7 +421,7 @@ export const deepResearchCommand = defineCommand({
     description:
       'Send a prompt to ChatGPT Deep Research and return the report.\n\n'
       + 'Usage:\n'
-      + '  cavendish deep-research "Compare React vs Vue in 2025"\n'
+      + '  cavendish deep-research "Compare React vs Vue in 2026"\n'
       + '  echo "topic" | cavendish deep-research "Analyze this"\n'
       + '  cavendish deep-research "Follow up" --chat <id>\n'
       + '  cavendish deep-research --chat <id> --refresh\n'
