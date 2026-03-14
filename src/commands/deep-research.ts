@@ -4,7 +4,7 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
@@ -34,6 +34,10 @@ const DEEP_RESEARCH_ARGS = {
   file: {
     type: 'string' as const,
     description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
+  },
+  uploadTimeout: {
+    type: 'string' as const,
+    description: 'Upload timeout in seconds for file attachments (default: 180)',
   },
   export: {
     type: 'string' as const,
@@ -69,7 +73,7 @@ function defaultExportFilename(format: DeepResearchExportFormat): string {
 }
 
 type RunMode =
-  | { kind: 'initial'; prompt: string; filePaths: string[] }
+  | { kind: 'initial'; prompt: string; filePaths: string[]; uploadTimeoutMs: number | undefined }
   | { kind: 'followup'; chatId: string; prompt: string }
   | { kind: 'refresh'; chatId: string };
 
@@ -81,6 +85,7 @@ interface ValidatedArgs {
   stream: boolean;
   timeoutMs: number;
   timeoutSec: number;
+  uploadTimeoutMs: number | undefined;
   exportFormat: DeepResearchExportFormat | undefined;
   exportPath: string | undefined;
   detach: boolean;
@@ -137,6 +142,7 @@ function resolveRunMode(
   stdinData: string,
   filePaths: string[],
   format: 'json' | 'text',
+  uploadTimeoutMs: number | undefined,
 ): RunMode | undefined {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
@@ -162,7 +168,7 @@ function resolveRunMode(
     return { kind: 'followup', chatId, prompt };
   }
 
-  return { kind: 'initial', prompt, filePaths };
+  return { kind: 'initial', prompt, filePaths, uploadTimeoutMs };
 }
 
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
@@ -203,6 +209,9 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     filePaths = validated;
   }
 
+  const uploadTimeoutMs = parseUploadTimeout(args.uploadTimeout as string | undefined, format);
+  if (uploadTimeoutMs === null) { return undefined; }
+
   let stdinData: string;
   try {
     stdinData = readStdin();
@@ -211,7 +220,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
-  const mode = resolveRunMode(args, stdinData, filePaths, format);
+  const mode = resolveRunMode(args, stdinData, filePaths, format, uploadTimeoutMs);
   if (mode === undefined) { return undefined; }
 
   const stream = args.stream === true;
@@ -226,6 +235,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     stream,
     timeoutMs: timeoutSec * 1000,
     timeoutSec,
+    uploadTimeoutMs,
     exportFormat: exp.exportFormat,
     exportPath: exp.exportPath,
     ...detachedOptions,
@@ -244,6 +254,9 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
     }
   }
   argv.push('--timeout', String(v.timeoutSec));
+  if (v.uploadTimeoutMs !== undefined) {
+    argv.push('--upload-timeout', String(v.uploadTimeoutMs / 1000));
+  }
   if (v.exportFormat !== undefined) {
     argv.push('--export', v.exportFormat);
   }
@@ -275,6 +288,7 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
 function dryRunMessage(v: ValidatedArgs): string {
   const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
   if (v.stream) { parts.push('stream: true'); }
+  if (v.uploadTimeoutMs !== undefined) { parts.push(`uploadTimeout: ${String(v.uploadTimeoutMs / 1000)}s`); }
   if (v.mode.kind === 'initial' && v.mode.filePaths.length > 0) {
     parts.push(`${String(v.mode.filePaths.length)} file(s)`);
   }
@@ -319,7 +333,7 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, t
     case 'initial':
       await driver.navigateToDeepResearch(quiet);
       if (mode.filePaths.length > 0) {
-        await driver.attachFiles(mode.filePaths, quiet, SELECTORS.SEND_BUTTON);
+        await driver.attachFiles(mode.filePaths, quiet, SELECTORS.SEND_BUTTON, mode.uploadTimeoutMs);
       }
       progress('Sending Deep Research query...', quiet);
       await driver.sendDeepResearchMessage(mode.prompt);

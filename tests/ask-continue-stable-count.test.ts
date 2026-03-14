@@ -55,6 +55,7 @@ vi.mock('../src/core/cli-args.js', () => ({
   readStdin: vi.fn().mockReturnValue(''),
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([]),
+  parseUploadTimeout: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../src/core/driver/helpers.js', async (importOriginal) => {

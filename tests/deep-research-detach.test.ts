@@ -18,6 +18,7 @@ vi.mock('../src/core/cli-args.js', () => ({
   readStdin: vi.fn().mockReturnValue(''),
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([SAFE_RESEARCH_PATH]),
+  parseUploadTimeout: vi.fn().mockReturnValue(undefined),
 }));
 
 vi.mock('../src/core/jobs/store.js', () => ({

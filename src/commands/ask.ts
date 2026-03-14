@@ -3,7 +3,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { delay } from '../core/driver/helpers.js';
 import { CavendishError } from '../core/errors.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
@@ -69,6 +69,10 @@ const ASK_ARGS = {
     type: 'boolean' as const,
     description: 'Enable agent mode (code execution, file operations)',
   },
+  uploadTimeout: {
+    type: 'string' as const,
+    description: 'Upload timeout in seconds for file attachments (default: 180)',
+  },
   detach: {
     type: 'boolean' as const,
     description: 'Submit as a detached background job and return immediately',
@@ -113,6 +117,7 @@ interface ValidatedArgs {
   continueChat: boolean;
   chatId: string | undefined;
   project: string | undefined;
+  uploadTimeoutMs: number | undefined;
   detach: boolean;
   notifyFile: string | undefined;
 }
@@ -240,6 +245,9 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const agentMode = args.agent === true;
 
+  const uploadTimeoutMs = parseUploadTimeout(args.uploadTimeout as string | undefined, format);
+  if (uploadTimeoutMs === null) { return undefined; }
+
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
   if (thinkingEffort !== undefined && chatOptions.continueChat) {
     failValidation('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.', format); return;
@@ -267,6 +275,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     agentMode,
     thinkingEffort,
     prompt,
+    uploadTimeoutMs,
     ...chatOptions,
     ...detachedOptions,
   };
@@ -282,6 +291,7 @@ function dryRunMessage(v: ValidatedArgs): string {
   if (v.stream) {parts.push('stream: true');}
   if (v.detach) {parts.push('detach: true');}
   if (v.notifyFile !== undefined) {parts.push(`notifyFile: ${v.notifyFile}`);}
+  if (v.uploadTimeoutMs !== undefined) {parts.push(`uploadTimeout: ${String(v.uploadTimeoutMs / 1000)}s`);}
   if (v.filePaths.length > 0) {parts.push(`${String(v.filePaths.length)} file(s)`);}
   if (v.gdriveFiles.length > 0) {parts.push(`${String(v.gdriveFiles.length)} Google Drive file(s)`);}
   if (v.githubRepos.length > 0) {parts.push(`${String(v.githubRepos.length)} GitHub repo(s)`);}
@@ -313,6 +323,9 @@ function buildAskJobArgv(validated: ValidatedArgs): string[] {
   }
   if (validated.thinkingEffort !== undefined) {
     argv.push('--thinking-effort', validated.thinkingEffort);
+  }
+  if (validated.uploadTimeoutMs !== undefined) {
+    argv.push('--upload-timeout', String(validated.uploadTimeoutMs / 1000));
   }
   return argv;
 }
@@ -429,6 +442,7 @@ async function applyComposerOptions(
     gdriveFiles,
     githubRepos,
     agentMode,
+    uploadTimeoutMs,
   } = validated;
 
   if (!continueChat) {
@@ -440,11 +454,11 @@ async function applyComposerOptions(
   }
 
   if (filePaths.length > 0) {
-    await driver.attachFiles(filePaths, quiet);
+    await driver.attachFiles(filePaths, quiet, undefined, uploadTimeoutMs);
   }
 
   for (const gdFile of gdriveFiles) {
-    await driver.attachGoogleDriveFile(gdFile, quiet);
+    await driver.attachGoogleDriveFile(gdFile, quiet, undefined, uploadTimeoutMs);
   }
 
   for (const repo of githubRepos) {
