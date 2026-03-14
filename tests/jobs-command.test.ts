@@ -115,6 +115,27 @@ describe('jobs command', () => {
     expect(jsonRawMock).not.toHaveBeenCalled();
   });
 
+  it('does not treat string option values as subcommand names', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const run = jobsCommand.run;
+    if (run === undefined) {
+      throw new Error('jobsCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        format: 'list',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: ['--format', 'list'],
+      cmd: jobsCommand,
+    });
+
+    expect(jsonRawMock).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces invalid job metadata through failStructured', async () => {
     const { jobsCommand } = await import('../src/commands/jobs.js');
     const store = await import('../src/core/jobs/store.js');

@@ -32,8 +32,8 @@ const RUN_WORKER_ARGS = {
 
 const RUN_RUNNER_ARGS = {};
 
-function hasSubCommandInvocation(rawArgs: string[]): boolean {
-  const firstPositional = rawArgs.find((arg) => !arg.startsWith('-'));
+function hasSubCommandInvocation(positionals: string[]): boolean {
+  const firstPositional = positionals[0];
   return firstPositional === 'list'
     || firstPositional === 'read'
     || firstPositional === 'status'
@@ -258,8 +258,8 @@ export const jobsCommand = defineCommand({
     'run-runner': runRunnerCommand,
     'run-worker': runWorkerCommand,
   },
-  run({ args, rawArgs }): void {
-    if (hasSubCommandInvocation(rawArgs)) {
+  run({ args }): void {
+    if (hasSubCommandInvocation(args._)) {
       return;
     }
     const format = validateFormat(args.format);
