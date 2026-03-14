@@ -1,8 +1,8 @@
 import { defineCommand } from 'citty';
 
 import { assertValidChatId } from '../constants/selectors.js';
-import { GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
-import { errorMessage, fail, progress } from '../core/output-handler.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
+import { errorMessage, failValidation, progress, validateFormat } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 /**
@@ -20,6 +20,7 @@ const DELETE_ARGS = {
     description: 'Project name (required for project conversations)',
   },
   ...GLOBAL_ARGS,
+  ...FORMAT_ARG,
 };
 
 export const deleteCommand = defineCommand({
@@ -29,16 +30,18 @@ export const deleteCommand = defineCommand({
   },
   args: DELETE_ARGS,
   async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(DELETE_ARGS)) { return; }
-
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
     const projectName = args.project;
+    const format = validateFormat(args.format);
+    if (format === undefined) { return; }
+
+    if (!rejectUnknownFlags(DELETE_ARGS, format)) { return; }
 
     try {
       assertValidChatId(args.chatId);
     } catch (error: unknown) {
-      fail(errorMessage(error));
+      failValidation(errorMessage(error), format);
       return;
     }
 
@@ -57,6 +60,6 @@ export const deleteCommand = defineCommand({
       } else {
         await driver.deleteConversation(args.chatId, quiet);
       }
-    }, undefined, { verbose: isVerbose });
+    }, format, { verbose: isVerbose });
   },
 });

@@ -23,13 +23,13 @@ export const GLOBAL_ARGS = {
 };
 
 /**
- * Format arg for commands that produce structured output.
- * Commands like archive/delete/move that have no formatted output should not include this.
+ * Format arg for commands that support text/json stdout or JSON-formatted errors.
+ * Commands like archive/move that never vary their output or error shape should not include this.
  */
 export const FORMAT_ARG = {
   format: {
     type: 'string' as const,
-    description: 'Output format: json or text (default: json)',
+    description: 'Output / error format: json or text (default: json)',
     default: 'json',
   },
 };
