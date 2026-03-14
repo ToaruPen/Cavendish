@@ -27,6 +27,10 @@ vi.mock('../src/core/jobs/worker.js', () => ({
   runJobWorkerOrExit: vi.fn(),
 }));
 
+vi.mock('../src/core/jobs/runner.js', () => ({
+  runJobRunnerOrExit: vi.fn(),
+}));
+
 vi.mock('../src/core/output-handler.js', () => {
   jsonRawMock = vi.fn();
   return {

@@ -202,6 +202,7 @@ cavendish status --json       # JSON output (same as doctor --json)
 CLI (citty)
   -> ProcessLock (exclusive access via ~/.cavendish/cavendish.lock)
   -> JobStore (detached job metadata under ~/.cavendish/jobs)
+  -> JobRunner (single detached queue owner for queued background jobs)
   -> BrowserManager (Chrome launch/connect via CDP, dynamic port)
     -> ChatGPTDriver (DOM operations)
       -> OutputHandler (text/json/ndjson to stdout)
@@ -213,6 +214,7 @@ CLI (citty)
 |--------|---------------|
 | **BrowserManager** | Chrome launch/connect/profile management (CDP with OS-assigned port, persistent process, orphan recovery) |
 | **ChatGPTDriver** | DOM operations (message send, response capture, file attach, model select, deep research) |
+| **JobRunner** | Sequential detached-job execution, queue ownership, and retry-on-lock handoff for background jobs |
 | **OutputHandler** | Response formatting (text/json/ndjson to stdout, structured errors to stderr) |
 | **ProcessLock** | Atomic file-based lock preventing parallel execution; stale lock recovery via PID check |
 | **Shutdown** | Signal handler registration (SIGINT/SIGTERM) with cleanup callbacks, lock release, 3s timeout |

@@ -1,0 +1,154 @@
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { CAVENDISH_DIR } from '../browser-manager.js';
+import { progress } from '../output-handler.js';
+
+import { readNextQueuedJob } from './store.js';
+import { markUnexpectedJobFailure, runJobWorker } from './worker.js';
+
+const RUNNER_LOCK_FILE = join(CAVENDISH_DIR, 'jobs-runner.lock');
+const RUNNER_LOCK_WAIT_MS = 3_000;
+const RUNNER_LOCK_RETRY_MS = 200;
+const JOB_RETRY_DELAY_MS = 2_000;
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    return isErrnoException(error) && error.code === 'EPERM';
+  }
+}
+
+function readLockPid(): number | null {
+  try {
+    const content = readFileSync(RUNNER_LOCK_FILE, 'utf8').trim();
+    const pid = Number.parseInt(content, 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function tryCreateLockFile(): boolean {
+  try {
+    writeFileSync(RUNNER_LOCK_FILE, String(process.pid), { flag: 'wx', mode: 0o600 });
+    return true;
+  } catch (error: unknown) {
+    if (isErrnoException(error) && error.code === 'EEXIST') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function tryClaimStaleLock(stalePid: number | null): boolean {
+  if (stalePid === null) {
+    return false;
+  }
+  try {
+    if (readLockPid() !== stalePid) {
+      return false;
+    }
+    unlinkSync(RUNNER_LOCK_FILE);
+  } catch (error: unknown) {
+    if (isErrnoException(error) && error.code !== 'ENOENT') {
+      throw error;
+    }
+    return false;
+  }
+  return tryCreateLockFile();
+}
+
+function tryAcquireRunnerLock(): boolean {
+  mkdirSync(CAVENDISH_DIR, { recursive: true });
+
+  if (tryCreateLockFile()) {
+    return true;
+  }
+
+  const existingPid = readLockPid();
+  if (existingPid === process.pid) {
+    return true;
+  }
+  if (existingPid !== null && isProcessAlive(existingPid)) {
+    return false;
+  }
+  if (tryClaimStaleLock(existingPid)) {
+    return true;
+  }
+  return false;
+}
+
+function releaseRunnerLock(): void {
+  if (readLockPid() !== process.pid) {
+    return;
+  }
+  try {
+    unlinkSync(RUNNER_LOCK_FILE);
+  } catch (error: unknown) {
+    if (isErrnoException(error) && error.code !== 'ENOENT') {
+      process.stderr.write(
+        `[cavendish:jobs] failed to release runner lock: ${error.message}\n`,
+      );
+    }
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function acquireRunnerLock(): Promise<boolean> {
+  const deadline = Date.now() + RUNNER_LOCK_WAIT_MS;
+  while (Date.now() <= deadline) {
+    if (tryAcquireRunnerLock()) {
+      return true;
+    }
+    await sleep(RUNNER_LOCK_RETRY_MS);
+  }
+  return false;
+}
+
+export async function runJobRunner(): Promise<void> {
+  const acquired = await acquireRunnerLock();
+  if (!acquired) {
+    return;
+  }
+
+  try {
+    for (;;) {
+      const nextJob = readNextQueuedJob();
+      if (nextJob === undefined) {
+        return;
+      }
+      try {
+        const result = await runJobWorker(nextJob.jobId);
+        if (result.outcome === 'retry') {
+          await sleep(JOB_RETRY_DELAY_MS);
+        }
+      } catch (error: unknown) {
+        markUnexpectedJobFailure(nextJob.jobId, error, 'Detached runner job failed');
+        continue;
+      }
+    }
+  } finally {
+    releaseRunnerLock();
+  }
+}
+
+export async function runJobRunnerOrExit(): Promise<void> {
+  try {
+    await runJobRunner();
+  } catch (error: unknown) {
+    progress(`Detached runner failed: ${error instanceof Error ? error.message : String(error)}`, false);
+    process.exitCode = 1;
+  }
+}

@@ -85,14 +85,15 @@ describe('job worker', () => {
       notifyFile,
     });
 
-    await worker.runJobWorker(job.jobId);
+    const result = await worker.runJobWorker(job.jobId);
 
+    expect(result.outcome).toBe('completed');
     expect(store.readJob(job.jobId)?.status).toBe('completed');
     expect(store.readJobResult(job.jobId)?.event.content).toBe('done');
     expect(readFileSync(notifyFile, 'utf8')).toContain('"jobId"');
   });
 
-  it('retries queued jobs when the process lock is busy', async () => {
+  it('returns a retry outcome when the process lock is busy', async () => {
     const lockError = JSON.stringify({
       error: true,
       category: 'cdp_unavailable',
@@ -100,29 +101,18 @@ describe('job worker', () => {
       exitCode: 2,
       action: 'wait',
     });
-    const finalLine = JSON.stringify({
-      type: 'final',
-      content: 'done after retry',
-      timestamp: '2026-03-14T00:00:00.000Z',
-      partial: false,
-    });
-    let attempts = 0;
-    const { store, worker } = await importWithMocks(() => {
-      attempts += 1;
-      if (attempts === 1) {
-        return makeChild([], [lockError], 2);
-      }
-      return makeChild([finalLine], [], 0);
-    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [lockError], 2));
     const job = store.createJob({
       kind: 'ask',
       argv: ['ask', 'hello'],
     });
 
-    await worker.runJobWorker(job.jobId);
+    const result = await worker.runJobWorker(job.jobId);
 
-    expect(attempts).toBe(2);
-    expect(store.readJob(job.jobId)?.status).toBe('completed');
+    expect(result.outcome).toBe('retry');
+    expect(store.readJob(job.jobId)?.status).toBe('queued');
+    expect(store.readJobResult(job.jobId)).toBeUndefined();
+    expect(store.readJobError(job.jobId)).toBeUndefined();
     expect(readFileSync(store.getJobEventsPath(job.jobId), 'utf8')).toContain('"job-queued"');
   });
 
@@ -140,8 +130,9 @@ describe('job worker', () => {
       argv: ['deep-research', 'topic'],
     });
 
-    await worker.runJobWorker(job.jobId);
+    const result = await worker.runJobWorker(job.jobId);
 
+    expect(result.outcome).toBe('timed_out');
     expect(store.readJob(job.jobId)?.status).toBe('timed_out');
     expect(store.readJobError(job.jobId)?.category).toBe('timeout');
   });

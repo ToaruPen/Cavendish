@@ -130,6 +130,12 @@ export function listJobs(): JobRecord[] {
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 }
 
+export function readNextQueuedJob(): JobRecord | undefined {
+  return listJobs()
+    .filter((job) => job.status === 'queued')
+    .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt))[0];
+}
+
 export function appendJobEvent(jobId: string, line: string): void {
   ensureDir(getJobDir(jobId));
   appendFileSync(getJobEventsPath(jobId), `${line}\n`);

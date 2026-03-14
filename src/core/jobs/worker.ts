@@ -9,7 +9,13 @@ import { notifyJobCompletion } from './notifier.js';
 import { appendJobEvent, readJob, updateJob, writeJobError, writeJobResult } from './store.js';
 import type { JobRecord, JobStatus } from './types.js';
 
-const RETRY_DELAY_MS = 2_000;
+export type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
+
+export interface JobRunResult {
+  outcome: JobRunOutcome;
+  record?: JobRecord;
+  error?: StructuredErrorPayload;
+}
 
 function resolveCliEntrypoint(): string {
   const entry = process.argv[1];
@@ -19,7 +25,7 @@ function resolveCliEntrypoint(): string {
   return entry;
 }
 
-function appendWorkerState(jobId: string, state: string): void {
+export function appendJobState(jobId: string, state: string): void {
   appendJobEvent(jobId, JSON.stringify({
     type: 'state',
     state,
@@ -56,7 +62,7 @@ function buildWorkerArgs(job: JobRecord): string[] {
   return [...job.argv, '--stream', '--format', 'json', '--quiet'];
 }
 
-function finalizeJobStatus(event: NdjsonEvent): JobStatus {
+function finalizeJobStatus(event: NdjsonEvent): Extract<JobStatus, 'completed' | 'timed_out'> {
   return event.partial === true ? 'timed_out' : 'completed';
 }
 
@@ -65,14 +71,8 @@ function isLockContentionError(error: StructuredErrorPayload): boolean {
     && error.message.toLowerCase().includes('another cavendish process');
 }
 
-function terminalStatusFromError(error: StructuredErrorPayload): JobStatus {
+function terminalStatusFromError(error: StructuredErrorPayload): Extract<JobStatus, 'failed' | 'timed_out'> {
   return error.category === 'timeout' ? 'timed_out' : 'failed';
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
@@ -126,98 +126,105 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
   };
 }
 
-export async function runJobWorker(jobId: string): Promise<void> {
-  if (readJob(jobId) === undefined) {
+export async function runJobWorker(jobId: string): Promise<JobRunResult> {
+  const current = readJob(jobId);
+  if (current === undefined) {
     throw new Error(`Job not found: ${jobId}`);
   }
+  let record = updateJob(jobId, {
+    status: 'running',
+    startedAt: current.startedAt ?? new Date().toISOString(),
+  });
+  appendJobState(jobId, 'job-running');
 
-  for (;;) {
-    const current = readJob(jobId);
-    if (current === undefined) {
-      throw new Error(`Job not found: ${jobId}`);
-    }
-    let record = updateJob(jobId, {
-      status: 'running',
-      startedAt: current.startedAt ?? new Date().toISOString(),
+  const { exitCode, finalEvent, structuredError } = await runWorkerAttempt(jobId, record);
+
+  if (finalEvent !== undefined) {
+    writeJobResult(jobId, {
+      event: finalEvent,
+      savedAt: new Date().toISOString(),
     });
-    appendWorkerState(jobId, 'job-running');
-
-    const { exitCode, finalEvent, structuredError } = await runWorkerAttempt(jobId, record);
-
-    if (finalEvent !== undefined) {
-      writeJobResult(jobId, {
-        event: finalEvent,
-        savedAt: new Date().toISOString(),
-      });
-      const status = finalizeJobStatus(finalEvent);
-      record = updateJob(jobId, {
-        status,
-        completedAt: new Date().toISOString(),
-        chatId: finalEvent.chatId,
-        url: finalEvent.url,
-        partial: finalEvent.partial,
-        exitCode,
-      });
-      appendWorkerState(jobId, `job-${status}`);
-      notifyJobCompletion(record);
-      return;
-    }
-
-    const errorPayload: StructuredErrorPayload = structuredError ?? {
-      error: true,
-      category: 'unknown',
-      message: `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
-      exitCode,
-      action: 'Inspect the job error output and retry the command.',
-    };
-
-    if (isLockContentionError(errorPayload)) {
-      updateJob(jobId, {
-        status: 'queued',
-      });
-      appendWorkerState(jobId, 'job-queued');
-      await sleep(RETRY_DELAY_MS);
-      continue;
-    }
-
-    writeJobError(jobId, errorPayload);
-    const status = terminalStatusFromError(errorPayload);
+    const status = finalizeJobStatus(finalEvent);
     record = updateJob(jobId, {
       status,
       completedAt: new Date().toISOString(),
-      error: errorPayload,
+      chatId: finalEvent.chatId,
+      url: finalEvent.url,
+      partial: finalEvent.partial,
       exitCode,
     });
-    appendWorkerState(jobId, `job-${status}`);
+    appendJobState(jobId, `job-${status}`);
     notifyJobCompletion(record);
-    return;
+    return { outcome: status, record };
+  }
+
+  const errorPayload: StructuredErrorPayload = structuredError ?? {
+    error: true,
+    category: 'unknown',
+    message: `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
+    exitCode,
+    action: 'Inspect the job error output and retry the command.',
+  };
+
+  if (isLockContentionError(errorPayload)) {
+    updateJob(jobId, {
+      status: 'queued',
+    });
+    appendJobState(jobId, 'job-queued');
+    return {
+      outcome: 'retry',
+      error: errorPayload,
+    };
+  }
+
+  writeJobError(jobId, errorPayload);
+  const status = terminalStatusFromError(errorPayload);
+  record = updateJob(jobId, {
+    status,
+    completedAt: new Date().toISOString(),
+    error: errorPayload,
+    exitCode,
+  });
+  appendJobState(jobId, `job-${status}`);
+  notifyJobCompletion(record);
+  return {
+    outcome: status,
+    record,
+    error: errorPayload,
+  };
+}
+
+export function markUnexpectedJobFailure(jobId: string, error: unknown, label = 'Detached worker failed'): void {
+  progress(`${label}: ${error instanceof Error ? error.message : String(error)}`, false);
+  const fallback: StructuredErrorPayload = {
+    error: true,
+    category: 'unknown',
+    message: error instanceof Error ? error.message : String(error),
+    exitCode: 1,
+    action: 'Inspect the job metadata and retry the command.',
+  };
+  writeJobError(jobId, fallback);
+  const job = readJob(jobId);
+  if (job !== undefined) {
+    const record = updateJob(jobId, {
+      status: 'failed',
+      completedAt: new Date().toISOString(),
+      error: fallback,
+      exitCode: 1,
+    });
+    appendJobState(jobId, 'job-failed');
+    notifyJobCompletion(record);
   }
 }
 
 export async function runJobWorkerOrExit(jobId: string): Promise<void> {
   try {
-    await runJobWorker(jobId);
-  } catch (error: unknown) {
-    progress(`Detached worker failed: ${error instanceof Error ? error.message : String(error)}`, false);
-    const fallback: StructuredErrorPayload = {
-      error: true,
-      category: 'unknown',
-      message: error instanceof Error ? error.message : String(error),
-      exitCode: 1,
-      action: 'Inspect the job metadata and retry the command.',
-    };
-    writeJobError(jobId, fallback);
-    const job = readJob(jobId);
-    if (job !== undefined) {
-      const record = updateJob(jobId, {
-        status: 'failed',
-        completedAt: new Date().toISOString(),
-        error: fallback,
-        exitCode: 1,
-      });
-      appendWorkerState(jobId, 'job-failed');
-      notifyJobCompletion(record);
+    const result = await runJobWorker(jobId);
+    if (result.outcome === 'retry') {
+      process.exitCode = 75;
     }
+  } catch (error: unknown) {
+    markUnexpectedJobFailure(jobId, error);
     process.exitCode = 1;
   }
 }

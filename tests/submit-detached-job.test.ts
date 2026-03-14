@@ -51,7 +51,7 @@ describe('submitDetachedJob', () => {
     rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('creates a job record and spawns a detached worker', async () => {
+  it('creates a job record and spawns a detached runner', async () => {
     const previousArgv1 = process.argv[1];
     process.argv[1] = cliEntry;
     try {
@@ -74,13 +74,13 @@ describe('submitDetachedJob', () => {
         | undefined;
       expect(spawnCall).toBeDefined();
       if (spawnCall === undefined) {
-        throw new Error('Detached worker spawn call was not captured');
+        throw new Error('Detached runner spawn call was not captured');
       }
       expect(spawnCall[0]).toBe(process.execPath);
-      expect(spawnCall[1]).toEqual([cliEntry, 'jobs', 'run-worker', 'job-123']);
+      expect(spawnCall[1]).toEqual([cliEntry, 'jobs', 'run-runner']);
       expect(spawnCall[2].detached).toBe(true);
       expect(spawnCall[2].stdio).toBe('ignore');
-      expect(spawnCall[2].env.CAVENDISH_JOB_WORKER).toBe('1');
+      expect(spawnCall[2].env.CAVENDISH_JOB_RUNNER).toBe('1');
       expect(unrefMock).toHaveBeenCalledOnce();
       expect(record).toMatchObject({
         jobId: 'job-123',
@@ -93,7 +93,7 @@ describe('submitDetachedJob', () => {
     }
   });
 
-  it('marks the job failed when worker spawn throws', async () => {
+  it('marks the job failed when runner spawn throws', async () => {
     const previousArgv1 = process.argv[1];
     process.argv[1] = cliEntry;
     spawnMock.mockImplementationOnce(() => {

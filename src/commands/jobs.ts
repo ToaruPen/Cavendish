@@ -2,6 +2,7 @@ import { defineCommand } from 'citty';
 
 import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
+import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
 import { runJobWorkerOrExit } from '../core/jobs/worker.js';
 import { fail, failStructured, jsonRaw, text, validateFormat } from '../core/output-handler.js';
@@ -28,6 +29,8 @@ const RUN_WORKER_ARGS = {
     required: true as const,
   },
 };
+
+const RUN_RUNNER_ARGS = {};
 
 function formatJobText(jobId: string, kind: string, status: string): string {
   return `${jobId}\t${kind}\t${status}`;
@@ -200,6 +203,18 @@ const runWorkerCommand = defineCommand({
   },
 });
 
+const runRunnerCommand = defineCommand({
+  meta: {
+    name: 'run-runner',
+    description: 'Run the detached job runner',
+  },
+  args: RUN_RUNNER_ARGS,
+  async run(): Promise<void> {
+    if (!rejectUnknownFlags(RUN_RUNNER_ARGS)) { return; }
+    await runJobRunnerOrExit();
+  },
+});
+
 export const jobsCommand = defineCommand({
   meta: {
     name: 'jobs',
@@ -211,6 +226,7 @@ export const jobsCommand = defineCommand({
     read: readCommand,
     status: statusCommand,
     wait: waitCommand,
+    'run-runner': runRunnerCommand,
     'run-worker': runWorkerCommand,
   },
   run({ args }): void {
