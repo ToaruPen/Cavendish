@@ -124,15 +124,18 @@ describe('deep-research --detach', () => {
     expect(request.notifyFile).toMatch(/dr-notify\.ndjson$/);
     expect(request.argv).toEqual([
       'deep-research',
-      '--timeout',
-      '1800',
       '--file',
       SAFE_RESEARCH_PATH,
+      '--timeout',
+      '1800',
       '--export',
       'markdown',
       '--exportPath',
       './report.md',
+      '--',
+      'research topic',
     ]);
+    expect(request).not.toHaveProperty('stdinData');
 
     const payload = jsonRawMock.mock.calls[0]?.[0] as SubmitPayload | undefined;
     expect(payload).toBeDefined();
