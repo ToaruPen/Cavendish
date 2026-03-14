@@ -166,7 +166,7 @@ export async function waitForAttachmentTiles(
     ({ selector, count }: { selector: string; count: number }) =>
       document.querySelectorAll(selector).length >= count,
     { selector: SELECTORS.FILE_ATTACHMENT_TILE, count: expected },
-    { timeout: 60_000 },
+    { timeout: effectiveTimeout },
   );
 
   // Wait for upload completion: ChatGPT has used multiple send-button variants

@@ -365,3 +365,22 @@ export function validateFileArgs(format?: 'json' | 'text'): string[] | undefined
 
   return filePaths;
 }
+
+/**
+ * Parse and validate --upload-timeout. Returns milliseconds on success,
+ * undefined when not provided, or null on validation failure.
+ */
+export function parseUploadTimeout(
+  raw: string | undefined,
+  format: 'json' | 'text',
+): number | undefined | null {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const sec = Number(raw);
+  if (!Number.isFinite(sec) || sec <= 0) {
+    failValidation(`--upload-timeout must be a positive number, got "${raw}"`, format);
+    return null;
+  }
+  return sec * 1000;
+}

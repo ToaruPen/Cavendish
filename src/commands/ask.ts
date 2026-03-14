@@ -3,7 +3,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { delay } from '../core/driver/helpers.js';
 import { CavendishError } from '../core/errors.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
@@ -183,25 +183,6 @@ function validateChatOptions(
     return undefined;
   }
   return { continueChat, chatId, project };
-}
-
-/**
- * Parse and validate --upload-timeout. Returns milliseconds on success,
- * undefined when not provided, or null on validation failure.
- */
-function parseUploadTimeout(
-  raw: string | undefined,
-  format: 'json' | 'text',
-): number | undefined | null {
-  if (raw === undefined) {
-    return undefined;
-  }
-  const sec = Number(raw);
-  if (!Number.isFinite(sec) || sec <= 0) {
-    failValidation(`--upload-timeout must be a positive number, got "${raw}"`, format);
-    return null;
-  }
-  return sec * 1000;
 }
 
 function resolvePrompt(

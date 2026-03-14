@@ -4,7 +4,7 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
@@ -116,25 +116,6 @@ function validateExport(
     return undefined;
   }
   return { exportFormat, exportPath: rawExportPath as string | undefined };
-}
-
-/**
- * Parse and validate --upload-timeout. Returns milliseconds on success,
- * undefined when not provided, or null on validation failure.
- */
-function parseUploadTimeout(
-  raw: string | undefined,
-  format: 'json' | 'text',
-): number | undefined | null {
-  if (raw === undefined) {
-    return undefined;
-  }
-  const sec = Number(raw);
-  if (!Number.isFinite(sec) || sec <= 0) {
-    failValidation(`--upload-timeout must be a positive number, got "${raw}"`, format);
-    return null;
-  }
-  return sec * 1000;
 }
 
 function validateFlagConflicts(args: Record<string, unknown>, format: 'json' | 'text'): boolean {
