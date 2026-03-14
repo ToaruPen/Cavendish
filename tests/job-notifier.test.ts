@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -27,6 +27,7 @@ describe('notifyJobCompletion', () => {
       notifyFile,
       submittedAt: '2026-03-14T00:00:00.000Z',
       updatedAt: '2026-03-14T00:00:01.000Z',
+      retryCount: 0,
       resultPath: join(root, 'result.json'),
       eventsPath: join(root, 'events.ndjson'),
       errorPath: join(root, 'error.json'),
@@ -48,5 +49,37 @@ describe('notifyJobCompletion', () => {
     });
     expect(typeof payload.timestamp).toBe('string');
     expect(Number.isNaN(Date.parse(String(payload.timestamp)))).toBe(false);
+  });
+
+  it('still writes a notification when stored result JSON is malformed', () => {
+    const root = mkdtempSync(join(process.cwd(), '.tmp-notify-'));
+    createdDirs.push(root);
+    const notifyFile = join(root, 'events', 'notify.ndjson');
+    writeFileSync(join(root, 'result.json'), '{not valid json');
+
+    notifyJobCompletion({
+      jobId: '00000000-0000-4000-8000-000000000002',
+      kind: 'ask',
+      status: 'completed',
+      argv: ['ask', 'hello'],
+      notifyFile,
+      submittedAt: '2026-03-14T00:00:00.000Z',
+      updatedAt: '2026-03-14T00:00:01.000Z',
+      retryCount: 1,
+      resultPath: join(root, 'result.json'),
+      eventsPath: join(root, 'events.ndjson'),
+      errorPath: join(root, 'error.json'),
+      chatId: 'chat-2',
+      url: 'https://chatgpt.com/c/chat-2',
+      partial: false,
+    });
+
+    const content = readFileSync(notifyFile, 'utf8').trim();
+    const payload = JSON.parse(content) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      jobId: '00000000-0000-4000-8000-000000000002',
+      chatId: 'chat-2',
+    });
+    expect('finalResponse' in payload).toBe(false);
   });
 });

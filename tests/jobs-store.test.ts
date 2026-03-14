@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -38,6 +38,7 @@ describe('job store', () => {
 
     expect(existsSync(getJobFilePath(job.jobId))).toBe(true);
     expect(readJob(job.jobId)?.status).toBe('queued');
+    expect(readJob(job.jobId)?.retryCount).toBe(0);
     expect(listJobs().map((entry) => entry.jobId)).toContain(job.jobId);
   });
 
@@ -77,5 +78,57 @@ describe('job store', () => {
     expect(readFileSync(getJobEventsPath(job.jobId), 'utf8')).toContain('"job-running"');
     expect(readJobResult(job.jobId)?.event.content).toBe('done');
     expect(readJobError(job.jobId)?.category).toBe('timeout');
+  });
+
+  it('ignores invalid job directories when listing jobs', async () => {
+    const { createJob, getJobsDir, readNextQueuedJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    mkdirSync(join(getJobsDir(), 'not-a-job-id'));
+
+    expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
+  });
+
+  it('skips invalid legacy job records without retry metadata', async () => {
+    const { createJob, getJobsDir, getJobFilePath, readNextQueuedJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const legacyJobId = '00000000-0000-4000-8000-000000000099';
+    mkdirSync(join(getJobsDir(), legacyJobId), { recursive: true });
+    writeFileSync(getJobFilePath(legacyJobId), `${JSON.stringify({
+      jobId: legacyJobId,
+      kind: 'ask',
+      status: 'queued',
+      argv: ['ask', 'legacy'],
+      submittedAt: '2026-03-14T00:00:00.000Z',
+      updatedAt: '2026-03-14T00:00:00.000Z',
+      resultPath: join(getJobsDir(), legacyJobId, 'result.json'),
+      eventsPath: join(getJobsDir(), legacyJobId, 'events.ndjson'),
+      errorPath: join(getJobsDir(), legacyJobId, 'error.json'),
+    }, null, 2)}\n`);
+    const incompleteJobId = '00000000-0000-4000-8000-000000000097';
+    mkdirSync(join(getJobsDir(), incompleteJobId), { recursive: true });
+    writeFileSync(getJobFilePath(incompleteJobId), `${JSON.stringify({
+      retryCount: 0,
+    }, null, 2)}\n`);
+
+    expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
+  });
+
+  it('skips job files that deserialize to null', async () => {
+    const { createJob, getJobsDir, getJobFilePath, readNextQueuedJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const invalidJobId = '00000000-0000-4000-8000-000000000098';
+    mkdirSync(join(getJobsDir(), invalidJobId), { recursive: true });
+    writeFileSync(getJobFilePath(invalidJobId), 'null\n');
+
+    expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });
 });

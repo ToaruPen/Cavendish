@@ -25,7 +25,7 @@ export function submitDetachedJob(request: DetachedJobRequest): JobRecord {
       category: 'unknown' as const,
       message: error instanceof Error ? error.message : String(error),
       exitCode: 1,
-      action: 'Fix the detached worker launch failure and retry the command.',
+      action: 'Fix the detached runner launch failure and retry the command.',
     };
     writeJobError(record.jobId, payload);
     updateJob(record.jobId, {
@@ -38,14 +38,10 @@ export function submitDetachedJob(request: DetachedJobRequest): JobRecord {
   try {
     const child = spawn(
       process.execPath,
-      [resolveCliEntrypoint(), 'jobs', 'run-worker', record.jobId],
+      [resolveCliEntrypoint(), 'jobs', 'run-runner'],
       {
         detached: true,
         stdio: 'ignore',
-        env: {
-          ...process.env,
-          CAVENDISH_JOB_WORKER: '1',
-        },
       },
     );
     child.once('error', (error: unknown): void => {

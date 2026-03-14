@@ -33,6 +33,9 @@ export interface JobRecord {
   url?: string;
   partial?: boolean;
   exitCode?: number;
+  retryCount: number;
+  lastRetriedAt?: string;
+  lastRetryError?: string;
   resultPath: string;
   eventsPath: string;
   errorPath: string;

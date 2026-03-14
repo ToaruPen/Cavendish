@@ -2,6 +2,7 @@ import { defineCommand } from 'citty';
 
 import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
 import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
+import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
 import { runJobWorkerOrExit } from '../core/jobs/worker.js';
 import { fail, failStructured, jsonRaw, text, validateFormat } from '../core/output-handler.js';
@@ -29,6 +30,8 @@ const RUN_WORKER_ARGS = {
   },
 };
 
+const RUN_RUNNER_ARGS = {};
+
 function formatJobText(jobId: string, kind: string, status: string): string {
   return `${jobId}\t${kind}\t${status}`;
 }
@@ -41,6 +44,9 @@ function outputJobs(format: 'json' | 'text'): void {
     submittedAt: job.submittedAt,
     updatedAt: job.updatedAt,
     chatId: job.chatId,
+    retryCount: job.retryCount,
+    lastRetriedAt: job.lastRetriedAt,
+    lastRetryError: job.lastRetryError,
   }));
   if (format === 'json') {
     jsonRaw(jobs);
@@ -55,9 +61,8 @@ function throwStoredError(error: StructuredErrorPayload): never {
   throw new CavendishError(error.message, error.category, error.action);
 }
 
-async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+function readJobOrThrow(jobId: string): Exclude<ReturnType<typeof readJob>, undefined> {
+  try {
     const job = readJob(jobId);
     if (job === undefined) {
       throw new CavendishError(
@@ -66,6 +71,23 @@ async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exc
         'Run `cavendish jobs` to list valid job IDs.',
       );
     }
+    return job;
+  } catch (error: unknown) {
+    if (error instanceof CavendishError) {
+      throw error;
+    }
+    throw new CavendishError(
+      error instanceof Error ? error.message : String(error),
+      'unknown',
+      `Recreate detached job ${jobId} and retry.`,
+    );
+  }
+}
+
+async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = readJobOrThrow(jobId);
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
     }
@@ -104,16 +126,16 @@ const readCommand = defineCommand({
     const format = validateFormat(args.format);
     if (format === undefined) { return; }
     if (!rejectUnknownFlags(JOB_ID_ARGS, format)) { return; }
-    const job = readJob(args.jobId);
-    if (job === undefined) {
-      fail(`Job not found: ${args.jobId}`);
-      return;
+    try {
+      const job = readJobOrThrow(args.jobId);
+      if (format === 'json') {
+        jsonRaw(job);
+        return;
+      }
+      text(formatJobText(job.jobId, job.kind, job.status));
+    } catch (error: unknown) {
+      failStructured(error, format);
     }
-    if (format === 'json') {
-      jsonRaw(job);
-      return;
-    }
-    text(formatJobText(job.jobId, job.kind, job.status));
   },
 });
 
@@ -200,6 +222,18 @@ const runWorkerCommand = defineCommand({
   },
 });
 
+const runRunnerCommand = defineCommand({
+  meta: {
+    name: 'run-runner',
+    description: 'Run the detached job runner',
+  },
+  args: RUN_RUNNER_ARGS,
+  async run(): Promise<void> {
+    if (!rejectUnknownFlags(RUN_RUNNER_ARGS)) { return; }
+    await runJobRunnerOrExit();
+  },
+});
+
 export const jobsCommand = defineCommand({
   meta: {
     name: 'jobs',
@@ -211,6 +245,7 @@ export const jobsCommand = defineCommand({
     read: readCommand,
     status: statusCommand,
     wait: waitCommand,
+    'run-runner': runRunnerCommand,
     'run-worker': runWorkerCommand,
   },
   run({ args }): void {

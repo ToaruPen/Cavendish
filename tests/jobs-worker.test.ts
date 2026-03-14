@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
@@ -85,14 +85,15 @@ describe('job worker', () => {
       notifyFile,
     });
 
-    await worker.runJobWorker(job.jobId);
+    const result = await worker.runJobWorker(job.jobId);
 
+    expect(result.outcome).toBe('completed');
     expect(store.readJob(job.jobId)?.status).toBe('completed');
     expect(store.readJobResult(job.jobId)?.event.content).toBe('done');
     expect(readFileSync(notifyFile, 'utf8')).toContain('"jobId"');
   });
 
-  it('retries queued jobs when the process lock is busy', async () => {
+  it('returns a retry outcome when the process lock is busy', async () => {
     const lockError = JSON.stringify({
       error: true,
       category: 'cdp_unavailable',
@@ -100,29 +101,23 @@ describe('job worker', () => {
       exitCode: 2,
       action: 'wait',
     });
-    const finalLine = JSON.stringify({
-      type: 'final',
-      content: 'done after retry',
-      timestamp: '2026-03-14T00:00:00.000Z',
-      partial: false,
-    });
-    let attempts = 0;
-    const { store, worker } = await importWithMocks(() => {
-      attempts += 1;
-      if (attempts === 1) {
-        return makeChild([], [lockError], 2);
-      }
-      return makeChild([finalLine], [], 0);
-    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [lockError], 2));
     const job = store.createJob({
       kind: 'ask',
       argv: ['ask', 'hello'],
     });
 
-    await worker.runJobWorker(job.jobId);
+    const result = await worker.runJobWorker(job.jobId);
 
-    expect(attempts).toBe(2);
-    expect(store.readJob(job.jobId)?.status).toBe('completed');
+    expect(result.outcome).toBe('retry');
+    expect(result.record?.retryCount).toBe(1);
+    expect(store.readJob(job.jobId)?.status).toBe('queued');
+    expect(store.readJob(job.jobId)?.startedAt).toBeUndefined();
+    expect(store.readJob(job.jobId)?.retryCount).toBe(1);
+    expect(store.readJob(job.jobId)?.lastRetriedAt).toBeDefined();
+    expect(store.readJob(job.jobId)?.lastRetryError).toContain('Another cavendish process');
+    expect(store.readJobResult(job.jobId)).toBeUndefined();
+    expect(store.readJobError(job.jobId)).toBeUndefined();
     expect(readFileSync(store.getJobEventsPath(job.jobId), 'utf8')).toContain('"job-queued"');
   });
 
@@ -140,9 +135,115 @@ describe('job worker', () => {
       argv: ['deep-research', 'topic'],
     });
 
-    await worker.runJobWorker(job.jobId);
+    const result = await worker.runJobWorker(job.jobId);
 
+    expect(result.outcome).toBe('timed_out');
     expect(store.readJob(job.jobId)?.status).toBe('timed_out');
     expect(store.readJobError(job.jobId)?.category).toBe('timeout');
+  });
+
+  it('propagates a non-zero exit code for failed worker runs', async () => {
+    const errorLine = JSON.stringify({
+      error: true,
+      category: 'timeout',
+      message: 'timed out',
+      exitCode: 7,
+      action: 'retry',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [errorLine], 7));
+    const job = store.createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(process.exitCode).toBe(7);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it('uses the structured lock-contention exit code for retry outcomes', async () => {
+    const lockError = JSON.stringify({
+      error: true,
+      category: 'cdp_unavailable',
+      message: 'Another cavendish process (PID: 1) is running. Wait for it to finish or kill it manually.',
+      exitCode: 2,
+      action: 'wait',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [lockError], 2));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(process.exitCode).toBe(2);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it('treats a missing final event with exit code 0 as a failure', async () => {
+    const { store, worker } = await importWithMocks(() => makeChild([], [], 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(store.readJobError(job.jobId)?.exitCode).toBe(1);
+      expect(store.readJob(job.jobId)?.exitCode).toBe(1);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it('normalizes zero structured error exit codes for failed worker runs', async () => {
+    const errorLine = JSON.stringify({
+      error: true,
+      category: 'timeout',
+      message: 'timed out',
+      exitCode: 0,
+      action: 'retry',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [errorLine], 0));
+    const job = store.createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it('records fallback errors even when job metadata becomes unreadable', async () => {
+    const { store, worker } = await importWithMocks(() => makeChild([], [], 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    writeFileSync(store.getJobFilePath(job.jobId), 'null\n');
+
+    expect(() => {
+      worker.markUnexpectedJobFailure(job.jobId, new Error('boom'));
+    }).not.toThrow();
+    expect(store.readJobError(job.jobId)?.message).toBe('boom');
   });
 });
