@@ -188,6 +188,12 @@ export function readStdin(): string {
     if (error instanceof Error && error.message.startsWith('Stdin input exceeds')) {
       throw error;
     }
+    // EAGAIN means no data is available on a non-blocking fd — common in
+    // subprocess / non-TTY contexts where stdin is reported as a pipe but
+    // has no actual data.  Treat it as "no stdin input".
+    if (error instanceof Error && 'code' in error && (error as { code: unknown }).code === 'EAGAIN') {
+      return '';
+    }
     throw new Error(
       `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,
     );
