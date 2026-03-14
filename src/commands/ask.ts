@@ -314,9 +314,6 @@ function buildAskJobArgv(validated: ValidatedArgs): string[] {
   if (validated.thinkingEffort !== undefined) {
     argv.push('--thinking-effort', validated.thinkingEffort);
   }
-  // End-of-options separator so prompts starting with '--' are not
-  // misinterpreted as flags when the worker re-invokes the CLI.
-  argv.push('--', validated.prompt);
   return argv;
 }
 
@@ -357,6 +354,7 @@ function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
   const record = submitDetachedJob({
     kind: 'ask',
     argv: buildAskJobArgv(validated),
+    prompt: validated.prompt,
     notifyFile: validated.notifyFile,
   });
   return {

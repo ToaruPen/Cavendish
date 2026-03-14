@@ -6,7 +6,7 @@ import { progress } from '../output-handler.js';
 import type { NdjsonEvent } from '../output-handler.js';
 
 import { notifyJobCompletion } from './notifier.js';
-import { appendJobEvent, readJob, updateJob, writeJobError, writeJobResult } from './store.js';
+import { appendJobEvent, readJob, readJobPrompt, updateJob, writeJobError, writeJobResult } from './store.js';
 import type { JobRecord, JobStatus } from './types.js';
 
 export type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
@@ -64,12 +64,13 @@ function parseStructuredError(line: string): StructuredErrorPayload | undefined 
 
 function buildWorkerArgs(job: JobRecord): string[] {
   const workerFlags = ['--stream', '--format', 'json', '--quiet'];
+  // Preserve backwards compatibility with jobs queued before the prompt-file
+  // migration: if argv still contains a '--' separator, insert worker flags
+  // before it so they are not treated as positional arguments.
   const dashDashIdx = job.argv.indexOf('--');
   if (dashDashIdx === -1) {
     return [...job.argv, ...workerFlags];
   }
-  // Insert worker flags before the '--' separator so they are not
-  // treated as positional arguments by the child's arg parser.
   const before = job.argv.slice(0, dashDashIdx);
   const fromDash = job.argv.slice(dashDashIdx);
   return [...before, ...workerFlags, ...fromDash];
@@ -100,7 +101,7 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
       CAVENDISH_ALLOW_PARTIAL: '1',
     },
   });
-  child.stdin.end(job.stdinData ?? '');
+  child.stdin.end(readJobPrompt(job.jobId));
 
   let finalEvent: NdjsonEvent | undefined;
   let structuredError: StructuredErrorPayload | undefined;

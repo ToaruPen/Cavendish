@@ -12,7 +12,7 @@ function makeChild(
   stdoutLines: string[],
   stderrLines: string[],
   exitCode: number,
-): EventEmitter & { stdout: PassThrough; stderr: PassThrough } {
+): EventEmitter & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough } {
   const child = new EventEmitter() as EventEmitter & {
     stdin: PassThrough;
     stdout: PassThrough;
@@ -249,17 +249,25 @@ describe('job worker', () => {
     expect(store.readJobError(job.jobId)?.message).toBe('boom');
   });
 
-  it('places worker flags before the -- separator in argv (#175)', async () => {
+  it('pipes prompt file content to child stdin instead of argv (#178)', async () => {
     const finalLine = JSON.stringify({
       type: 'final',
       content: 'done',
       timestamp: '2026-03-14T00:00:00.000Z',
       partial: false,
     });
-    const { store, worker, spawnMock } = await importWithMocks(() => makeChild([finalLine], [], 0));
+    let capturedStdinData = '';
+    const { store, worker, spawnMock } = await importWithMocks(() => {
+      const child = makeChild([finalLine], [], 0);
+      child.stdin.on('data', (chunk: Buffer) => {
+        capturedStdinData += chunk.toString();
+      });
+      return child;
+    });
     const job = store.createJob({
       kind: 'ask',
-      argv: ['ask', '--model', 'Pro', '--timeout', '120', '--', 'my prompt'],
+      argv: ['ask', '--model', 'Pro', '--timeout', '120'],
+      prompt: 'my prompt from file',
     });
 
     await worker.runJobWorker(job.jobId);
@@ -269,13 +277,14 @@ describe('job worker', () => {
     if (spawnArgs === undefined) {
       throw new Error('spawn was not called');
     }
-    // Worker flags (--stream, --format, --quiet) must appear before '--'
-    const dashDashIdx = spawnArgs.indexOf('--');
-    expect(dashDashIdx).toBeGreaterThan(-1);
-    expect(spawnArgs.indexOf('--stream')).toBeLessThan(dashDashIdx);
-    expect(spawnArgs.indexOf('--format')).toBeLessThan(dashDashIdx);
-    expect(spawnArgs.indexOf('--quiet')).toBeLessThan(dashDashIdx);
-    // Prompt must appear after '--'
-    expect(spawnArgs[dashDashIdx + 1]).toBe('my prompt');
+    // Prompt must NOT appear in argv (avoids ps exposure and ARG_MAX)
+    expect(spawnArgs).not.toContain('my prompt from file');
+    expect(spawnArgs).not.toContain('--');
+    // Worker flags must be appended
+    expect(spawnArgs).toContain('--stream');
+    expect(spawnArgs).toContain('--format');
+    expect(spawnArgs).toContain('--quiet');
+    // Prompt must be piped via stdin from the prompt file
+    expect(capturedStdinData).toBe('my prompt from file');
   });
 });

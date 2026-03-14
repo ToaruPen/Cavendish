@@ -9,10 +9,12 @@ import type { DetachedJobRequest, JobKind, JobRecord, JobResultRecord, JobStatus
 
 const JOBS_DIR = join(CAVENDISH_DIR, 'jobs');
 const JOB_FILE = 'job.json';
+const PROMPT_FILE = 'prompt.txt';
 const EVENTS_FILE = 'events.ndjson';
 const RESULT_FILE = 'result.json';
 const ERROR_FILE = 'error.json';
 const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_KINDS: readonly JobKind[] = ['ask', 'deep-research'];
 const JOB_STATUSES: readonly JobStatus[] = ['queued', 'running', 'completed', 'failed', 'timed_out', 'cancelled'];
@@ -61,6 +63,18 @@ export function getJobErrorPath(jobId: string): string {
   return join(getJobDir(jobId), ERROR_FILE);
 }
 
+export function getJobPromptPath(jobId: string): string {
+  return join(getJobDir(jobId), PROMPT_FILE);
+}
+
+export function readJobPrompt(jobId: string): string {
+  const path = getJobPromptPath(jobId);
+  if (!existsSync(path)) {
+    return '';
+  }
+  return readFileSync(path, 'utf8');
+}
+
 export function createJob(request: DetachedJobRequest): JobRecord {
   const jobId = randomUUID();
   const submittedAt = new Date().toISOString();
@@ -69,7 +83,6 @@ export function createJob(request: DetachedJobRequest): JobRecord {
     kind: request.kind,
     status: 'queued',
     argv: request.argv,
-    stdinData: request.stdinData,
     notifyFile: request.notifyFile,
     submittedAt,
     updatedAt: submittedAt,
@@ -78,6 +91,15 @@ export function createJob(request: DetachedJobRequest): JobRecord {
     eventsPath: getJobEventsPath(jobId),
     errorPath: getJobErrorPath(jobId),
   };
+  // Write the prompt file before persisting the job record so that an
+  // already-running detached runner cannot pick up the job before the
+  // prompt is available on disk.
+  if (request.prompt !== undefined && request.prompt.length > 0) {
+    ensureDir(getJobDir(jobId));
+    const promptPath = getJobPromptPath(jobId);
+    writeFileSync(promptPath, request.prompt);
+    chmodSync(promptPath, FILE_MODE);
+  }
   saveJob(record);
   return record;
 }
@@ -165,7 +187,6 @@ function assertValidJobRecordShape(record: unknown, label: string): asserts reco
   if (typeof candidate.retryCount !== 'number' || !Number.isInteger(candidate.retryCount) || candidate.retryCount < 0) {
     throw new Error(`${label} is missing required retryCount metadata. Recreate the detached job and retry.`);
   }
-  assertOptionalStringField(candidate.stdinData, 'stdinData', label);
   assertOptionalStringField(candidate.notifyFile, 'notifyFile', label);
   assertOptionalStringField(candidate.startedAt, 'startedAt', label);
   assertOptionalStringField(candidate.completedAt, 'completedAt', label);

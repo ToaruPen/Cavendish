@@ -250,11 +250,6 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
   if (v.exportPath !== undefined) {
     argv.push('--exportPath', v.exportPath);
   }
-  // End-of-options separator so prompts starting with '--' are not
-  // misinterpreted as flags when the worker re-invokes the CLI.
-  if (v.mode.kind !== 'refresh') {
-    argv.push('--', v.mode.prompt);
-  }
   return argv;
 }
 
@@ -262,6 +257,7 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
   const record = submitDetachedJob({
     kind: 'deep-research',
     argv: buildDeepResearchJobArgv(v),
+    prompt: v.mode.kind !== 'refresh' ? v.mode.prompt : undefined,
     notifyFile: v.notifyFile,
   });
   return {
