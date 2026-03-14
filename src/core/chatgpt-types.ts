@@ -33,6 +33,8 @@ export interface WaitForResponseOptions {
   quiet?: boolean;
   /** Assistant message count captured BEFORE sendMessage to avoid race conditions. */
   initialMsgCount: number;
+  /** Last assistant response text captured before sending a follow-up. */
+  initialResponseText?: string;
   /** Label prefix for progress messages (e.g. 'Deep Research'). Defaults to 'Response'. */
   label?: string;
 }

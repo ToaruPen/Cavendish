@@ -158,7 +158,10 @@ export function readStdin(): string {
   }
   try {
     const stat = fstatSync(0);
-    if (!stat.isFIFO() && !stat.isFile()) {
+    const isPipeLike = stat.isFIFO()
+      || stat.isFile()
+      || (typeof stat.isSocket === 'function' && stat.isSocket());
+    if (!isPipeLike) {
       return '';
     }
 

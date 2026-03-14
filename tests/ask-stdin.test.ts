@@ -40,6 +40,7 @@ describe('readStdin() size limit', () => {
 
   async function importWithMockedFs(
     buf: Buffer,
+    kind: 'fifo' | 'socket' = 'fifo',
   ): Promise<{ readStdin: () => string }> {
     vi.resetModules();
 
@@ -48,9 +49,10 @@ describe('readStdin() size limit', () => {
       let offset = 0;
       return {
         ...real,
-        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean } => ({
-          isFIFO: (): boolean => true,
+        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean; isSocket: () => boolean } => ({
+          isFIFO: (): boolean => kind === 'fifo',
           isFile: (): boolean => false,
+          isSocket: (): boolean => kind === 'socket',
         }),
         readSync: (
           _fd: number,
@@ -95,5 +97,12 @@ describe('readStdin() size limit', () => {
 
     const result = readStdin();
     expect(result).toHaveLength(STDIN_MAX_BYTES);
+  });
+
+  it('accepts socket-backed stdin from spawned child processes', async () => {
+    const buf = Buffer.from('detached worker stdin');
+    const { readStdin } = await importWithMockedFs(buf, 'socket');
+
+    expect(readStdin()).toBe('detached worker stdin');
   });
 });
