@@ -207,7 +207,18 @@ export class ChatGPTDriver {
 
     await this.page.locator(SELECTORS.CONVERSATION_ARCHIVE_OPTION).click();
 
-    await link.waitFor({ state: 'detached', timeout: 10_000 });
+    // Playwright's 'hidden' state succeeds when the element is either
+    // removed from the DOM (detached) or invisible (CSS display:none / etc.).
+    try {
+      await link.waitFor({ state: 'hidden', timeout: 10_000 });
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        // Preserve the original Playwright TimeoutError so upstream
+        // error handlers can classify it correctly (e.g. as a timeout).
+        throw error;
+      }
+      throw error;
+    }
     progress('Conversation archived', quiet);
   }
 
@@ -729,6 +740,10 @@ export class ChatGPTDriver {
       );
     }
 
+    // Scroll the link to the vertical centre of the sidebar so it is not
+    // hidden behind sticky header/footer overlays that intercept clicks.
+    await link.evaluate((el) => { el.scrollIntoView({ block: 'center' }); });
+
     await link.hover();
     const menuButton = link.locator(SELECTORS.CONVERSATION_MENU_BUTTON);
     await menuButton.waitFor({ state: 'visible', timeout: 5000 });
@@ -750,6 +765,9 @@ export class ChatGPTDriver {
       }
       throw error;
     }
+
+    // Scroll into centre to avoid sticky header/footer overlays (same as openConversationMenu).
+    await link.evaluate((el) => { el.scrollIntoView({ block: 'center' }); });
 
     await link.hover();
     const menuButton = link.locator(SELECTORS.PROJECT_CONVERSATION_MENU_BUTTON);

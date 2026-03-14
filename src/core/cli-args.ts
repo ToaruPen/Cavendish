@@ -144,6 +144,65 @@ export const STDIN_MAX_BYTES = 1_048_576;
 /** Size of the scratch buffer used for chunked stdin reads. */
 const STDIN_CHUNK_SIZE = 64 * 1024;
 
+/** Check if an error is an EAGAIN errno (non-blocking fd with no data). */
+function isEagainError(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && (error as { code: unknown }).code === 'EAGAIN';
+}
+
+/**
+ * Maximum consecutive EAGAIN retries before giving up.
+ * 20 retries × 5 ms = ~100 ms of patience — long enough for inter-chunk
+ * gaps in bursty writes, short enough for "no stdin at all" to fail fast.
+ */
+const EAGAIN_MAX_RETRIES = 20;
+const EAGAIN_RETRY_MS = 5;
+
+/** Synchronous sleep using {@link Atomics.wait}. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Read all available chunks from fd 0 into `chunks`, tracking total bytes.
+ *
+ * On non-blocking fds EAGAIN means "no data yet", not EOF. The loop retries
+ * up to {@link EAGAIN_MAX_RETRIES} consecutive times with a short sleep so
+ * bursty writes are not silently truncated.
+ */
+function readChunks(chunks: Buffer[], state: { totalBytes: number }): void {
+  const scratch = Buffer.allocUnsafe(STDIN_CHUNK_SIZE);
+  let consecutiveEagain = 0;
+  for (;;) {
+    let bytesRead: number;
+    try {
+      bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
+    } catch (error: unknown) {
+      if (isEagainError(error)) {
+        consecutiveEagain++;
+        if (consecutiveEagain > EAGAIN_MAX_RETRIES) {
+          return; // no more data coming
+        }
+        sleepSync(EAGAIN_RETRY_MS);
+        continue;
+      }
+      throw error;
+    }
+    if (bytesRead === 0) {
+      break;
+    }
+    consecutiveEagain = 0;
+    state.totalBytes += bytesRead;
+    if (state.totalBytes > STDIN_MAX_BYTES) {
+      throw new Error(
+        `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(state.totalBytes)}+). Reduce input size or use --file instead.`,
+      );
+    }
+    chunks.push(Buffer.from(scratch.subarray(0, bytesRead)));
+  }
+}
+
 /**
  * Read piped stdin when running in a non-TTY context.
  * Returns the raw input, or an empty string when stdin is a TTY.
@@ -156,6 +215,8 @@ export function readStdin(): string {
   if (process.stdin.isTTY) {
     return '';
   }
+  const chunks: Buffer[] = [];
+  const state = { totalBytes: 0 };
   try {
     const stat = fstatSync(0);
     const isPipeLike = stat.isFIFO()
@@ -165,25 +226,9 @@ export function readStdin(): string {
       return '';
     }
 
-    const scratch = Buffer.allocUnsafe(STDIN_CHUNK_SIZE);
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
+    readChunks(chunks, state);
 
-    for (;;) {
-      const bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
-      if (bytesRead === 0) {
-        break;
-      }
-      totalBytes += bytesRead;
-      if (totalBytes > STDIN_MAX_BYTES) {
-        throw new Error(
-          `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(totalBytes)}+). Reduce input size or use --file instead.`,
-        );
-      }
-      chunks.push(Buffer.from(scratch.subarray(0, bytesRead)));
-    }
-
-    return Buffer.concat(chunks, totalBytes).toString('utf-8');
+    return Buffer.concat(chunks, state.totalBytes).toString('utf-8');
   } catch (error: unknown) {
     if (error instanceof Error && error.message.startsWith('Stdin input exceeds')) {
       throw error;

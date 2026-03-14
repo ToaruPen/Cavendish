@@ -105,4 +105,70 @@ describe('readStdin() size limit', () => {
 
     expect(readStdin()).toBe('detached worker stdin');
   });
+
+  it('returns empty string when readSync always throws EAGAIN (no stdin data)', async () => {
+    vi.resetModules();
+
+    vi.doMock('node:fs', async () => {
+      const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...real,
+        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean; isSocket: () => boolean } => ({
+          isFIFO: (): boolean => true,
+          isFile: (): boolean => false,
+          isSocket: (): boolean => false,
+        }),
+        readSync: (): number => {
+          const err = new Error('EAGAIN: resource temporarily unavailable, read') as NodeJS.ErrnoException;
+          err.code = 'EAGAIN';
+          throw err;
+        },
+      };
+    });
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    const mod = await import('../src/core/cli-args.js');
+
+    expect(mod.readStdin()).toBe('');
+  });
+
+  it('retries on EAGAIN between bursts and returns concatenated data', async () => {
+    vi.resetModules();
+
+    // Simulate bursty writes: chunk1 → EAGAIN × 2 → chunk2 → EOF
+    vi.doMock('node:fs', async () => {
+      const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+      const sequence = ['hello ', null, null, 'world'];
+      let idx = 0;
+      return {
+        ...real,
+        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean; isSocket: () => boolean } => ({
+          isFIFO: (): boolean => true,
+          isFile: (): boolean => false,
+          isSocket: (): boolean => false,
+        }),
+        readSync: (
+          _fd: number,
+          target: Buffer,
+          targetOffset: number,
+        ): number => {
+          if (idx >= sequence.length) { return 0; } // EOF
+          const item = sequence[idx++];
+          if (item === null) {
+            const err = new Error('EAGAIN') as NodeJS.ErrnoException;
+            err.code = 'EAGAIN';
+            throw err;
+          }
+          const buf = Buffer.from(item);
+          buf.copy(target, targetOffset);
+          return buf.length;
+        },
+      };
+    });
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    const mod = await import('../src/core/cli-args.js');
+
+    expect(mod.readStdin()).toBe('hello world');
+  });
 });
