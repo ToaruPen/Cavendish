@@ -144,14 +144,6 @@ export const STDIN_MAX_BYTES = 1_048_576;
 /** Size of the scratch buffer used for chunked stdin reads. */
 const STDIN_CHUNK_SIZE = 64 * 1024;
 
-/**
- * Read piped stdin when running in a non-TTY context.
- * Returns the raw input, or an empty string when stdin is a TTY.
- *
- * Reads in 64 KiB chunks and checks the accumulated size after each chunk,
- * throwing immediately when {@link STDIN_MAX_BYTES} is exceeded. This prevents
- * OOM from multi-GB stdin input.
- */
 /** Check if an error is an EAGAIN errno (non-blocking fd with no data). */
 function isEagainError(error: unknown): boolean {
   return error instanceof Error
@@ -211,6 +203,14 @@ function readChunks(chunks: Buffer[], state: { totalBytes: number }): void {
   }
 }
 
+/**
+ * Read piped stdin when running in a non-TTY context.
+ * Returns the raw input, or an empty string when stdin is a TTY.
+ *
+ * Reads in 64 KiB chunks and checks the accumulated size after each chunk,
+ * throwing immediately when {@link STDIN_MAX_BYTES} is exceeded. This prevents
+ * OOM from multi-GB stdin input.
+ */
 export function readStdin(): string {
   if (process.stdin.isTTY) {
     return '';
