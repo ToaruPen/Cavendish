@@ -207,22 +207,17 @@ export class ChatGPTDriver {
 
     await this.page.locator(SELECTORS.CONVERSATION_ARCHIVE_OPTION).click();
 
-    // ChatGPT may remove the link from DOM (detached) or hide it via CSS
-    // animation. Accept either state as success.
+    // Playwright's 'hidden' state succeeds when the element is either
+    // removed from the DOM (detached) or invisible (CSS display:none / etc.).
     try {
-      await link.waitFor({ state: 'detached', timeout: 10_000 });
+      await link.waitFor({ state: 'hidden', timeout: 10_000 });
     } catch (error: unknown) {
       if (isTimeoutError(error)) {
-        const stillVisible = await link.isVisible();
-        if (stillVisible) {
-          throw new Error(
-            `Archive action did not remove conversation "${id}" from sidebar within 10s.`,
-          );
-        }
-        // Link is hidden (CSS) but not detached — archive succeeded
-      } else {
-        throw error;
+        throw new Error(
+          `Archive action did not hide/remove conversation "${id}" from sidebar within 10s.`,
+        );
       }
+      throw error;
     }
     progress('Conversation archived', quiet);
   }

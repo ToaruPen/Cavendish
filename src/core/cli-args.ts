@@ -152,10 +152,37 @@ const STDIN_CHUNK_SIZE = 64 * 1024;
  * throwing immediately when {@link STDIN_MAX_BYTES} is exceeded. This prevents
  * OOM from multi-GB stdin input.
  */
+/** Check if an error is an EAGAIN errno (non-blocking fd with no data). */
+function isEagainError(error: unknown): boolean {
+  return error instanceof Error
+    && 'code' in error
+    && (error as { code: unknown }).code === 'EAGAIN';
+}
+
+/** Read all available chunks from fd 0 into `chunks`, tracking `totalBytes`. */
+function readChunks(chunks: Buffer[], state: { totalBytes: number }): void {
+  const scratch = Buffer.allocUnsafe(STDIN_CHUNK_SIZE);
+  for (;;) {
+    const bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
+    if (bytesRead === 0) {
+      break;
+    }
+    state.totalBytes += bytesRead;
+    if (state.totalBytes > STDIN_MAX_BYTES) {
+      throw new Error(
+        `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(state.totalBytes)}+). Reduce input size or use --file instead.`,
+      );
+    }
+    chunks.push(Buffer.from(scratch.subarray(0, bytesRead)));
+  }
+}
+
 export function readStdin(): string {
   if (process.stdin.isTTY) {
     return '';
   }
+  const chunks: Buffer[] = [];
+  const state = { totalBytes: 0 };
   try {
     const stat = fstatSync(0);
     const isPipeLike = stat.isFIFO()
@@ -165,34 +192,20 @@ export function readStdin(): string {
       return '';
     }
 
-    const scratch = Buffer.allocUnsafe(STDIN_CHUNK_SIZE);
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
+    readChunks(chunks, state);
 
-    for (;;) {
-      const bytesRead = readSync(0, scratch, 0, STDIN_CHUNK_SIZE, null);
-      if (bytesRead === 0) {
-        break;
-      }
-      totalBytes += bytesRead;
-      if (totalBytes > STDIN_MAX_BYTES) {
-        throw new Error(
-          `Stdin input exceeds ${String(STDIN_MAX_BYTES)} bytes (got ${String(totalBytes)}+). Reduce input size or use --file instead.`,
-        );
-      }
-      chunks.push(Buffer.from(scratch.subarray(0, bytesRead)));
-    }
-
-    return Buffer.concat(chunks, totalBytes).toString('utf-8');
+    return Buffer.concat(chunks, state.totalBytes).toString('utf-8');
   } catch (error: unknown) {
     if (error instanceof Error && error.message.startsWith('Stdin input exceeds')) {
       throw error;
     }
     // EAGAIN means no data is available on a non-blocking fd — common in
     // subprocess / non-TTY contexts where stdin is reported as a pipe but
-    // has no actual data.  Treat it as "no stdin input".
-    if (error instanceof Error && 'code' in error && (error as { code: unknown }).code === 'EAGAIN') {
-      return '';
+    // has no actual data.  Return any partially buffered data, or empty string.
+    if (isEagainError(error)) {
+      return state.totalBytes === 0
+        ? ''
+        : Buffer.concat(chunks, state.totalBytes).toString('utf-8');
     }
     throw new Error(
       `Failed to read piped stdin: ${errorMessage(error)}. Re-run without pipe or fix stdin source.`,

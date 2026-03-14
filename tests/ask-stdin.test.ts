@@ -105,4 +105,67 @@ describe('readStdin() size limit', () => {
 
     expect(readStdin()).toBe('detached worker stdin');
   });
+
+  it('returns empty string when readSync throws EAGAIN with no prior data', async () => {
+    vi.resetModules();
+
+    vi.doMock('node:fs', async () => {
+      const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+      return {
+        ...real,
+        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean; isSocket: () => boolean } => ({
+          isFIFO: (): boolean => true,
+          isFile: (): boolean => false,
+          isSocket: (): boolean => false,
+        }),
+        readSync: (): number => {
+          const err = new Error('EAGAIN: resource temporarily unavailable, read') as NodeJS.ErrnoException;
+          err.code = 'EAGAIN';
+          throw err;
+        },
+      };
+    });
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    const mod = await import('../src/core/cli-args.js');
+
+    expect(mod.readStdin()).toBe('');
+  });
+
+  it('returns partial data when readSync throws EAGAIN after reading chunks', async () => {
+    vi.resetModules();
+
+    vi.doMock('node:fs', async () => {
+      const real = await vi.importActual<typeof import('node:fs')>('node:fs');
+      let callCount = 0;
+      const partialData = Buffer.from('partial');
+      return {
+        ...real,
+        fstatSync: (): { isFIFO: () => boolean; isFile: () => boolean; isSocket: () => boolean } => ({
+          isFIFO: (): boolean => true,
+          isFile: (): boolean => false,
+          isSocket: (): boolean => false,
+        }),
+        readSync: (
+          _fd: number,
+          target: Buffer,
+          targetOffset: number,
+        ): number => {
+          callCount++;
+          if (callCount === 1) {
+            partialData.copy(target, targetOffset);
+            return partialData.length;
+          }
+          const err = new Error('EAGAIN: resource temporarily unavailable, read') as NodeJS.ErrnoException;
+          err.code = 'EAGAIN';
+          throw err;
+        },
+      };
+    });
+
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    const mod = await import('../src/core/cli-args.js');
+
+    expect(mod.readStdin()).toBe('partial');
+  });
 });
