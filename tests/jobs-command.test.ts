@@ -94,6 +94,69 @@ describe('jobs command', () => {
     ]);
   });
 
+  it('does not emit the root jobs list when a subcommand is invoked', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const run = jobsCommand.run;
+    if (run === undefined) {
+      throw new Error('jobsCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: ['read'],
+        format: 'json',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: ['read', 'job-1', '--format', 'json'],
+      cmd: jobsCommand,
+    });
+
+    expect(jsonRawMock).not.toHaveBeenCalled();
+  });
+
+  it('does not emit the root jobs list when options appear before a subcommand', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const run = jobsCommand.run;
+    if (run === undefined) {
+      throw new Error('jobsCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: ['read'],
+        format: 'json',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: ['--format', 'json', 'read', 'job-1'],
+      cmd: jobsCommand,
+    });
+
+    expect(jsonRawMock).not.toHaveBeenCalled();
+  });
+
+  it('does not treat string option values as subcommand names', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const run = jobsCommand.run;
+    if (run === undefined) {
+      throw new Error('jobsCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        format: 'list',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: ['--format', 'list'],
+      cmd: jobsCommand,
+    });
+
+    expect(jsonRawMock).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces invalid job metadata through failStructured', async () => {
     const { jobsCommand } = await import('../src/commands/jobs.js');
     const store = await import('../src/core/jobs/store.js');

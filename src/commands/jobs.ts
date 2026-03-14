@@ -234,21 +234,30 @@ const runRunnerCommand = defineCommand({
   },
 });
 
+const JOBS_SUB_COMMANDS = {
+  list: listCommand,
+  read: readCommand,
+  status: statusCommand,
+  wait: waitCommand,
+  'run-runner': runRunnerCommand,
+  'run-worker': runWorkerCommand,
+} as const;
+
+function hasSubCommandInvocation(positionals: string[]): boolean {
+  return Object.hasOwn(JOBS_SUB_COMMANDS, positionals[0] ?? '');
+}
+
 export const jobsCommand = defineCommand({
   meta: {
     name: 'jobs',
     description: 'Inspect and wait for detached jobs',
   },
   args: JOBS_ARGS,
-  subCommands: {
-    list: listCommand,
-    read: readCommand,
-    status: statusCommand,
-    wait: waitCommand,
-    'run-runner': runRunnerCommand,
-    'run-worker': runWorkerCommand,
-  },
+  subCommands: JOBS_SUB_COMMANDS,
   run({ args }): void {
+    if (hasSubCommandInvocation(args._)) {
+      return;
+    }
     const format = validateFormat(args.format);
     if (format === undefined) { return; }
     if (!rejectUnknownFlags(JOBS_ARGS, format)) { return; }
