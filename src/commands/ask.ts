@@ -5,6 +5,9 @@ import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
 import { CavendishError } from '../core/errors.js';
+import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
+import { getJobFilePath } from '../core/jobs/store.js';
+import { submitDetachedJob } from '../core/jobs/submit.js';
 import { allowedThinkingEfforts, supportsGitHub, THINKING_EFFORT_LEVELS, type ThinkingEffortLevel } from '../core/model-config.js';
 import { emitChunk, emitFinal, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { acquireLock, releaseLock } from '../core/process-lock.js';
@@ -61,6 +64,14 @@ const ASK_ARGS = {
     type: 'boolean' as const,
     description: 'Enable agent mode (code execution, file operations)',
   },
+  detach: {
+    type: 'boolean' as const,
+    description: 'Submit as a detached background job and return immediately',
+  },
+  notifyFile: {
+    type: 'string' as const,
+    description: 'Append a JSON notification line to this file when the detached job finishes',
+  },
   ...GLOBAL_ARGS,
   ...FORMAT_ARG,
   ...STREAM_ARG,
@@ -97,6 +108,8 @@ interface ValidatedArgs {
   continueChat: boolean;
   chatId: string | undefined;
   project: string | undefined;
+  detach: boolean;
+  notifyFile: string | undefined;
 }
 
 /**
@@ -162,6 +175,25 @@ function validateChatOptions(
   return { continueChat, chatId, project };
 }
 
+function resolvePrompt(
+  args: Record<string, unknown>,
+  format: 'json' | 'text',
+): string | undefined {
+  let stdinData: string;
+  try {
+    stdinData = readStdin();
+  } catch (error: unknown) {
+    failValidation(errorMessage(error), format);
+    return undefined;
+  }
+  const rawPrompt = (args.prompt as string | undefined) ?? '';
+  if (rawPrompt.length === 0 && stdinData.length === 0) {
+    failValidation('Prompt is required. Provide as argument or pipe via stdin.', format);
+    return undefined;
+  }
+  return buildPrompt(rawPrompt, stdinData);
+}
+
 /**
  * Parse and validate all CLI arguments. Returns undefined on validation failure
  * (exitCode is set and error is logged).
@@ -210,18 +242,11 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const effortError = validateThinkingEffort(thinkingEffort, model);
   if (effortError !== undefined) {failValidation(effortError, format); return;}
 
-  let stdinData: string;
-  try {
-    stdinData = readStdin();
-  } catch (error: unknown) {
-    failValidation(errorMessage(error), format); return;
-  }
-  const rawPrompt = (args.prompt as string | undefined) ?? '';
-  if (rawPrompt.length === 0 && stdinData.length === 0) {
-    failValidation('Prompt is required. Provide as argument or pipe via stdin.', format); return;
-  }
-  const prompt = buildPrompt(rawPrompt, stdinData);
+  const prompt = resolvePrompt(args, format);
+  if (prompt === undefined) { return undefined; }
   const stream = args.stream === true;
+  const detachedOptions = validateDetachedOptions(args, format, stream);
+  if (detachedOptions === undefined) { return undefined; }
 
   return {
     quiet,
@@ -238,6 +263,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     thinkingEffort,
     prompt,
     ...chatOptions,
+    ...detachedOptions,
   };
 }
 
@@ -249,10 +275,76 @@ function dryRunMessage(v: ValidatedArgs): string {
   if (v.chatId !== undefined) {parts.push(`chat: ${v.chatId}`);}
   else if (v.continueChat) {parts.push('continue: most recent');}
   if (v.stream) {parts.push('stream: true');}
+  if (v.detach) {parts.push('detach: true');}
+  if (v.notifyFile !== undefined) {parts.push(`notifyFile: ${v.notifyFile}`);}
   if (v.filePaths.length > 0) {parts.push(`${String(v.filePaths.length)} file(s)`);}
   if (v.gdriveFiles.length > 0) {parts.push(`${String(v.gdriveFiles.length)} Google Drive file(s)`);}
   if (v.githubRepos.length > 0) {parts.push(`${String(v.githubRepos.length)} GitHub repo(s)`);}
   return `[dry-run] Would send prompt to ChatGPT (${parts.join(', ')})`;
+}
+
+function buildAskJobArgv(validated: ValidatedArgs): string[] {
+  const argv = ['ask', '--model', validated.model, '--timeout', String(validated.timeoutSec)];
+  if (validated.continueChat) {
+    argv.push('--continue');
+  }
+  if (validated.chatId !== undefined) {
+    argv.push('--chat', validated.chatId);
+  }
+  if (validated.project !== undefined) {
+    argv.push('--project', validated.project);
+  }
+  for (const filePath of validated.filePaths) {
+    argv.push('--file', filePath);
+  }
+  for (const gdriveFile of validated.gdriveFiles) {
+    argv.push('--gdrive', gdriveFile);
+  }
+  for (const githubRepo of validated.githubRepos) {
+    argv.push('--github', githubRepo);
+  }
+  if (validated.agentMode) {
+    argv.push('--agent');
+  }
+  if (validated.thinkingEffort !== undefined) {
+    argv.push('--thinking-effort', validated.thinkingEffort);
+  }
+  return argv;
+}
+
+function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
+  const record = submitDetachedJob({
+    kind: 'ask',
+    argv: buildAskJobArgv(validated),
+    stdinData: validated.prompt,
+    notifyFile: validated.notifyFile,
+  });
+  return {
+    jobId: record.jobId,
+    status: record.status,
+    kind: record.kind,
+    submittedAt: record.submittedAt,
+    jobPath: getJobFilePath(record.jobId),
+    eventsPath: record.eventsPath,
+    chatId: validated.chatId,
+    notifyFile: validated.notifyFile,
+  };
+}
+
+function handleDryRunOrDetach(
+  args: Record<string, unknown>,
+  validated: ValidatedArgs,
+): boolean {
+  if (args.dryRun === true) {
+    progress(dryRunMessage(validated), false);
+    return true;
+  }
+  if (!validated.detach) {
+    return false;
+  }
+  const payload = submitDetachedAskJob(validated);
+  writeDetachedSubmit(payload, validated.format);
+  return true;
 }
 
 /**
@@ -330,7 +422,7 @@ function assertCompletedResponse(
   result: WaitForResponseResult,
   timeoutSec: number,
 ): void {
-  if (result.completed) {
+  if (result.completed || process.env.CAVENDISH_ALLOW_PARTIAL === '1') {
     return;
   }
 
@@ -395,15 +487,13 @@ export const askCommand = defineCommand({
     const validated = validateArgs(args);
     if (validated === undefined) {return;}
 
-    if (args.dryRun === true) {
-      progress(dryRunMessage(validated), false);
+    if (handleDryRunOrDetach(args, validated)) {
       return;
     }
 
     const {
       quiet, isVerbose, model, timeoutMs, timeoutSec, format, stream, prompt, project,
     } = validated;
-
     verbose(`Model: ${model}, timeout: ${String(timeoutSec)}s, format: ${format}`, isVerbose);
     if (validated.chatId !== undefined) {
       verbose(`Target chat: ${validated.chatId}`, isVerbose);

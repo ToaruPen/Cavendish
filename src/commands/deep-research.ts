@@ -5,6 +5,9 @@ import { defineCommand } from 'citty';
 import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
+import { getJobFilePath } from '../core/jobs/store.js';
+import { submitDetachedJob } from '../core/jobs/submit.js';
 import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
@@ -40,6 +43,14 @@ const DEEP_RESEARCH_ARGS = {
     type: 'string' as const,
     description: 'Path to save exported file (default: ./deep-research-report.{ext})',
   },
+  detach: {
+    type: 'boolean' as const,
+    description: 'Submit as a detached background job and return immediately',
+  },
+  notifyFile: {
+    type: 'string' as const,
+    description: 'Append a JSON notification line to this file when the detached job finishes',
+  },
   ...GLOBAL_ARGS,
   ...FORMAT_ARG,
   ...STREAM_ARG,
@@ -72,6 +83,8 @@ interface ValidatedArgs {
   timeoutSec: number;
   exportFormat: DeepResearchExportFormat | undefined;
   exportPath: string | undefined;
+  detach: boolean;
+  notifyFile: string | undefined;
 }
 
 function validateTimeout(raw: unknown, format: 'json' | 'text'): number | undefined {
@@ -202,6 +215,8 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   if (mode === undefined) { return undefined; }
 
   const stream = args.stream === true;
+  const detachedOptions = validateDetachedOptions(args, format, stream);
+  if (detachedOptions === undefined) { return undefined; }
 
   return {
     quiet,
@@ -213,7 +228,75 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     timeoutSec,
     exportFormat: exp.exportFormat,
     exportPath: exp.exportPath,
+    ...detachedOptions,
   };
+}
+
+function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
+  const argv = ['deep-research', '--timeout', String(v.timeoutSec)];
+  if (v.mode.kind === 'refresh') {
+    argv.push('--chat', v.mode.chatId, '--refresh');
+  } else if (v.mode.kind === 'followup') {
+    argv.push('--chat', v.mode.chatId);
+  } else {
+    for (const filePath of v.mode.filePaths) {
+      argv.push('--file', filePath);
+    }
+  }
+  if (v.exportFormat !== undefined) {
+    argv.push('--export', v.exportFormat);
+  }
+  if (v.exportPath !== undefined) {
+    argv.push('--exportPath', v.exportPath);
+  }
+  return argv;
+}
+
+function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload {
+  const record = submitDetachedJob({
+    kind: 'deep-research',
+    argv: buildDeepResearchJobArgv(v),
+    stdinData: v.mode.kind === 'refresh' ? undefined : v.mode.prompt,
+    notifyFile: v.notifyFile,
+  });
+  return {
+    jobId: record.jobId,
+    status: record.status,
+    kind: record.kind,
+    submittedAt: record.submittedAt,
+    jobPath: getJobFilePath(record.jobId),
+    eventsPath: record.eventsPath,
+    chatId: v.mode.kind === 'initial' ? undefined : v.mode.chatId,
+    notifyFile: v.notifyFile,
+  };
+}
+
+function dryRunMessage(v: ValidatedArgs): string {
+  const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
+  if (v.stream) { parts.push('stream: true'); }
+  if (v.mode.kind === 'initial' && v.mode.filePaths.length > 0) {
+    parts.push(`${String(v.mode.filePaths.length)} file(s)`);
+  }
+  if (v.exportFormat !== undefined) { parts.push(`export: ${v.exportFormat}`); }
+  if (v.detach) { parts.push('detach: true'); }
+  if (v.notifyFile !== undefined) { parts.push(`notifyFile: ${v.notifyFile}`); }
+  return `[dry-run] Would send Deep Research query (${parts.join(', ')})`;
+}
+
+function handleDryRunOrDetach(
+  args: Record<string, unknown>,
+  validated: ValidatedArgs,
+): boolean {
+  if (args.dryRun === true) {
+    progress(dryRunMessage(validated), false);
+    return true;
+  }
+  if (!validated.detach) {
+    return false;
+  }
+  const payload = submitDetachedDeepResearchJob(validated);
+  writeDetachedSubmit(payload, validated.format);
+  return true;
 }
 
 /**
@@ -334,16 +417,11 @@ export const deepResearchCommand = defineCommand({
     const v = validateArgs(args);
     if (v === undefined) { return; }
 
-    const { quiet, isVerbose, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath } = v;
+    const {
+      quiet, isVerbose, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath,
+    } = v;
 
-    if (args.dryRun === true) {
-      const parts = [`mode: ${mode.kind}`, `format: ${format}`, `timeout: ${String(timeoutSec)}s`];
-      if (stream) { parts.push('stream: true'); }
-      if (mode.kind === 'initial' && mode.filePaths.length > 0) {
-        parts.push(`${String(mode.filePaths.length)} file(s)`);
-      }
-      if (exportFormat !== undefined) { parts.push(`export: ${exportFormat}`); }
-      progress(`[dry-run] Would send Deep Research query (${parts.join(', ')})`, false);
+    if (handleDryRunOrDetach(args, v)) {
       return;
     }
 

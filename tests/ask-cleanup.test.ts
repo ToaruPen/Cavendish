@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -13,6 +15,7 @@ let unregisterFns: ReturnType<typeof vi.fn>[];
 /* ---------- static mocks ---------- */
 
 vi.mock('../src/core/browser-manager.js', () => ({
+  CAVENDISH_DIR: join(process.cwd(), '.tmp-tests', 'cavendish'),
   BrowserManager: vi.fn(() => ({
     getPage: vi.fn().mockResolvedValue({ url: (): string => 'https://chatgpt.com' }),
     closePage: vi.fn().mockResolvedValue(undefined),
