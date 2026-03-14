@@ -59,14 +59,14 @@ describe('submitDetachedJob', () => {
       const record: { jobId: string; kind: string } = submitDetachedJob({
         kind: 'ask',
         argv: ['ask', 'hello'],
-        stdinData: 'hello from stdin',
+        prompt: 'hello from stdin',
         notifyFile: NOTIFY_FILE,
       });
 
       expect(createJobMock).toHaveBeenCalledWith({
         kind: 'ask',
         argv: ['ask', 'hello'],
-        stdinData: 'hello from stdin',
+        prompt: 'hello from stdin',
         notifyFile: NOTIFY_FILE,
       });
       const spawnCall = spawnMock.mock.calls[0] as

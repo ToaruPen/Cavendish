@@ -69,6 +69,7 @@ vi.mock('../src/constants/selectors.js', async () => {
 
 interface DetachedRequest {
   kind: string;
+  prompt?: string;
   notifyFile?: string;
   argv: string[];
 }
@@ -132,10 +133,8 @@ describe('deep-research --detach', () => {
       'markdown',
       '--exportPath',
       './report.md',
-      '--',
-      'research topic',
     ]);
-    expect(request).not.toHaveProperty('stdinData');
+    expect(request.prompt).toBe('research topic');
 
     const payload = jsonRawMock.mock.calls[0]?.[0] as SubmitPayload | undefined;
     expect(payload).toBeDefined();

@@ -150,10 +150,8 @@ describe('ask --detach', () => {
       '--agent',
       '--thinking-effort',
       'standard',
-      '--',
-      'hello',
     ]);
-    expect(request.stdinData).toBeUndefined();
+    expect(request.prompt).toBe('hello');
 
     const payload = jsonRawMock.mock.calls[0]?.[0] as DetachedSubmitPayload | undefined;
     expect(payload).toBeDefined();
@@ -169,8 +167,7 @@ describe('ask --detach', () => {
     expect(payload.notifyFile).toMatch(/notify\.ndjson$/);
   });
 
-  it('includes stdin-only prompt in argv instead of stdinData (#175)', async () => {
-    // Simulate stdin-only: readStdin returns the prompt, buildPrompt returns it
+  it('passes stdin-only prompt via prompt field, not argv (#178)', async () => {
     readStdinMock.mockReturnValueOnce('stdin-only prompt');
     buildPromptMock.mockReturnValueOnce('stdin-only prompt');
 
@@ -204,11 +201,10 @@ describe('ask --detach', () => {
     if (request === undefined) {
       throw new Error('Detached ask request was not captured');
     }
-    // The prompt must be a positional arg in argv (after '--'), not in stdinData
-    expect(request.argv[0]).toBe('ask');
-    expect(request.argv.at(-2)).toBe('--');
-    expect(request.argv.at(-1)).toBe('stdin-only prompt');
-    expect(request.stdinData).toBeUndefined();
+    // Prompt must be in the prompt field, not in argv (avoids ps exposure)
+    expect(request.prompt).toBe('stdin-only prompt');
+    expect(request.argv).not.toContain('--');
+    expect(request.argv).not.toContain('stdin-only prompt');
   });
 
   it('rejects --stream together with --detach', async () => {
