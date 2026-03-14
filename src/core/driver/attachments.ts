@@ -10,7 +10,7 @@ import type { FrameLocator, Locator, Page } from 'playwright-core';
 import { MENU_LABELS, SELECTORS } from '../../constants/selectors.js';
 import { progress } from '../output-handler.js';
 
-import { delay, isTimeoutError, SEND_BUTTON_TIMEOUT_MS, waitForReadySendButton } from './helpers.js';
+import { delay, isTimeoutError, UPLOAD_SEND_BUTTON_TIMEOUT_MS, waitForReadySendButton } from './helpers.js';
 
 type OpenMenuFn = (labelPath: (string | string[])[], quiet?: boolean) => Promise<void>;
 
@@ -159,7 +159,7 @@ export async function waitForAttachmentTiles(
   sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
   uploadTimeoutMs?: number,
 ): Promise<void> {
-  const effectiveTimeout = uploadTimeoutMs ?? SEND_BUTTON_TIMEOUT_MS;
+  const effectiveTimeout = uploadTimeoutMs ?? UPLOAD_SEND_BUTTON_TIMEOUT_MS;
 
   // Wait for the expected number of file tiles to appear in the composer.
   await page.waitForFunction(

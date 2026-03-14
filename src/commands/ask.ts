@@ -245,6 +245,9 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   const agentMode = args.agent === true;
 
+  const uploadTimeoutMs = parseUploadTimeout(args.uploadTimeout as string | undefined, format);
+  if (uploadTimeoutMs === null) { return undefined; }
+
   const thinkingEffort = args.thinkingEffort as ThinkingEffortLevel | undefined;
   if (thinkingEffort !== undefined && chatOptions.continueChat) {
     failValidation('--thinking-effort cannot be used with --continue. The continued chat uses its existing model.', format); return;
@@ -257,9 +260,6 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const stream = args.stream === true;
   const detachedOptions = validateDetachedOptions(args, format, stream);
   if (detachedOptions === undefined) { return undefined; }
-
-  const uploadTimeoutMs = parseUploadTimeout(args.uploadTimeout as string | undefined, format);
-  if (uploadTimeoutMs === null) { return undefined; }
 
   return {
     quiet,
