@@ -189,4 +189,22 @@ describe('job worker', () => {
       process.exitCode = previousExitCode;
     }
   });
+
+  it('treats a missing final event with exit code 0 as a failure', async () => {
+    const { store, worker } = await importWithMocks(() => makeChild([], [], 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(store.readJobError(job.jobId)?.exitCode).toBe(1);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
 });

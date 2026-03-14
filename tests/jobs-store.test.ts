@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,5 +78,16 @@ describe('job store', () => {
     expect(readFileSync(getJobEventsPath(job.jobId), 'utf8')).toContain('"job-running"');
     expect(readJobResult(job.jobId)?.event.content).toBe('done');
     expect(readJobError(job.jobId)?.category).toBe('timeout');
+  });
+
+  it('ignores invalid job directories when listing jobs', async () => {
+    const { createJob, getJobsDir, readNextQueuedJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    mkdirSync(join(getJobsDir(), 'not-a-job-id'));
+
+    expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });
 });

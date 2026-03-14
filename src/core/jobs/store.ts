@@ -129,7 +129,15 @@ export function listJobs(): JobRecord[] {
   }
   return readdirSync(JOBS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => readJob(entry.name))
+    .map((entry) => {
+      try {
+        return readJob(entry.name);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`[cavendish:jobs] skipping invalid job directory "${entry.name}": ${message}\n`);
+        return undefined;
+      }
+    })
     .filter((value): value is JobRecord => value !== undefined)
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 }

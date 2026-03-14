@@ -131,13 +131,16 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   if (current === undefined) {
     throw new Error(`Job not found: ${jobId}`);
   }
+  const retryCount = Number.isFinite(current.retryCount) ? current.retryCount : 0;
   let record = updateJob(jobId, {
     status: 'running',
     startedAt: current.startedAt ?? new Date().toISOString(),
+    retryCount,
   });
   appendJobState(jobId, 'job-running');
 
   const { exitCode, finalEvent, structuredError } = await runWorkerAttempt(jobId, record);
+  const normalizedExitCode = structuredError === undefined && exitCode === 0 ? 1 : exitCode;
 
   if (finalEvent !== undefined) {
     writeJobResult(jobId, {
@@ -162,7 +165,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     error: true,
     category: 'unknown',
     message: `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
-    exitCode,
+    exitCode: normalizedExitCode,
     action: 'Inspect the job error output and retry the command.',
   };
 
@@ -170,7 +173,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     record = updateJob(jobId, (latest) => ({
       status: 'queued',
       startedAt: undefined,
-      retryCount: latest.retryCount + 1,
+      retryCount: (Number.isFinite(latest.retryCount) ? latest.retryCount : 0) + 1,
       lastRetriedAt: new Date().toISOString(),
       lastRetryError: errorPayload.message,
     }));
