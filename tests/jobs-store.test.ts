@@ -38,6 +38,7 @@ describe('job store', () => {
 
     expect(existsSync(getJobFilePath(job.jobId))).toBe(true);
     expect(readJob(job.jobId)?.status).toBe('queued');
+    expect(readJob(job.jobId)?.retryCount).toBe(0);
     expect(listJobs().map((entry) => entry.jobId)).toContain(job.jobId);
   });
 

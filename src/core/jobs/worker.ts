@@ -167,12 +167,16 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   };
 
   if (isLockContentionError(errorPayload)) {
-    updateJob(jobId, {
+    record = updateJob(jobId, {
       status: 'queued',
+      retryCount: current.retryCount + 1,
+      lastRetriedAt: new Date().toISOString(),
+      lastRetryError: errorPayload.message,
     });
     appendJobState(jobId, 'job-queued');
     return {
       outcome: 'retry',
+      record,
       error: errorPayload,
     };
   }

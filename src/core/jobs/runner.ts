@@ -8,7 +8,7 @@ import { readNextQueuedJob } from './store.js';
 import { markUnexpectedJobFailure, runJobWorker } from './worker.js';
 
 const RUNNER_LOCK_FILE = join(CAVENDISH_DIR, 'jobs-runner.lock');
-const RUNNER_LOCK_WAIT_MS = 3_000;
+const RUNNER_LOCK_MAX_ATTEMPTS = 3;
 const RUNNER_LOCK_RETRY_MS = 200;
 const JOB_RETRY_DELAY_MS = 2_000;
 
@@ -119,12 +119,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function acquireRunnerLock(): Promise<boolean> {
-  const deadline = Date.now() + RUNNER_LOCK_WAIT_MS;
-  while (Date.now() <= deadline) {
+  for (let attempt = 1; attempt <= RUNNER_LOCK_MAX_ATTEMPTS; attempt += 1) {
     if (tryAcquireRunnerLock()) {
+      if (attempt > 1) {
+        progress(`Detached runner lock acquired on attempt ${String(attempt)}`, false);
+      }
       return true;
     }
-    await sleep(RUNNER_LOCK_RETRY_MS);
+    progress(
+      `Detached runner lock busy (attempt ${String(attempt)}/${String(RUNNER_LOCK_MAX_ATTEMPTS)})`,
+      false,
+    );
+    if (attempt < RUNNER_LOCK_MAX_ATTEMPTS) {
+      await sleep(RUNNER_LOCK_RETRY_MS);
+    }
   }
   return false;
 }
@@ -144,6 +152,10 @@ export async function runJobRunner(): Promise<void> {
       try {
         const result = await runJobWorker(nextJob.jobId);
         if (result.outcome === 'retry') {
+          progress(
+            `Retrying detached job ${nextJob.jobId} after lock contention (${String(result.record?.retryCount ?? 0)})`,
+            false,
+          );
           await sleep(JOB_RETRY_DELAY_MS);
         }
       } catch (error: unknown) {

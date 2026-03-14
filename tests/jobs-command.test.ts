@@ -16,6 +16,9 @@ vi.mock('../src/core/jobs/store.js', () => ({
       status: 'queued',
       submittedAt: '2026-03-14T00:00:00.000Z',
       updatedAt: '2026-03-14T00:00:00.000Z',
+      retryCount: 2,
+      lastRetriedAt: '2026-03-14T00:00:10.000Z',
+      lastRetryError: 'Another cavendish process is running.',
     },
   ]),
   readJob: vi.fn(),
@@ -74,6 +77,9 @@ describe('jobs command', () => {
         submittedAt: '2026-03-14T00:00:00.000Z',
         updatedAt: '2026-03-14T00:00:00.000Z',
         chatId: undefined,
+        retryCount: 2,
+        lastRetriedAt: '2026-03-14T00:00:10.000Z',
+        lastRetryError: 'Another cavendish process is running.',
       },
     ]);
   });

@@ -44,6 +44,9 @@ function outputJobs(format: 'json' | 'text'): void {
     submittedAt: job.submittedAt,
     updatedAt: job.updatedAt,
     chatId: job.chatId,
+    retryCount: job.retryCount,
+    lastRetriedAt: job.lastRetriedAt,
+    lastRetryError: job.lastRetryError,
   }));
   if (format === 'json') {
     jsonRaw(jobs);

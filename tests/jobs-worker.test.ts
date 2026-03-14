@@ -110,7 +110,11 @@ describe('job worker', () => {
     const result = await worker.runJobWorker(job.jobId);
 
     expect(result.outcome).toBe('retry');
+    expect(result.record?.retryCount).toBe(1);
     expect(store.readJob(job.jobId)?.status).toBe('queued');
+    expect(store.readJob(job.jobId)?.retryCount).toBe(1);
+    expect(store.readJob(job.jobId)?.lastRetriedAt).toBeDefined();
+    expect(store.readJob(job.jobId)?.lastRetryError).toContain('Another cavendish process');
     expect(store.readJobResult(job.jobId)).toBeUndefined();
     expect(store.readJobError(job.jobId)).toBeUndefined();
     expect(readFileSync(store.getJobEventsPath(job.jobId), 'utf8')).toContain('"job-queued"');

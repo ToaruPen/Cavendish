@@ -71,6 +71,7 @@ export function createJob(request: DetachedJobRequest): JobRecord {
     notifyFile: request.notifyFile,
     submittedAt,
     updatedAt: submittedAt,
+    retryCount: 0,
     resultPath: getJobResultPath(jobId),
     eventsPath: getJobEventsPath(jobId),
     errorPath: getJobErrorPath(jobId),
