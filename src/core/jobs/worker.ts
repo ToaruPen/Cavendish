@@ -17,6 +17,9 @@ export interface JobRunResult {
   error?: StructuredErrorPayload;
 }
 
+// Internal sentinel exit code used only for runner/worker handoff retries.
+const RETRY_HANDOFF_EXIT_CODE = 75;
+
 function resolveCliEntrypoint(): string {
   const entry = process.argv[1];
   if (typeof entry !== 'string' || entry.length === 0) {
@@ -161,7 +164,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   const errorPayload: StructuredErrorPayload = structuredError ?? {
     error: true,
     category: 'unknown',
-    message: `Detached runner exited without a final event (exit code: ${String(exitCode)})`,
+    message: `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
     exitCode,
     action: 'Inspect the job error output and retry the command.',
   };
@@ -226,7 +229,7 @@ export async function runJobWorkerOrExit(jobId: string): Promise<void> {
   try {
     const result = await runJobWorker(jobId);
     if (result.outcome === 'retry') {
-      process.exitCode = 75;
+      process.exitCode = RETRY_HANDOFF_EXIT_CODE;
       return;
     }
     if (result.error !== undefined) {
