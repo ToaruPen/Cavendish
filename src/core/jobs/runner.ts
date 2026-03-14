@@ -12,6 +12,7 @@ const RUNNER_LOCK_MAX_ATTEMPTS = 3;
 const RUNNER_LOCK_RETRY_MS = 200;
 const JOB_RETRY_DELAY_MS = 2_000;
 const JOB_RETRY_MAX_ATTEMPTS = 3;
+let runnerPromise: Promise<void> | null = null;
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
@@ -89,8 +90,12 @@ function tryClaimStaleLock(stalePid: number | null): boolean {
     if (staleFileNeedsCleanup) {
       try {
         unlinkSync(staleFile);
-      } catch {
-        // Stale lock backup may already have been restored or removed.
+      } catch (cleanupError: unknown) {
+        if (!isErrnoException(cleanupError) || cleanupError.code !== 'ENOENT') {
+          process.stderr.write(
+            `[cavendish:jobs] failed to clean up stale runner lock "${staleFile}": ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`,
+          );
+        }
       }
     }
     if (isErrnoException(error) && error.code !== 'ENOENT') {
@@ -160,7 +165,7 @@ async function acquireRunnerLock(): Promise<boolean> {
   return false;
 }
 
-export async function runJobRunner(): Promise<void> {
+async function runJobRunnerOnce(): Promise<void> {
   const acquired = await acquireRunnerLock();
   if (!acquired) {
     return;
@@ -199,6 +204,20 @@ export async function runJobRunner(): Promise<void> {
   } finally {
     releaseRunnerLock();
   }
+}
+
+export async function runJobRunner(): Promise<void> {
+  if (runnerPromise !== null) {
+    return runnerPromise;
+  }
+  runnerPromise = (async (): Promise<void> => {
+    try {
+      await runJobRunnerOnce();
+    } finally {
+      runnerPromise = null;
+    }
+  })();
+  return runnerPromise;
 }
 
 export async function runJobRunnerOrExit(): Promise<void> {

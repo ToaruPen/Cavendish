@@ -36,6 +36,34 @@ function makeChild(
   return child;
 }
 
+function makeDelayedChild(
+  stdoutLines: string[],
+  stderrLines: string[],
+  exitCode: number,
+  delayMs: number,
+): EventEmitter & { stdout: PassThrough; stderr: PassThrough } {
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+  };
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  setTimeout(() => {
+    for (const line of stdoutLines) {
+      child.stdout.write(`${line}\n`);
+    }
+    child.stdout.end();
+    for (const line of stderrLines) {
+      child.stderr.write(`${line}\n`);
+    }
+    child.stderr.end();
+    child.emit('close', exitCode);
+  }, delayMs);
+  return child;
+}
+
 async function importWithMocks(
   spawnImpl: () => ReturnType<typeof makeChild>,
 ): Promise<{
@@ -198,5 +226,26 @@ describe('job runner', () => {
     writeFileSync(join(cavendishDir, 'jobs-runner.lock'), 'not-a-pid\n');
 
     await expect(runner.runJobRunner()).rejects.toThrow(/corrupt/);
+  });
+
+  it('reuses the same in-process runner promise for concurrent calls', async () => {
+    const finalLine = JSON.stringify({
+      type: 'final',
+      content: 'done',
+      timestamp: '2026-03-14T00:00:00.000Z',
+      partial: false,
+    });
+    const { runner, store } = await importWithMocks(() => makeDelayedChild([finalLine], [], 0, 20));
+    store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    await Promise.all([
+      runner.runJobRunner(),
+      runner.runJobRunner(),
+    ]);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 });
