@@ -1,6 +1,6 @@
 {
   "name": "cavendish",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "A Playwright-based CLI tool that automates ChatGPT's Web UI, enabling coding agents to query ChatGPT Pro models via a single shell command",
   "type": "module",
   "files": [
