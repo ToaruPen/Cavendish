@@ -209,13 +209,14 @@ export async function runJobWorkerOrExit(jobId: string): Promise<void> {
     writeJobError(jobId, fallback);
     const job = readJob(jobId);
     if (job !== undefined) {
-      updateJob(jobId, {
+      const record = updateJob(jobId, {
         status: 'failed',
         completedAt: new Date().toISOString(),
         error: fallback,
         exitCode: 1,
       });
       appendWorkerState(jobId, 'job-failed');
+      notifyJobCompletion(record);
     }
     process.exitCode = 1;
   }

@@ -20,7 +20,7 @@ describe('notifyJobCompletion', () => {
     const notifyFile = join(root, 'events', 'notify.ndjson');
 
     notifyJobCompletion({
-      jobId: 'job-1',
+      jobId: '00000000-0000-4000-8000-000000000001',
       kind: 'ask',
       status: 'completed',
       argv: ['ask', 'hello'],
@@ -38,7 +38,7 @@ describe('notifyJobCompletion', () => {
     const content = readFileSync(notifyFile, 'utf8').trim();
     const payload = JSON.parse(content) as Record<string, unknown>;
     expect(payload).toMatchObject({
-      jobId: 'job-1',
+      jobId: '00000000-0000-4000-8000-000000000001',
       kind: 'ask',
       status: 'completed',
       resultPath: join(root, 'result.json'),

@@ -49,8 +49,11 @@ export interface JobNotificationPayload {
   kind: JobKind;
   status: JobStatus;
   resultPath: string;
+  errorPath: string;
   chatId?: string;
   url?: string;
   partial?: boolean;
+  finalResponse?: string;
+  errorMessage?: string;
   timestamp: string;
 }

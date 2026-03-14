@@ -1,8 +1,10 @@
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const SAFE_CONTEXT_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/context.txt';
-const SAFE_JOB_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/job.json';
-const SAFE_EVENTS_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/events.ndjson';
+const SAFE_CONTEXT_PATH = join(process.cwd(), '.tmp-tests', 'context.txt');
+const SAFE_JOB_PATH = join(process.cwd(), '.tmp-tests', 'job.json');
+const SAFE_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'events.ndjson');
 
 let jsonRawMock: ReturnType<typeof vi.fn>;
 let failValidationMock: ReturnType<typeof vi.fn>;
@@ -85,21 +87,8 @@ vi.mock('../src/constants/selectors.js', () => ({
   assertValidChatId: vi.fn(),
 }));
 
-interface DetachedRequest {
-  kind: string;
-  notifyFile?: string;
-  argv: string[];
-}
-
-interface SubmitPayload {
-  jobId: string;
-  kind: string;
-  status: string;
-  submittedAt: string;
-  jobPath: string;
-  eventsPath: string;
-  notifyFile?: string;
-}
+import type { DetachedSubmitPayload } from '../src/core/jobs/helpers.js';
+import type { DetachedJobRequest } from '../src/core/jobs/types.js';
 
 describe('ask --detach', () => {
   beforeEach(() => {
@@ -135,7 +124,7 @@ describe('ask --detach', () => {
     });
 
     expect(submitDetachedJobMock).toHaveBeenCalledOnce();
-    const request = submitDetachedJobMock.mock.calls[0]?.[0] as DetachedRequest | undefined;
+    const request = submitDetachedJobMock.mock.calls[0]?.[0] as DetachedJobRequest | undefined;
     expect(request).toBeDefined();
     if (request === undefined) {
       throw new Error('Detached ask request was not captured');
@@ -160,7 +149,7 @@ describe('ask --detach', () => {
       stdinData: 'hello',
     }));
 
-    const payload = jsonRawMock.mock.calls[0]?.[0] as SubmitPayload | undefined;
+    const payload = jsonRawMock.mock.calls[0]?.[0] as DetachedSubmitPayload | undefined;
     expect(payload).toBeDefined();
     if (payload === undefined) {
       throw new Error('Detached ask payload was not emitted');

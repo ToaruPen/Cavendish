@@ -266,6 +266,7 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
     submittedAt: record.submittedAt,
     jobPath: getJobFilePath(record.jobId),
     eventsPath: record.eventsPath,
+    chatId: v.mode.kind === 'initial' ? undefined : v.mode.chatId,
     notifyFile: v.notifyFile,
   };
 }

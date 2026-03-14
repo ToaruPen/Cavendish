@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { readJobError, readJobResult } from './store.js';
 import type { JobNotificationPayload, JobRecord } from './types.js';
 
 export function notifyJobCompletion(record: JobRecord): void {
@@ -14,9 +15,12 @@ export function notifyJobCompletion(record: JobRecord): void {
       kind: record.kind,
       status: record.status,
       resultPath: record.resultPath,
+      errorPath: record.errorPath,
       chatId: record.chatId,
       url: record.url,
       partial: record.partial,
+      finalResponse: readJobResult(record.jobId)?.event.content,
+      errorMessage: readJobError(record.jobId)?.message ?? record.error?.message,
       timestamp: new Date().toISOString(),
     };
     appendFileSync(record.notifyFile, `${JSON.stringify(payload)}\n`);

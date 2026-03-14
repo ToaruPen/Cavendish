@@ -1,11 +1,14 @@
+import { join } from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const SAFE_RESEARCH_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/research.csv';
-const SAFE_JOB_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/dr-job.json';
-const SAFE_EVENTS_PATH = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/dr-events.ndjson';
+const SAFE_RESEARCH_PATH = join(process.cwd(), '.tmp-tests', 'research.csv');
+const SAFE_JOB_PATH = join(process.cwd(), '.tmp-tests', 'dr-job.json');
+const SAFE_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'dr-events.ndjson');
 
 let jsonRawMock: ReturnType<typeof vi.fn>;
 let submitDetachedJobMock: ReturnType<typeof vi.fn>;
+let withDriverMock: ReturnType<typeof vi.fn>;
 
 vi.mock('../src/core/cli-args.js', () => ({
   FORMAT_ARG: {},
@@ -50,9 +53,11 @@ vi.mock('../src/core/output-handler.js', () => {
   };
 });
 
-vi.mock('../src/core/with-driver.js', () => ({
-  withDriver: vi.fn(),
-}));
+vi.mock('../src/core/with-driver.js', () => {
+  const mock = vi.fn();
+  withDriverMock = mock;
+  return { withDriver: mock };
+});
 
 vi.mock('../src/constants/selectors.js', async () => {
   const actual = await vi.importActual<typeof import('../src/constants/selectors.js')>('../src/constants/selectors.js');
@@ -109,6 +114,7 @@ describe('deep-research --detach', () => {
     });
 
     expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    expect(withDriverMock).not.toHaveBeenCalled();
     const request = submitDetachedJobMock.mock.calls[0]?.[0] as DetachedRequest | undefined;
     expect(request).toBeDefined();
     if (request === undefined) {

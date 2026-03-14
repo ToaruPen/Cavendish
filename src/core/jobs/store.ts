@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { CAVENDISH_DIR } from '../browser-manager.js';
@@ -12,9 +12,18 @@ const JOB_FILE = 'job.json';
 const EVENTS_FILE = 'events.ndjson';
 const RESULT_FILE = 'result.json';
 const ERROR_FILE = 'error.json';
+const DIR_MODE = 0o700;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function ensureDir(path: string): void {
-  mkdirSync(path, { recursive: true });
+  mkdirSync(path, { recursive: true, mode: DIR_MODE });
+  chmodSync(path, DIR_MODE);
+}
+
+function assertValidJobId(jobId: string): void {
+  if (!UUID_PATTERN.test(jobId)) {
+    throw new Error(`Invalid job ID: ${jobId}`);
+  }
 }
 
 function writeJsonAtomic(path: string, data: unknown): void {
@@ -30,6 +39,7 @@ export function getJobsDir(): string {
 }
 
 export function getJobDir(jobId: string): string {
+  assertValidJobId(jobId);
   return join(getJobsDir(), jobId);
 }
 

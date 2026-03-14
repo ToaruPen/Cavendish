@@ -326,6 +326,7 @@ function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
     submittedAt: record.submittedAt,
     jobPath: getJobFilePath(record.jobId),
     eventsPath: record.eventsPath,
+    chatId: validated.chatId,
     notifyFile: validated.notifyFile,
   };
 }

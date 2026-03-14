@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
 
 import { CavendishError } from '../errors.js';
 
@@ -13,13 +12,6 @@ function resolveCliEntrypoint(): string {
       'Cannot resolve cavendish CLI entrypoint from process.argv[1]',
       'unknown',
       'Run the command via the Cavendish CLI entrypoint and retry.',
-    );
-  }
-  if (!existsSync(entry) || !statSync(entry).isFile()) {
-    throw new CavendishError(
-      `Cavendish CLI entrypoint not found: ${entry}`,
-      'unknown',
-      'Reinstall Cavendish or run the command through the packaged CLI binary.',
     );
   }
   return entry;

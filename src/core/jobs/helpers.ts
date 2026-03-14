@@ -9,6 +9,7 @@ export interface DetachedSubmitPayload {
   submittedAt: string;
   jobPath: string;
   eventsPath: string;
+  chatId?: string;
   notifyFile?: string;
 }
 
@@ -44,6 +45,9 @@ export function writeDetachedSubmit(
       `jobPath: ${payload.jobPath}`,
       `eventsPath: ${payload.eventsPath}`,
     ];
+    if (payload.chatId !== undefined) {
+      lines.push(`chatId: ${payload.chatId}`);
+    }
     if (payload.notifyFile !== undefined) {
       lines.push(`notifyFile: ${payload.notifyFile}`);
     }
