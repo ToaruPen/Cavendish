@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -87,6 +87,29 @@ describe('job store', () => {
       argv: ['ask', 'hello'],
     });
     mkdirSync(join(getJobsDir(), 'not-a-job-id'));
+
+    expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
+  });
+
+  it('skips invalid legacy job records without retry metadata', async () => {
+    const { createJob, getJobsDir, getJobFilePath, readNextQueuedJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const legacyJobId = '00000000-0000-4000-8000-000000000099';
+    mkdirSync(join(getJobsDir(), legacyJobId), { recursive: true });
+    writeFileSync(getJobFilePath(legacyJobId), `${JSON.stringify({
+      jobId: legacyJobId,
+      kind: 'ask',
+      status: 'queued',
+      argv: ['ask', 'legacy'],
+      submittedAt: '2026-03-14T00:00:00.000Z',
+      updatedAt: '2026-03-14T00:00:00.000Z',
+      resultPath: join(getJobsDir(), legacyJobId, 'result.json'),
+      eventsPath: join(getJobsDir(), legacyJobId, 'events.ndjson'),
+      errorPath: join(getJobsDir(), legacyJobId, 'error.json'),
+    }, null, 2)}\n`);
 
     expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });

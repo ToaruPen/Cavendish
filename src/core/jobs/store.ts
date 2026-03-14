@@ -115,12 +115,23 @@ function readJsonFile(path: string, label: string): unknown {
   }
 }
 
+function assertValidJobRecordShape(record: JobRecord, label: string): void {
+  if (!Number.isFinite(record.retryCount)) {
+    throw new Error(`${label} is missing required retryCount metadata. Recreate the detached job and retry.`);
+  }
+}
+
 export function readJob(jobId: string): JobRecord | undefined {
   const path = getJobFilePath(jobId);
   if (!existsSync(path)) {
     return undefined;
   }
-  return readJsonFile(path, `job ${jobId}`) as JobRecord | undefined;
+  const record = readJsonFile(path, `job ${jobId}`) as JobRecord | undefined;
+  if (record === undefined) {
+    return undefined;
+  }
+  assertValidJobRecordShape(record, `Job ${jobId}`);
+  return record;
 }
 
 export function listJobs(): JobRecord[] {
@@ -143,9 +154,14 @@ export function listJobs(): JobRecord[] {
 }
 
 export function readNextQueuedJob(): JobRecord | undefined {
-  return listJobs()
-    .filter((job) => job.status === 'queued')
-    .sort((a, b) => a.submittedAt.localeCompare(b.submittedAt))[0];
+  const jobs = listJobs();
+  for (let index = jobs.length - 1; index >= 0; index -= 1) {
+    const job = jobs[index];
+    if (job.status === 'queued') {
+      return job;
+    }
+  }
+  return undefined;
 }
 
 export function appendJobEvent(jobId: string, line: string): void {
