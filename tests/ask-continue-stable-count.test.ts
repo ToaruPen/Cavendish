@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let waitForResponseMock: ReturnType<typeof vi.fn>;
 let getAssistantMessageCountMock: ReturnType<typeof vi.fn>;
+let getLastResponseMock: ReturnType<typeof vi.fn>;
 
 vi.mock('../src/core/browser-manager.js', () => ({
   CAVENDISH_DIR: join(process.cwd(), '.tmp-tests', 'cavendish'),
@@ -18,8 +19,15 @@ vi.mock('../src/core/chatgpt-driver.js', () => {
   waitForResponseMock = vi.fn().mockResolvedValue({ text: 'new response', completed: true });
   getAssistantMessageCountMock = vi.fn()
     .mockResolvedValueOnce(0)
+    .mockResolvedValueOnce(0)
+    .mockResolvedValueOnce(2)
     .mockResolvedValueOnce(2)
     .mockResolvedValueOnce(2);
+  getLastResponseMock = vi.fn()
+    .mockResolvedValueOnce('streaming response')
+    .mockResolvedValueOnce('existing response')
+    .mockResolvedValueOnce('existing response')
+    .mockResolvedValueOnce('existing response');
 
   return {
     ChatGPTDriver: vi.fn(() => ({
@@ -30,7 +38,7 @@ vi.mock('../src/core/chatgpt-driver.js', () => {
       }),
       sendMessage: vi.fn().mockResolvedValue(undefined),
       getAssistantMessageCount: getAssistantMessageCountMock,
-      getLastResponse: vi.fn().mockResolvedValue('existing response'),
+      getLastResponse: getLastResponseMock,
       waitForResponse: waitForResponseMock,
       extractChatId: vi.fn().mockReturnValue('recent-chat-id'),
       getCurrentUrl: vi.fn().mockReturnValue('https://chatgpt.com/c/recent-chat-id'),
@@ -94,7 +102,7 @@ describe('ask --continue baseline capture', () => {
     vi.clearAllMocks();
   });
 
-  it('waits for assistant message count to stabilize before waiting for a follow-up response', async () => {
+  it('captures a stable message-count and response-text baseline before waiting for a follow-up response', async () => {
     const { askCommand } = await import('../src/commands/ask.js');
     const run = askCommand.run;
     if (run === undefined) {
@@ -118,9 +126,11 @@ describe('ask --continue baseline capture', () => {
       cmd: askCommand,
     });
 
-    expect(getAssistantMessageCountMock).toHaveBeenCalledTimes(3);
+    expect(getAssistantMessageCountMock).toHaveBeenCalledTimes(4);
+    expect(getLastResponseMock).toHaveBeenCalledTimes(4);
     expect(waitForResponseMock).toHaveBeenCalledWith(expect.objectContaining({
       initialMsgCount: 2,
+      initialResponseText: 'existing response',
     }));
   });
 });
