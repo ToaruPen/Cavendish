@@ -31,7 +31,13 @@ export const archiveCommand = defineCommand({
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
 
-    const ids = collectChatIds('archive', args.stdin === true);
+    let ids: string[];
+    try {
+      ids = collectChatIds('archive', args.stdin === true);
+    } catch (error: unknown) {
+      fail(errorMessage(error));
+      return;
+    }
 
     if (ids.length === 0) {
       fail('No conversation IDs provided. Pass IDs as arguments or use --stdin.');

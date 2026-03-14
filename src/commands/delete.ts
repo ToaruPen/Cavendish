@@ -40,7 +40,13 @@ export const deleteCommand = defineCommand({
 
     if (!rejectUnknownFlags(DELETE_ARGS, format)) { return; }
 
-    const ids = collectChatIds('delete', args.stdin === true);
+    let ids: string[];
+    try {
+      ids = collectChatIds('delete', args.stdin === true);
+    } catch (error: unknown) {
+      failValidation(errorMessage(error), format);
+      return;
+    }
 
     if (ids.length === 0) {
       failValidation('No conversation IDs provided. Pass IDs as arguments or use --stdin.', format);
@@ -75,6 +81,7 @@ export const deleteCommand = defineCommand({
         try {
           progress(`${label} Deleting: ${id}`, quiet);
           if (projectName !== undefined) {
+            // Re-navigate per deletion: the project page DOM changes after each delete.
             await driver.navigateToProject(projectName, quiet);
             await driver.deleteProjectConversation(id, quiet);
           } else {

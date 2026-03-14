@@ -36,7 +36,13 @@ export const moveCommand = defineCommand({
     const quiet = args.quiet === true;
     const isVerbose = args.verbose === true;
 
-    const ids = collectChatIds('move', args.stdin === true);
+    let ids: string[];
+    try {
+      ids = collectChatIds('move', args.stdin === true);
+    } catch (error: unknown) {
+      fail(errorMessage(error));
+      return;
+    }
 
     if (ids.length === 0) {
       fail('No conversation IDs provided. Pass IDs as arguments or use --stdin.');
