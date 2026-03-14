@@ -183,7 +183,10 @@ async function getResponseSnapshot(
 
       const target = messages[messages.length - 1];
       const text = target.textContent.trim();
-      const copyButton = target.querySelector<HTMLElement>(copySelector);
+      // The copy button lives in the enclosing <article>, not inside the
+      // assistant message element itself (ChatGPT DOM change, Chrome 145+).
+      const article = target.closest('article');
+      const copyButton = (article ?? target).querySelector<HTMLElement>(copySelector);
       const copyButtonVisible = copyButton !== null && copyButton.getBoundingClientRect().height > 0;
 
       return { text, copyButtonVisible };
