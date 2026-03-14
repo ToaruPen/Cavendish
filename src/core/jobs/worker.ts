@@ -169,6 +169,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   if (isLockContentionError(errorPayload)) {
     record = updateJob(jobId, {
       status: 'queued',
+      startedAt: undefined,
       retryCount: current.retryCount + 1,
       lastRetriedAt: new Date().toISOString(),
       lastRetryError: errorPayload.message,
@@ -226,6 +227,14 @@ export async function runJobWorkerOrExit(jobId: string): Promise<void> {
     const result = await runJobWorker(jobId);
     if (result.outcome === 'retry') {
       process.exitCode = 75;
+      return;
+    }
+    if (result.error !== undefined) {
+      process.exitCode = result.error.exitCode;
+      return;
+    }
+    if (result.outcome === 'failed' || result.outcome === 'timed_out') {
+      process.exitCode = 1;
     }
   } catch (error: unknown) {
     markUnexpectedJobFailure(jobId, error);

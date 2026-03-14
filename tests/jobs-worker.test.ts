@@ -112,6 +112,7 @@ describe('job worker', () => {
     expect(result.outcome).toBe('retry');
     expect(result.record?.retryCount).toBe(1);
     expect(store.readJob(job.jobId)?.status).toBe('queued');
+    expect(store.readJob(job.jobId)?.startedAt).toBeUndefined();
     expect(store.readJob(job.jobId)?.retryCount).toBe(1);
     expect(store.readJob(job.jobId)?.lastRetriedAt).toBeDefined();
     expect(store.readJob(job.jobId)?.lastRetryError).toContain('Another cavendish process');
@@ -139,5 +140,29 @@ describe('job worker', () => {
     expect(result.outcome).toBe('timed_out');
     expect(store.readJob(job.jobId)?.status).toBe('timed_out');
     expect(store.readJobError(job.jobId)?.category).toBe('timeout');
+  });
+
+  it('propagates a non-zero exit code for failed worker runs', async () => {
+    const errorLine = JSON.stringify({
+      error: true,
+      category: 'timeout',
+      message: 'timed out',
+      exitCode: 7,
+      action: 'retry',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [errorLine], 7));
+    const job = store.createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(process.exitCode).toBe(7);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
   });
 });

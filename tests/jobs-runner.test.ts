@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
@@ -163,5 +163,40 @@ describe('job runner', () => {
 
     expect(attempts).toBe(2);
     expect(store.readJob(job.jobId)?.status).toBe('completed');
+  });
+
+  it('fails a job after repeated lock-contention retries', async () => {
+    const lockError = JSON.stringify({
+      error: true,
+      category: 'cdp_unavailable',
+      message: 'Another cavendish process (PID: 1) is running. Wait for it to finish or kill it manually.',
+      exitCode: 2,
+      action: 'wait',
+    });
+    let attempts = 0;
+    const { runner, store } = await importWithMocks(() => {
+      attempts += 1;
+      return makeChild([], [lockError], 2);
+    });
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    await runner.runJobRunner();
+
+    expect(attempts).toBe(3);
+    expect(store.readJob(job.jobId)?.status).toBe('failed');
+    expect(store.readJob(job.jobId)?.retryCount).toBe(3);
+    expect(store.readJobError(job.jobId)?.message).toContain('Another cavendish process');
+  });
+
+  it('fails fast when the runner lock file is corrupt', async () => {
+    const { runner } = await importWithMocks(() => makeChild([], [], 0));
+    const cavendishDir = join(testRoot, '.cavendish');
+    mkdirSync(cavendishDir, { recursive: true });
+    writeFileSync(join(cavendishDir, 'jobs-runner.lock'), 'not-a-pid\n');
+
+    await expect(runner.runJobRunner()).rejects.toThrow(/corrupt/);
   });
 });

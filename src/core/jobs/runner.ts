@@ -11,6 +11,7 @@ const RUNNER_LOCK_FILE = join(CAVENDISH_DIR, 'jobs-runner.lock');
 const RUNNER_LOCK_MAX_ATTEMPTS = 3;
 const RUNNER_LOCK_RETRY_MS = 200;
 const JOB_RETRY_DELAY_MS = 2_000;
+const JOB_RETRY_MAX_ATTEMPTS = 3;
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;
@@ -25,19 +26,27 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function readLockPid(): number | null {
+function readLockPidFromPath(path: string): number | null {
   try {
-    const content = readFileSync(RUNNER_LOCK_FILE, 'utf8').trim();
-    const pid = Number.parseInt(content, 10);
-    return Number.isInteger(pid) && pid > 0 ? pid : null;
+    const content = readFileSync(path, 'utf8').trim();
+    if (!/^[1-9]\d*$/.test(content)) {
+      throw new Error(
+        `Runner lock file is corrupt: ${JSON.stringify(content)}. Remove "${path}" and retry.`,
+      );
+    }
+    return Number.parseInt(content, 10);
   } catch (error: unknown) {
     if (isErrnoException(error) && error.code === 'ENOENT') {
       return null;
     }
     throw new Error(
-      `Failed to read runner lock file "${RUNNER_LOCK_FILE}": ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to read runner lock file "${path}": ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+function readLockPid(): number | null {
+  return readLockPidFromPath(RUNNER_LOCK_FILE);
 }
 
 function tryCreateLockFile(): boolean {
@@ -56,19 +65,33 @@ function tryClaimStaleLock(stalePid: number | null): boolean {
   if (stalePid === null) {
     return false;
   }
-  const tmpFile = `${RUNNER_LOCK_FILE}.${String(process.pid)}`;
+  const staleFile = `${RUNNER_LOCK_FILE}.stale.${String(process.pid)}`;
+  let staleFileNeedsCleanup = false;
   try {
     if (readLockPid() !== stalePid) {
       return false;
     }
-    writeFileSync(tmpFile, String(process.pid), { mode: 0o600 });
-    renameSync(tmpFile, RUNNER_LOCK_FILE);
-    return readLockPid() === process.pid;
+    renameSync(RUNNER_LOCK_FILE, staleFile);
+    staleFileNeedsCleanup = true;
+    const movedPid = readLockPidFromPath(staleFile);
+    if (movedPid !== stalePid) {
+      if (readLockPid() === null) {
+        renameSync(staleFile, RUNNER_LOCK_FILE);
+        staleFileNeedsCleanup = false;
+      }
+      return false;
+    }
+    const claimed = tryCreateLockFile();
+    unlinkSync(staleFile);
+    staleFileNeedsCleanup = false;
+    return claimed;
   } catch (error: unknown) {
-    try {
-      unlinkSync(tmpFile);
-    } catch {
-      // Temp file may already have been renamed or removed.
+    if (staleFileNeedsCleanup) {
+      try {
+        unlinkSync(staleFile);
+      } catch {
+        // Stale lock backup may already have been restored or removed.
+      }
     }
     if (isErrnoException(error) && error.code !== 'ENOENT') {
       throw error;
@@ -152,11 +175,21 @@ export async function runJobRunner(): Promise<void> {
       try {
         const result = await runJobWorker(nextJob.jobId);
         if (result.outcome === 'retry') {
+          const retryCount = result.record?.retryCount ?? 0;
           progress(
-            `Retrying detached job ${nextJob.jobId} after lock contention (${String(result.record?.retryCount ?? 0)})`,
+            `Retrying detached job ${nextJob.jobId} after lock contention (${String(retryCount)}/${String(JOB_RETRY_MAX_ATTEMPTS)})`,
             false,
           );
+          if (retryCount >= JOB_RETRY_MAX_ATTEMPTS) {
+            markUnexpectedJobFailure(
+              nextJob.jobId,
+              new Error(result.error?.message ?? 'Retry limit exceeded'),
+              'Detached runner retry limit exceeded',
+            );
+            continue;
+          }
           await sleep(JOB_RETRY_DELAY_MS);
+          continue;
         }
       } catch (error: unknown) {
         markUnexpectedJobFailure(nextJob.jobId, error, 'Detached runner job failed');
