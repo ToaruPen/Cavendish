@@ -62,42 +62,45 @@ function tryCreateLockFile(): boolean {
   }
 }
 
+function cleanupStaleLockFile(staleFile: string): void {
+  try {
+    unlinkSync(staleFile);
+  } catch (cleanupError: unknown) {
+    if (!isErrnoException(cleanupError) || cleanupError.code !== 'ENOENT') {
+      process.stderr.write(
+        `[cavendish:jobs] failed to clean up stale runner lock "${staleFile}": ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`,
+      );
+    }
+  }
+}
+
+function restoreRunnerLockIfMissing(staleFile: string): void {
+  if (readLockPid() !== null) {
+    return;
+  }
+  renameSync(staleFile, RUNNER_LOCK_FILE);
+}
+
 function tryClaimStaleLock(stalePid: number | null): boolean {
   if (stalePid === null) {
     return false;
   }
   const staleFile = `${RUNNER_LOCK_FILE}.stale.${String(process.pid)}`;
-  let staleFileNeedsCleanup = false;
   try {
     if (readLockPid() !== stalePid) {
       return false;
     }
     renameSync(RUNNER_LOCK_FILE, staleFile);
-    staleFileNeedsCleanup = true;
     const movedPid = readLockPidFromPath(staleFile);
     if (movedPid !== stalePid) {
-      if (readLockPid() === null) {
-        renameSync(staleFile, RUNNER_LOCK_FILE);
-        staleFileNeedsCleanup = false;
-      }
+      restoreRunnerLockIfMissing(staleFile);
       return false;
     }
     const claimed = tryCreateLockFile();
-    unlinkSync(staleFile);
-    staleFileNeedsCleanup = false;
+    cleanupStaleLockFile(staleFile);
     return claimed;
   } catch (error: unknown) {
-    if (staleFileNeedsCleanup) {
-      try {
-        unlinkSync(staleFile);
-      } catch (cleanupError: unknown) {
-        if (!isErrnoException(cleanupError) || cleanupError.code !== 'ENOENT') {
-          process.stderr.write(
-            `[cavendish:jobs] failed to clean up stale runner lock "${staleFile}": ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`,
-          );
-        }
-      }
-    }
+    cleanupStaleLockFile(staleFile);
     if (isErrnoException(error) && error.code !== 'ENOENT') {
       throw error;
     }
