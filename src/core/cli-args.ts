@@ -253,6 +253,106 @@ export function buildPrompt(prompt: string, stdinData: string): string {
   return `${stdinData}\n\n${prompt}`;
 }
 
+// ── Batch ID collection (delete / archive / move) ────────────────────
+
+/**
+ * The `--stdin` flag for commands that accept chat IDs from stdin.
+ */
+export const STDIN_ARG = {
+  stdin: {
+    type: 'boolean' as const,
+    description: 'Read chat IDs from stdin (one per line)',
+  },
+};
+
+/**
+ * Known flags that accept a string value (used by {@link extractPositionalIds}
+ * to skip the value token after the flag).
+ */
+const FLAGS_WITH_VALUES = new Set([
+  '--project', '--format', '--thinking-effort', '--model',
+]);
+
+/**
+ * Determine how many argv tokens a flag consumes (0 = not a flag, 1 = boolean
+ * flag or `--flag=value`, 2 = `--flag value` for known value-taking flags).
+ */
+function flagTokenCount(arg: string): number {
+  if (!arg.startsWith('--')) { return 0; }
+  if (arg.includes('=')) { return 1; }
+  const flagName = arg;
+  return FLAGS_WITH_VALUES.has(flagName) ? 2 : 1;
+}
+
+/**
+ * Find the index of the first argv element (from index 2 onward) that matches
+ * the given subcommand token. Returns -1 if not found.
+ */
+function findSubcommandIndex(argv: readonly string[], subcommand: string): number {
+  for (let i = 2; i < argv.length; i++) {
+    if (argv[i] === subcommand) { return i; }
+  }
+  return -1;
+}
+
+/**
+ * Extract positional (non-flag) tokens from process.argv after the subcommand.
+ *
+ * Walks argv starting after the subcommand token, collects non-flag tokens.
+ * Flags and their values are skipped.
+ *
+ * @param subcommand - the subcommand name (e.g. 'delete', 'archive', 'move')
+ */
+export function extractPositionalIds(subcommand: string): string[] {
+  const argv = process.argv;
+  const subIdx = findSubcommandIndex(argv, subcommand);
+  if (subIdx === -1) { return []; }
+
+  const ids: string[] = [];
+  for (let i = subIdx + 1; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--') { break; }
+
+    const skip = flagTokenCount(arg);
+    if (skip > 0) {
+      i += skip - 1; // -1 because the loop increments i
+      continue;
+    }
+
+    ids.push(arg);
+  }
+
+  return ids;
+}
+
+/**
+ * Read chat IDs from stdin (one per line).
+ * Returns an empty array if stdin is a TTY or has no data.
+ */
+function readStdinIds(): string[] {
+  const raw = readStdin();
+  if (raw.length === 0) { return []; }
+  return raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+}
+
+/**
+ * Collect chat IDs from positional args and optionally stdin.
+ * Deduplicates IDs while preserving first-seen order.
+ *
+ * @param subcommand - the subcommand name to locate positional args after
+ * @param useStdin - whether to also read IDs from stdin
+ */
+export function collectChatIds(subcommand: string, useStdin: boolean): string[] {
+  const ids: string[] = extractPositionalIds(subcommand);
+
+  if (useStdin) {
+    ids.push(...readStdinIds());
+  }
+
+  // Deduplicate while preserving order
+  return [...new Set(ids)];
+}
+
 // ── Unknown-flag detection ───────────────────────────────────────────
 
 /** Convert a camelCase string to kebab-case. */
