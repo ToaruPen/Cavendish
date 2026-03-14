@@ -22,6 +22,7 @@ export async function attachGoogleDriveFile(
   openComposerMenuItem: OpenMenuFn,
   quiet = false,
   sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
+  uploadTimeoutMs?: number,
 ): Promise<void> {
   progress(`Attaching Google Drive file: ${fileName}`, quiet);
 
@@ -52,7 +53,7 @@ export async function attachGoogleDriveFile(
     timeout: 10_000,
   });
 
-  await waitForAttachmentTiles(page, tileCountBefore + 1, sendButtonSelector);
+  await waitForAttachmentTiles(page, tileCountBefore + 1, sendButtonSelector, uploadTimeoutMs);
 
   progress(`Google Drive file attached: ${fileName}`, quiet);
 }
@@ -138,6 +139,7 @@ export async function attachFiles(
   filePaths: string[],
   quiet = false,
   sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
+  uploadTimeoutMs?: number,
 ): Promise<void> {
   progress(`Attaching ${String(filePaths.length)} file(s)...`, quiet);
 
@@ -145,7 +147,7 @@ export async function attachFiles(
   const fileInput = page.locator(SELECTORS.FILE_INPUT_GENERIC);
   await fileInput.setInputFiles(filePaths);
 
-  await waitForAttachmentTiles(page, tileCountBefore + filePaths.length, sendButtonSelector);
+  await waitForAttachmentTiles(page, tileCountBefore + filePaths.length, sendButtonSelector, uploadTimeoutMs);
   progress('Files attached', quiet);
 }
 
@@ -155,28 +157,31 @@ export async function waitForAttachmentTiles(
   page: Page,
   expected: number,
   sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,
+  uploadTimeoutMs?: number,
 ): Promise<void> {
+  const effectiveTimeout = uploadTimeoutMs ?? SEND_BUTTON_TIMEOUT_MS;
+
   // Wait for the expected number of file tiles to appear in the composer.
   await page.waitForFunction(
     ({ selector, count }: { selector: string; count: number }) =>
       document.querySelectorAll(selector).length >= count,
     { selector: SELECTORS.FILE_ATTACHMENT_TILE, count: expected },
-    { timeout: 10_000 },
+    { timeout: 60_000 },
   );
 
   // Wait for upload completion: ChatGPT has used multiple send-button variants
   // in the composer, so accept any visible enabled send button.
   try {
-    await waitForReadySendButton(page, sendButtonSelector, SEND_BUTTON_TIMEOUT_MS);
+    await waitForReadySendButton(page, sendButtonSelector, effectiveTimeout);
     await page.waitForFunction(
       (selector: string) => document.querySelectorAll(selector).length === 0,
       SELECTORS.UPLOAD_IN_PROGRESS,
-      { timeout: SEND_BUTTON_TIMEOUT_MS },
+      { timeout: effectiveTimeout },
     );
   } catch (err: unknown) {
     if (isTimeoutError(err)) {
       throw new Error(
-        `Send button did not become enabled within ${String(Math.round(SEND_BUTTON_TIMEOUT_MS / 1000))}s after file upload. `
+        `Send button did not become enabled within ${String(Math.round(effectiveTimeout / 1000))}s after file upload. `
         + `Tried selectors: ${sendButtonSelector}, ${SELECTORS.SEND_BUTTON}, ${SELECTORS.SUBMIT_BUTTON}. `
         + `Pending upload selector: ${SELECTORS.UPLOAD_IN_PROGRESS}. `
         + 'The file may still be uploading or the composer UI may have changed.',

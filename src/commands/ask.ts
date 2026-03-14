@@ -69,6 +69,10 @@ const ASK_ARGS = {
     type: 'boolean' as const,
     description: 'Enable agent mode (code execution, file operations)',
   },
+  uploadTimeout: {
+    type: 'string' as const,
+    description: 'Upload timeout in seconds for file attachments (default: 180)',
+  },
   detach: {
     type: 'boolean' as const,
     description: 'Submit as a detached background job and return immediately',
@@ -113,6 +117,7 @@ interface ValidatedArgs {
   continueChat: boolean;
   chatId: string | undefined;
   project: string | undefined;
+  uploadTimeoutMs: number | undefined;
   detach: boolean;
   notifyFile: string | undefined;
 }
@@ -178,6 +183,25 @@ function validateChatOptions(
     return undefined;
   }
   return { continueChat, chatId, project };
+}
+
+/**
+ * Parse and validate --upload-timeout. Returns milliseconds on success,
+ * undefined when not provided, or null on validation failure.
+ */
+function parseUploadTimeout(
+  raw: string | undefined,
+  format: 'json' | 'text',
+): number | undefined | null {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const sec = Number(raw);
+  if (!Number.isFinite(sec) || sec <= 0) {
+    failValidation(`--upload-timeout must be a positive number, got "${raw}"`, format);
+    return null;
+  }
+  return sec * 1000;
 }
 
 function resolvePrompt(
@@ -253,6 +277,9 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
   const detachedOptions = validateDetachedOptions(args, format, stream);
   if (detachedOptions === undefined) { return undefined; }
 
+  const uploadTimeoutMs = parseUploadTimeout(args.uploadTimeout as string | undefined, format);
+  if (uploadTimeoutMs === null) { return undefined; }
+
   return {
     quiet,
     isVerbose,
@@ -267,6 +294,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     agentMode,
     thinkingEffort,
     prompt,
+    uploadTimeoutMs,
     ...chatOptions,
     ...detachedOptions,
   };
@@ -282,6 +310,7 @@ function dryRunMessage(v: ValidatedArgs): string {
   if (v.stream) {parts.push('stream: true');}
   if (v.detach) {parts.push('detach: true');}
   if (v.notifyFile !== undefined) {parts.push(`notifyFile: ${v.notifyFile}`);}
+  if (v.uploadTimeoutMs !== undefined) {parts.push(`uploadTimeout: ${String(v.uploadTimeoutMs / 1000)}s`);}
   if (v.filePaths.length > 0) {parts.push(`${String(v.filePaths.length)} file(s)`);}
   if (v.gdriveFiles.length > 0) {parts.push(`${String(v.gdriveFiles.length)} Google Drive file(s)`);}
   if (v.githubRepos.length > 0) {parts.push(`${String(v.githubRepos.length)} GitHub repo(s)`);}
@@ -313,6 +342,9 @@ function buildAskJobArgv(validated: ValidatedArgs): string[] {
   }
   if (validated.thinkingEffort !== undefined) {
     argv.push('--thinking-effort', validated.thinkingEffort);
+  }
+  if (validated.uploadTimeoutMs !== undefined) {
+    argv.push('--upload-timeout', String(validated.uploadTimeoutMs / 1000));
   }
   return argv;
 }
@@ -429,6 +461,7 @@ async function applyComposerOptions(
     gdriveFiles,
     githubRepos,
     agentMode,
+    uploadTimeoutMs,
   } = validated;
 
   if (!continueChat) {
@@ -440,11 +473,11 @@ async function applyComposerOptions(
   }
 
   if (filePaths.length > 0) {
-    await driver.attachFiles(filePaths, quiet);
+    await driver.attachFiles(filePaths, quiet, undefined, uploadTimeoutMs);
   }
 
   for (const gdFile of gdriveFiles) {
-    await driver.attachGoogleDriveFile(gdFile, quiet);
+    await driver.attachGoogleDriveFile(gdFile, quiet, undefined, uploadTimeoutMs);
   }
 
   for (const repo of githubRepos) {

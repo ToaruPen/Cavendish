@@ -35,6 +35,10 @@ const DEEP_RESEARCH_ARGS = {
     type: 'string' as const,
     description: 'File(s) to attach (repeatable: --file a.ts --file b.ts)',
   },
+  uploadTimeout: {
+    type: 'string' as const,
+    description: 'Upload timeout in seconds for file attachments (default: 180)',
+  },
   export: {
     type: 'string' as const,
     description: 'Export report to file: markdown, word, or pdf (e.g. --export markdown)',
@@ -69,7 +73,7 @@ function defaultExportFilename(format: DeepResearchExportFormat): string {
 }
 
 type RunMode =
-  | { kind: 'initial'; prompt: string; filePaths: string[] }
+  | { kind: 'initial'; prompt: string; filePaths: string[]; uploadTimeoutMs: number | undefined }
   | { kind: 'followup'; chatId: string; prompt: string }
   | { kind: 'refresh'; chatId: string };
 
@@ -81,6 +85,7 @@ interface ValidatedArgs {
   stream: boolean;
   timeoutMs: number;
   timeoutSec: number;
+  uploadTimeoutMs: number | undefined;
   exportFormat: DeepResearchExportFormat | undefined;
   exportPath: string | undefined;
   detach: boolean;
@@ -113,6 +118,25 @@ function validateExport(
   return { exportFormat, exportPath: rawExportPath as string | undefined };
 }
 
+/**
+ * Parse and validate --upload-timeout. Returns milliseconds on success,
+ * undefined when not provided, or null on validation failure.
+ */
+function parseUploadTimeout(
+  raw: string | undefined,
+  format: 'json' | 'text',
+): number | undefined | null {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const sec = Number(raw);
+  if (!Number.isFinite(sec) || sec <= 0) {
+    failValidation(`--upload-timeout must be a positive number, got "${raw}"`, format);
+    return null;
+  }
+  return sec * 1000;
+}
+
 function validateFlagConflicts(args: Record<string, unknown>, format: 'json' | 'text'): boolean {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
@@ -137,6 +161,7 @@ function resolveRunMode(
   stdinData: string,
   filePaths: string[],
   format: 'json' | 'text',
+  uploadTimeoutMs: number | undefined,
 ): RunMode | undefined {
   const isFollowUp = args.chat !== undefined;
   const isRefresh = args.refresh === true;
@@ -162,7 +187,7 @@ function resolveRunMode(
     return { kind: 'followup', chatId, prompt };
   }
 
-  return { kind: 'initial', prompt, filePaths };
+  return { kind: 'initial', prompt, filePaths, uploadTimeoutMs };
 }
 
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
@@ -203,6 +228,9 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     filePaths = validated;
   }
 
+  const uploadTimeoutMs = parseUploadTimeout(args.uploadTimeout as string | undefined, format);
+  if (uploadTimeoutMs === null) { return undefined; }
+
   let stdinData: string;
   try {
     stdinData = readStdin();
@@ -211,7 +239,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     return undefined;
   }
 
-  const mode = resolveRunMode(args, stdinData, filePaths, format);
+  const mode = resolveRunMode(args, stdinData, filePaths, format, uploadTimeoutMs);
   if (mode === undefined) { return undefined; }
 
   const stream = args.stream === true;
@@ -226,6 +254,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     stream,
     timeoutMs: timeoutSec * 1000,
     timeoutSec,
+    uploadTimeoutMs,
     exportFormat: exp.exportFormat,
     exportPath: exp.exportPath,
     ...detachedOptions,
@@ -244,6 +273,9 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
     }
   }
   argv.push('--timeout', String(v.timeoutSec));
+  if (v.uploadTimeoutMs !== undefined) {
+    argv.push('--upload-timeout', String(v.uploadTimeoutMs / 1000));
+  }
   if (v.exportFormat !== undefined) {
     argv.push('--export', v.exportFormat);
   }
@@ -275,6 +307,7 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
 function dryRunMessage(v: ValidatedArgs): string {
   const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
   if (v.stream) { parts.push('stream: true'); }
+  if (v.uploadTimeoutMs !== undefined) { parts.push(`uploadTimeout: ${String(v.uploadTimeoutMs / 1000)}s`); }
   if (v.mode.kind === 'initial' && v.mode.filePaths.length > 0) {
     parts.push(`${String(v.mode.filePaths.length)} file(s)`);
   }
@@ -319,7 +352,7 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, t
     case 'initial':
       await driver.navigateToDeepResearch(quiet);
       if (mode.filePaths.length > 0) {
-        await driver.attachFiles(mode.filePaths, quiet, SELECTORS.SEND_BUTTON);
+        await driver.attachFiles(mode.filePaths, quiet, SELECTORS.SEND_BUTTON, mode.uploadTimeoutMs);
       }
       progress('Sending Deep Research query...', quiet);
       await driver.sendDeepResearchMessage(mode.prompt);
