@@ -61,9 +61,8 @@ function throwStoredError(error: StructuredErrorPayload): never {
   throw new CavendishError(error.message, error.category, error.action);
 }
 
-async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+function readJobOrThrow(jobId: string): Exclude<ReturnType<typeof readJob>, undefined> {
+  try {
     const job = readJob(jobId);
     if (job === undefined) {
       throw new CavendishError(
@@ -72,6 +71,23 @@ async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exc
         'Run `cavendish jobs` to list valid job IDs.',
       );
     }
+    return job;
+  } catch (error: unknown) {
+    if (error instanceof CavendishError) {
+      throw error;
+    }
+    throw new CavendishError(
+      error instanceof Error ? error.message : String(error),
+      'unknown',
+      `Recreate detached job ${jobId} and retry.`,
+    );
+  }
+}
+
+async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const job = readJobOrThrow(jobId);
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
     }
@@ -110,16 +126,16 @@ const readCommand = defineCommand({
     const format = validateFormat(args.format);
     if (format === undefined) { return; }
     if (!rejectUnknownFlags(JOB_ID_ARGS, format)) { return; }
-    const job = readJob(args.jobId);
-    if (job === undefined) {
-      fail(`Job not found: ${args.jobId}`);
-      return;
+    try {
+      const job = readJobOrThrow(args.jobId);
+      if (format === 'json') {
+        jsonRaw(job);
+        return;
+      }
+      text(formatJobText(job.jobId, job.kind, job.status));
+    } catch (error: unknown) {
+      failStructured(error, format);
     }
-    if (format === 'json') {
-      jsonRaw(job);
-      return;
-    }
-    text(formatJobText(job.jobId, job.kind, job.status));
   },
 });
 

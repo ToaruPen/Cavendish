@@ -17,6 +17,10 @@ export interface JobRunResult {
   error?: StructuredErrorPayload;
 }
 
+function normalizeFailureExitCode(exitCode: number | undefined): number {
+  return typeof exitCode === 'number' && exitCode !== 0 ? exitCode : 1;
+}
+
 function resolveCliEntrypoint(): string {
   const entry = process.argv[1];
   if (typeof entry !== 'string' || entry.length === 0) {
@@ -140,7 +144,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   appendJobState(jobId, 'job-running');
 
   const { exitCode, finalEvent, structuredError } = await runWorkerAttempt(jobId, record);
-  const normalizedExitCode = structuredError === undefined && exitCode === 0 ? 1 : exitCode;
+  const normalizedExitCode = structuredError === undefined ? normalizeFailureExitCode(exitCode) : exitCode;
 
   if (finalEvent !== undefined) {
     writeJobResult(jobId, {
@@ -212,7 +216,16 @@ export function markUnexpectedJobFailure(jobId: string, error: unknown, label = 
     action: 'Inspect the job metadata and retry the command.',
   };
   writeJobError(jobId, fallback);
-  const job = readJob(jobId);
+  let job: JobRecord | undefined;
+  try {
+    job = readJob(jobId);
+  } catch (readError: unknown) {
+    progress(
+      `Detached worker failed to load job metadata for ${jobId}: ${readError instanceof Error ? readError.message : String(readError)}`,
+      false,
+    );
+    return;
+  }
   if (job !== undefined) {
     const record = updateJob(jobId, {
       status: 'failed',
@@ -229,11 +242,11 @@ export async function runJobWorkerOrExit(jobId: string): Promise<void> {
   try {
     const result = await runJobWorker(jobId);
     if (result.outcome === 'retry') {
-      process.exitCode = result.error?.exitCode ?? 1;
+      process.exitCode = normalizeFailureExitCode(result.error?.exitCode);
       return;
     }
     if (result.error !== undefined) {
-      process.exitCode = result.error.exitCode;
+      process.exitCode = normalizeFailureExitCode(result.error.exitCode);
       return;
     }
     if (result.outcome === 'failed' || result.outcome === 'timed_out') {

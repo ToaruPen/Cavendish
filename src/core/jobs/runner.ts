@@ -128,8 +128,15 @@ function tryAcquireRunnerLock(): boolean {
 }
 
 function releaseRunnerLock(): void {
-  if (readLockPid() !== process.pid) {
-    return;
+  try {
+    const lockPid = readLockPid();
+    if (lockPid !== null && lockPid !== process.pid) {
+      return;
+    }
+  } catch (error: unknown) {
+    process.stderr.write(
+      `[cavendish:jobs] failed to inspect runner lock before release: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
   }
   try {
     unlinkSync(RUNNER_LOCK_FILE);
@@ -164,13 +171,19 @@ async function acquireRunnerLock(): Promise<boolean> {
       await sleep(RUNNER_LOCK_RETRY_MS);
     }
   }
+  progress(
+    `Detached runner lock unavailable after ${String(RUNNER_LOCK_MAX_ATTEMPTS)} attempts`,
+    false,
+  );
   return false;
 }
 
 async function runJobRunnerOnce(): Promise<void> {
   const acquired = await acquireRunnerLock();
   if (!acquired) {
-    return;
+    throw new Error(
+      `Detached runner could not acquire queue lock after ${String(RUNNER_LOCK_MAX_ATTEMPTS)} attempts. Inspect "${RUNNER_LOCK_FILE}" and retry.`,
+    );
   }
 
   try {

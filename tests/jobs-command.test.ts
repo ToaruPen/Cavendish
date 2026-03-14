@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+let failStructuredMock: ReturnType<typeof vi.fn>;
 let jsonRawMock: ReturnType<typeof vi.fn>;
+
+interface RunnableCommand {
+  run?: (context: {
+    args: never;
+    rawArgs: string[];
+    cmd: RunnableCommand;
+  }) => void | Promise<void>;
+}
 
 vi.mock('../src/core/cli-args.js', () => ({
   FORMAT_ARG: {},
@@ -35,10 +44,11 @@ vi.mock('../src/core/jobs/runner.js', () => ({
 }));
 
 vi.mock('../src/core/output-handler.js', () => {
+  failStructuredMock = vi.fn();
   jsonRawMock = vi.fn();
   return {
     fail: vi.fn(),
-    failStructured: vi.fn(),
+    failStructured: failStructuredMock,
     jsonRaw: jsonRawMock,
     progress: vi.fn(),
     text: vi.fn(),
@@ -82,5 +92,33 @@ describe('jobs command', () => {
         lastRetryError: 'Another cavendish process is running.',
       },
     ]);
+  });
+
+  it('surfaces invalid job metadata through failStructured', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const store = await import('../src/core/jobs/store.js');
+    vi.mocked(store.readJob).mockImplementation(() => {
+      throw new Error('Job job-1 has invalid status metadata. Recreate the detached job and retry.');
+    });
+    const subCommands = jobsCommand.subCommands as unknown as { read?: RunnableCommand };
+    const readCommand = subCommands.read;
+    const run = readCommand?.run;
+    if (readCommand === undefined || run === undefined) {
+      throw new Error('jobsCommand.subCommands.read.run is undefined');
+    }
+
+    await Promise.resolve(run({
+      args: {
+        _: [],
+        jobId: 'job-1',
+        format: 'json',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: [],
+      cmd: readCommand,
+    }));
+
+    expect(failStructuredMock).toHaveBeenCalledTimes(1);
   });
 });

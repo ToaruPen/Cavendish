@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
@@ -207,5 +207,43 @@ describe('job worker', () => {
     } finally {
       process.exitCode = previousExitCode;
     }
+  });
+
+  it('normalizes zero structured error exit codes for failed worker runs', async () => {
+    const errorLine = JSON.stringify({
+      error: true,
+      category: 'timeout',
+      message: 'timed out',
+      exitCode: 0,
+      action: 'retry',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [errorLine], 0));
+    const job = store.createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
+
+  it('records fallback errors even when job metadata becomes unreadable', async () => {
+    const { store, worker } = await importWithMocks(() => makeChild([], [], 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    writeFileSync(store.getJobFilePath(job.jobId), 'null\n');
+
+    expect(() => {
+      worker.markUnexpectedJobFailure(job.jobId, new Error('boom'));
+    }).not.toThrow();
+    expect(store.readJobError(job.jobId)?.message).toBe('boom');
   });
 });

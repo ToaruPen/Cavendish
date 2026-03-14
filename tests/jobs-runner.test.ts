@@ -236,6 +236,20 @@ describe('job runner', () => {
     await expect(runner.runJobRunner()).rejects.toThrow(/corrupt/);
   });
 
+  it('fails when the runner lock stays owned by another live process', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      return true;
+    });
+    const { runner } = await importWithMocks(() => makeChild([], [], 0));
+    const cavendishDir = join(testRoot, '.cavendish');
+    mkdirSync(cavendishDir, { recursive: true });
+    writeFileSync(join(cavendishDir, 'jobs-runner.lock'), '99999\n');
+
+    await expect(runner.runJobRunner()).rejects.toThrow(/could not acquire queue lock/);
+
+    killSpy.mockRestore();
+  });
+
   it('reuses the same in-process runner promise for concurrent calls', async () => {
     const finalLine = JSON.stringify({
       type: 'final',

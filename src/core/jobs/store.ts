@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { CAVENDISH_DIR } from '../browser-manager.js';
 import type { StructuredErrorPayload } from '../errors.js';
 
-import type { DetachedJobRequest, JobRecord, JobResultRecord } from './types.js';
+import type { DetachedJobRequest, JobKind, JobRecord, JobResultRecord, JobStatus } from './types.js';
 
 const JOBS_DIR = join(CAVENDISH_DIR, 'jobs');
 const JOB_FILE = 'job.json';
@@ -14,6 +14,8 @@ const RESULT_FILE = 'result.json';
 const ERROR_FILE = 'error.json';
 const DIR_MODE = 0o700;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const JOB_KINDS: readonly JobKind[] = ['ask', 'deep-research'];
+const JOB_STATUSES: readonly JobStatus[] = ['queued', 'running', 'completed', 'failed', 'timed_out', 'cancelled'];
 
 function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true, mode: DIR_MODE });
@@ -115,14 +117,64 @@ function readJsonFile(path: string, label: string): unknown {
   }
 }
 
+function assertStringField(value: unknown, field: string, label: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`${label} has invalid ${field} metadata. Recreate the detached job and retry.`);
+  }
+}
+
+function assertOptionalStringField(value: unknown, field: string, label: string): void {
+  if (value !== undefined && typeof value !== 'string') {
+    throw new Error(`${label} has invalid ${field} metadata. Recreate the detached job and retry.`);
+  }
+}
+
+function assertOptionalNumberField(value: unknown, field: string, label: string): void {
+  if (value !== undefined && typeof value !== 'number') {
+    throw new Error(`${label} has invalid ${field} metadata. Recreate the detached job and retry.`);
+  }
+}
+
+function assertOptionalBooleanField(value: unknown, field: string, label: string): void {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new Error(`${label} has invalid ${field} metadata. Recreate the detached job and retry.`);
+  }
+}
+
 function assertValidJobRecordShape(record: unknown, label: string): asserts record is JobRecord {
   if (record === null || typeof record !== 'object') {
     throw new Error(`${label} is not a valid job record object. Recreate the detached job and retry.`);
   }
   const candidate = record as Partial<JobRecord>;
+  assertStringField(candidate.jobId, 'jobId', label);
+  assertValidJobId(candidate.jobId);
+  if (typeof candidate.kind !== 'string' || !JOB_KINDS.includes(candidate.kind)) {
+    throw new Error(`${label} has invalid kind metadata. Recreate the detached job and retry.`);
+  }
+  if (typeof candidate.status !== 'string' || !JOB_STATUSES.includes(candidate.status)) {
+    throw new Error(`${label} has invalid status metadata. Recreate the detached job and retry.`);
+  }
+  if (!Array.isArray(candidate.argv) || candidate.argv.some((value) => typeof value !== 'string')) {
+    throw new Error(`${label} has invalid argv metadata. Recreate the detached job and retry.`);
+  }
+  assertStringField(candidate.submittedAt, 'submittedAt', label);
+  assertStringField(candidate.updatedAt, 'updatedAt', label);
+  assertStringField(candidate.resultPath, 'resultPath', label);
+  assertStringField(candidate.eventsPath, 'eventsPath', label);
+  assertStringField(candidate.errorPath, 'errorPath', label);
   if (typeof candidate.retryCount !== 'number' || !Number.isInteger(candidate.retryCount) || candidate.retryCount < 0) {
     throw new Error(`${label} is missing required retryCount metadata. Recreate the detached job and retry.`);
   }
+  assertOptionalStringField(candidate.stdinData, 'stdinData', label);
+  assertOptionalStringField(candidate.notifyFile, 'notifyFile', label);
+  assertOptionalStringField(candidate.startedAt, 'startedAt', label);
+  assertOptionalStringField(candidate.completedAt, 'completedAt', label);
+  assertOptionalStringField(candidate.chatId, 'chatId', label);
+  assertOptionalStringField(candidate.url, 'url', label);
+  assertOptionalStringField(candidate.lastRetriedAt, 'lastRetriedAt', label);
+  assertOptionalStringField(candidate.lastRetryError, 'lastRetryError', label);
+  assertOptionalBooleanField(candidate.partial, 'partial', label);
+  assertOptionalNumberField(candidate.exitCode, 'exitCode', label);
 }
 
 export function readJob(jobId: string): JobRecord | undefined {

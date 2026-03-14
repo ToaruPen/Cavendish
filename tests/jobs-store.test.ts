@@ -110,6 +110,11 @@ describe('job store', () => {
       eventsPath: join(getJobsDir(), legacyJobId, 'events.ndjson'),
       errorPath: join(getJobsDir(), legacyJobId, 'error.json'),
     }, null, 2)}\n`);
+    const incompleteJobId = '00000000-0000-4000-8000-000000000097';
+    mkdirSync(join(getJobsDir(), incompleteJobId), { recursive: true });
+    writeFileSync(getJobFilePath(incompleteJobId), `${JSON.stringify({
+      retryCount: 0,
+    }, null, 2)}\n`);
 
     expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });
