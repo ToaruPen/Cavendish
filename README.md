@@ -150,6 +150,8 @@ cavendish jobs status <job-id>
 cavendish jobs wait <job-id>
 ```
 
+> **Note**: Deep Research on broad or complex topics can exceed 30 minutes. If ChatGPT is still researching, rerun with a larger `--timeout`.
+
 ### Chat Management
 
 ```bash
