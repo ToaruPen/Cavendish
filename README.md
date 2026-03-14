@@ -186,7 +186,7 @@ cavendish status --json       # JSON output (same as doctor --json)
 
 | Flag | Scope | Description |
 |------|-------|-------------|
-| `--format text\|json` | ask, deep-research, list, read, projects | Output format (default: `json`) |
+| `--format text\|json` | ask, deep-research, delete, list, read, projects | Output / error format (default: `json`) |
 | `--stream` | ask, deep-research | NDJSON streaming output |
 | `--detach` | ask, deep-research | Submit a background job and return immediately |
 | `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
