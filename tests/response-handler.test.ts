@@ -101,13 +101,13 @@ describe('waitForResponse()', () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const page = new FakePage([
       { text: 'Old answer', count: 2, stopVisible: false, copyVisible: true },
-      { text: 'New answer', count: 2, stopVisible: true, copyVisible: false },
-      { text: 'New answer', count: 2, stopVisible: false, copyVisible: true },
+      { text: 'New answer', count: 3, stopVisible: true, copyVisible: false },
+      { text: 'New answer', count: 3, stopVisible: false, copyVisible: true },
     ]) as unknown as Parameters<typeof waitForResponse>[0];
 
     const result = await waitForResponse(page, {
       timeout: 5_000,
-      initialMsgCount: 1,
+      initialMsgCount: 2,
       initialResponseText: 'Old answer',
       quiet: true,
     });
@@ -122,13 +122,32 @@ describe('waitForResponse()', () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const page = new FakePage([
       { text: 'Old answer', count: 2, stopVisible: false, copyVisible: true },
-      { text: 'Old answer', count: 2, stopVisible: true, copyVisible: false },
-      { text: 'Old answer', count: 2, stopVisible: false, copyVisible: true },
+      { text: 'Old answer', count: 3, stopVisible: true, copyVisible: false },
+      { text: 'Old answer', count: 3, stopVisible: false, copyVisible: true },
     ]) as unknown as Parameters<typeof waitForResponse>[0];
 
     const result = await waitForResponse(page, {
       timeout: 5_000,
-      initialMsgCount: 1,
+      initialMsgCount: 2,
+      initialResponseText: 'Old answer',
+      quiet: true,
+    });
+
+    expect(result).toEqual({
+      text: 'Old answer',
+      completed: true,
+    });
+  });
+
+  it('completes a same-text follow-up that finishes between polls', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const page = new FakePage([
+      { text: 'Old answer', count: 3, stopVisible: false, copyVisible: true },
+    ]) as unknown as Parameters<typeof waitForResponse>[0];
+
+    const result = await waitForResponse(page, {
+      timeout: 5_000,
+      initialMsgCount: 2,
       initialResponseText: 'Old answer',
       quiet: true,
     });

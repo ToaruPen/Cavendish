@@ -258,9 +258,11 @@ function isCompletedSnapshot(
   msgCountBefore: number,
   initialResponseText?: string,
 ): boolean {
+  // Ignore pre-send completed snapshots unless a new assistant message has
+  // already appeared and completed with the same text.
   if (
     isStaleInitialResponse(snapshot, initialResponseText)
-    && !isCompletedRepeatedFollowUp(snapshot, started, msgCountBefore)
+    && !isCompletedRepeatedFollowUp(snapshot, msgCountBefore)
   ) {
     return false;
   }
@@ -285,11 +287,9 @@ function isCompletedSnapshot(
 
 function isCompletedRepeatedFollowUp(
   snapshot: ResponseSnapshot,
-  started: boolean,
   msgCountBefore: number,
 ): boolean {
-  return started
-    && snapshot.copyButtonVisible
+  return snapshot.copyButtonVisible
     && snapshot.messageCount > msgCountBefore
     && snapshot.text.length > 0;
 }
