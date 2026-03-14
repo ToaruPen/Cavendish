@@ -124,7 +124,18 @@ async function monitorResponse(
       lastEmittedText = emitChunkIfChanged(snapshot.text, lastEmittedText, onChunk);
     }
 
-    if (isCompletedSnapshot(snapshot, started, sawStopButton, lastTextChangeAt, now, settleDelayMs, initialResponseText)) {
+    if (
+      isCompletedSnapshot(
+        snapshot,
+        started,
+        sawStopButton,
+        lastTextChangeAt,
+        now,
+        settleDelayMs,
+        msgCountBefore,
+        initialResponseText,
+      )
+    ) {
       return { text: snapshot.text, completed: true };
     }
 
@@ -244,9 +255,13 @@ function isCompletedSnapshot(
   lastTextChangeAt: number | undefined,
   now: number,
   settleDelayMs: number,
+  msgCountBefore: number,
   initialResponseText?: string,
 ): boolean {
-  if (isStaleInitialResponse(snapshot, initialResponseText)) {
+  if (
+    isStaleInitialResponse(snapshot, initialResponseText)
+    && !isCompletedRepeatedFollowUp(snapshot, started, msgCountBefore)
+  ) {
     return false;
   }
   if (snapshot.copyButtonVisible && snapshot.text.length > 0) {
@@ -266,6 +281,17 @@ function isCompletedSnapshot(
     && !snapshot.stopButtonVisible
     && lastTextChangeAt !== undefined
     && now - lastTextChangeAt >= requiredSettleDelay;
+}
+
+function isCompletedRepeatedFollowUp(
+  snapshot: ResponseSnapshot,
+  started: boolean,
+  msgCountBefore: number,
+): boolean {
+  return started
+    && snapshot.copyButtonVisible
+    && snapshot.messageCount > msgCountBefore
+    && snapshot.text.length > 0;
 }
 
 function assertNotStalled(
