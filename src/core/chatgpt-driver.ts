@@ -213,9 +213,9 @@ export class ChatGPTDriver {
       await link.waitFor({ state: 'hidden', timeout: 10_000 });
     } catch (error: unknown) {
       if (isTimeoutError(error)) {
-        throw new Error(
-          `Archive action did not hide/remove conversation "${id}" from sidebar within 10s.`,
-        );
+        // Preserve the original Playwright TimeoutError so upstream
+        // error handlers can classify it correctly (e.g. as a timeout).
+        throw error;
       }
       throw error;
     }
