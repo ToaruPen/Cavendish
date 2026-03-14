@@ -44,6 +44,12 @@ cavendish deep-research --export pdf "State of WebAssembly in 2026"
 npm install -g cavendish
 ```
 
+Update to the latest version:
+
+```bash
+npm update -g cavendish
+```
+
 ## Quick Start
 
 Cavendish uses a **dedicated Chrome profile** stored in `~/.cavendish/chrome-profile`. Your regular Chrome profile is not affected.
