@@ -165,4 +165,28 @@ describe('job worker', () => {
       process.exitCode = previousExitCode;
     }
   });
+
+  it('uses the structured lock-contention exit code for retry outcomes', async () => {
+    const lockError = JSON.stringify({
+      error: true,
+      category: 'cdp_unavailable',
+      message: 'Another cavendish process (PID: 1) is running. Wait for it to finish or kill it manually.',
+      exitCode: 2,
+      action: 'wait',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild([], [lockError], 2));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+
+    try {
+      await worker.runJobWorkerOrExit(job.jobId);
+      expect(process.exitCode).toBe(2);
+    } finally {
+      process.exitCode = previousExitCode;
+    }
+  });
 });

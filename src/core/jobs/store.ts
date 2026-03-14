@@ -87,15 +87,18 @@ export function saveJob(record: JobRecord): void {
 
 export function updateJob(
   jobId: string,
-  updates: Partial<JobRecord>,
+  updates: Partial<JobRecord> | ((current: JobRecord) => Partial<JobRecord>),
 ): JobRecord {
   const current = readJob(jobId);
   if (current === undefined) {
     throw new Error(`Job not found: ${jobId}`);
   }
+  const nextUpdates = typeof updates === 'function'
+    ? updates(current)
+    : updates;
   const next: JobRecord = {
     ...current,
-    ...updates,
+    ...nextUpdates,
     updatedAt: new Date().toISOString(),
   };
   saveJob(next);

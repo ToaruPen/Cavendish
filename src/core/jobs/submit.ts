@@ -42,10 +42,6 @@ export function submitDetachedJob(request: DetachedJobRequest): JobRecord {
       {
         detached: true,
         stdio: 'ignore',
-        env: {
-          ...process.env,
-          CAVENDISH_JOB_RUNNER: '1',
-        },
       },
     );
     child.once('error', (error: unknown): void => {

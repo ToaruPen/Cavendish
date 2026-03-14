@@ -17,9 +17,6 @@ export interface JobRunResult {
   error?: StructuredErrorPayload;
 }
 
-// Internal sentinel exit code used only for runner/worker handoff retries.
-const RETRY_HANDOFF_EXIT_CODE = 75;
-
 function resolveCliEntrypoint(): string {
   const entry = process.argv[1];
   if (typeof entry !== 'string' || entry.length === 0) {
@@ -170,13 +167,13 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   };
 
   if (isLockContentionError(errorPayload)) {
-    record = updateJob(jobId, {
+    record = updateJob(jobId, (latest) => ({
       status: 'queued',
       startedAt: undefined,
-      retryCount: current.retryCount + 1,
+      retryCount: latest.retryCount + 1,
       lastRetriedAt: new Date().toISOString(),
       lastRetryError: errorPayload.message,
-    });
+    }));
     appendJobState(jobId, 'job-queued');
     return {
       outcome: 'retry',
@@ -229,7 +226,7 @@ export async function runJobWorkerOrExit(jobId: string): Promise<void> {
   try {
     const result = await runJobWorker(jobId);
     if (result.outcome === 'retry') {
-      process.exitCode = RETRY_HANDOFF_EXIT_CODE;
+      process.exitCode = result.error?.exitCode ?? 1;
       return;
     }
     if (result.error !== undefined) {

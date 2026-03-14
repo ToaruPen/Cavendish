@@ -80,7 +80,7 @@ describe('submitDetachedJob', () => {
       expect(spawnCall[1]).toEqual([cliEntry, 'jobs', 'run-runner']);
       expect(spawnCall[2].detached).toBe(true);
       expect(spawnCall[2].stdio).toBe('ignore');
-      expect(spawnCall[2].env.CAVENDISH_JOB_RUNNER).toBe('1');
+      expect(spawnCall[2].env).toBeUndefined();
       expect(unrefMock).toHaveBeenCalledOnce();
       expect(record).toMatchObject({
         jobId: 'job-123',
