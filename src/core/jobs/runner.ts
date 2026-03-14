@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CAVENDISH_DIR } from '../browser-manager.js';
@@ -30,8 +30,13 @@ function readLockPid(): number | null {
     const content = readFileSync(RUNNER_LOCK_FILE, 'utf8').trim();
     const pid = Number.parseInt(content, 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
+  } catch (error: unknown) {
+    if (isErrnoException(error) && error.code === 'ENOENT') {
+      return null;
+    }
+    throw new Error(
+      `Failed to read runner lock file "${RUNNER_LOCK_FILE}": ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -51,18 +56,25 @@ function tryClaimStaleLock(stalePid: number | null): boolean {
   if (stalePid === null) {
     return false;
   }
+  const tmpFile = `${RUNNER_LOCK_FILE}.${String(process.pid)}`;
   try {
     if (readLockPid() !== stalePid) {
       return false;
     }
-    unlinkSync(RUNNER_LOCK_FILE);
+    writeFileSync(tmpFile, String(process.pid), { mode: 0o600 });
+    renameSync(tmpFile, RUNNER_LOCK_FILE);
+    return readLockPid() === process.pid;
   } catch (error: unknown) {
+    try {
+      unlinkSync(tmpFile);
+    } catch {
+      // Temp file may already have been renamed or removed.
+    }
     if (isErrnoException(error) && error.code !== 'ENOENT') {
       throw error;
     }
     return false;
   }
-  return tryCreateLockFile();
 }
 
 function tryAcquireRunnerLock(): boolean {

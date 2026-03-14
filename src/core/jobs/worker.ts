@@ -161,7 +161,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   const errorPayload: StructuredErrorPayload = structuredError ?? {
     error: true,
     category: 'unknown',
-    message: `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
+    message: `Detached runner exited without a final event (exit code: ${String(exitCode)})`,
     exitCode,
     action: 'Inspect the job error output and retry the command.',
   };
