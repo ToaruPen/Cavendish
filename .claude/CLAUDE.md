@@ -66,6 +66,7 @@ Every feature/fix follows this sequence:
    - DOM-dependent code (ChatGPTDriver, BrowserManager): run the **Live Chrome Test** checklist (see Testing section)
    - DOM-independent code (OutputHandler, ConfigManager, utils): write and run vitest unit tests
    - When responding to review comments: verify with live test BEFORE deciding to fix or skip
+   - **After live tests: delete all test conversations** created during verification via `cavendish delete <id>`
    - Mark complete after verification:
    ```bash
    jq '.steps.live_test_done = true' .claude/.workflow-state > tmp && mv tmp .claude/.workflow-state
