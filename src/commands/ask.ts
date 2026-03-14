@@ -4,6 +4,7 @@ import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
 import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { delay } from '../core/driver/helpers.js';
 import { CavendishError } from '../core/errors.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
@@ -16,6 +17,8 @@ import { registerCleanup } from '../core/shutdown.js';
 const DEFAULT_MODEL = 'Pro';
 const DEFAULT_TIMEOUT_SEC = 120;
 const PRO_TIMEOUT_SEC = 2400;
+const CONTINUED_CHAT_COUNT_SETTLE_MS = 250;
+const CONTINUED_CHAT_MAX_POLLS = 8;
 
 const ASK_ARGS = {
   prompt: {
@@ -312,6 +315,48 @@ function buildAskJobArgv(validated: ValidatedArgs): string[] {
   return argv;
 }
 
+async function captureInitialAssistantMessageCount(
+  driver: ChatGPTDriver,
+  continueChat: boolean,
+): Promise<number> {
+  let lastCount = await driver.getAssistantMessageCount();
+  if (!continueChat) {
+    return lastCount;
+  }
+
+  for (let poll = 0; poll < CONTINUED_CHAT_MAX_POLLS; poll += 1) {
+    await delay(CONTINUED_CHAT_COUNT_SETTLE_MS);
+    const nextCount = await driver.getAssistantMessageCount();
+    if (nextCount === lastCount) {
+      return nextCount;
+    }
+    lastCount = nextCount;
+  }
+
+  return lastCount;
+}
+
+async function captureInitialResponseText(
+  driver: ChatGPTDriver,
+  continueChat: boolean,
+): Promise<string | undefined> {
+  if (!continueChat) {
+    return undefined;
+  }
+
+  let lastText = await driver.getLastResponse();
+  for (let poll = 0; poll < CONTINUED_CHAT_MAX_POLLS; poll += 1) {
+    await delay(CONTINUED_CHAT_COUNT_SETTLE_MS);
+    const nextText = await driver.getLastResponse();
+    if (nextText.length > 0 && nextText === lastText) {
+      return nextText;
+    }
+    lastText = nextText;
+  }
+
+  return lastText.length > 0 ? lastText : undefined;
+}
+
 function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
   const record = submitDetachedJob({
     kind: 'ask',
@@ -522,7 +567,8 @@ export const askCommand = defineCommand({
 
       progress('Sending message...', quiet);
       verbose(`Sending message (prompt length: ${String(prompt.length)} chars)...`, isVerbose);
-      const initialMsgCount = await driver.getAssistantMessageCount();
+      const initialMsgCount = await captureInitialAssistantMessageCount(driver, validated.continueChat);
+      const initialResponseText = await captureInitialResponseText(driver, validated.continueChat);
       await driver.sendMessage(prompt);
 
       verbose(`Waiting for response (timeout: ${String(timeoutSec)}s, initialMsgCount: ${String(initialMsgCount)})...`, isVerbose);
@@ -532,6 +578,7 @@ export const askCommand = defineCommand({
         timeout: timeoutMs,
         quiet,
         initialMsgCount,
+        initialResponseText,
         onChunk,
       });
       assertCompletedResponse(result, timeoutSec);

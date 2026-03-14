@@ -34,6 +34,7 @@ export async function waitForResponse(
     onChunk,
     quiet = false,
     initialMsgCount,
+    initialResponseText,
     label = 'Response',
   } = options;
 
@@ -47,6 +48,7 @@ export async function waitForResponse(
     settleDelayMs,
     quiet,
     onChunk,
+    initialResponseText,
   );
 
   if (result.completed) {
@@ -88,6 +90,7 @@ async function monitorResponse(
   settleDelayMs: number,
   quiet: boolean,
   onChunk?: (text: string) => void,
+  initialResponseText?: string,
 ): Promise<WaitForResponseResult> {
   const deadline = Date.now() + timeout;
   let lastSnapshot: ResponseSnapshot = {
@@ -106,7 +109,7 @@ async function monitorResponse(
     const snapshot = await getResponseSnapshot(page, msgCountBefore);
     const now = Date.now();
     sawStopButton = sawStopButton || snapshot.stopButtonVisible;
-    if (hasResponseStarted(snapshot, msgCountBefore) && !started) {
+    if (hasResponseStarted(snapshot, msgCountBefore, initialResponseText) && !started) {
       started = true;
       lastActivityAt = now;
       progress('Response started', quiet);
@@ -116,12 +119,12 @@ async function monitorResponse(
       lastActivityAt = now;
     }
 
-    if (snapshot.text !== lastSnapshot.text) {
+    if (snapshot.text !== lastSnapshot.text && !isStaleInitialResponse(snapshot, initialResponseText)) {
       lastTextChangeAt = now;
       lastEmittedText = emitChunkIfChanged(snapshot.text, lastEmittedText, onChunk);
     }
 
-    if (isCompletedSnapshot(snapshot, started, sawStopButton, lastTextChangeAt, now, settleDelayMs)) {
+    if (isCompletedSnapshot(snapshot, started, sawStopButton, lastTextChangeAt, now, settleDelayMs, initialResponseText)) {
       return { text: snapshot.text, completed: true };
     }
 
@@ -192,10 +195,24 @@ async function getResponseSnapshot(
 function hasResponseStarted(
   snapshot: ResponseSnapshot,
   msgCountBefore: number,
+  initialResponseText?: string,
 ): boolean {
+  if (isStaleInitialResponse(snapshot, initialResponseText)) {
+    return false;
+  }
   return snapshot.stopButtonVisible
     || snapshot.messageCount > msgCountBefore
     || snapshot.text.length > 0;
+}
+
+function isStaleInitialResponse(
+  snapshot: ResponseSnapshot,
+  initialResponseText: string | undefined,
+): boolean {
+  return initialResponseText !== undefined
+    && snapshot.copyButtonVisible
+    && !snapshot.stopButtonVisible
+    && snapshot.text === initialResponseText;
 }
 
 function snapshotChanged(
@@ -227,7 +244,11 @@ function isCompletedSnapshot(
   lastTextChangeAt: number | undefined,
   now: number,
   settleDelayMs: number,
+  initialResponseText?: string,
 ): boolean {
+  if (isStaleInitialResponse(snapshot, initialResponseText)) {
+    return false;
+  }
   if (snapshot.copyButtonVisible && snapshot.text.length > 0) {
     return true;
   }

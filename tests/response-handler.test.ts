@@ -97,6 +97,27 @@ describe('waitForResponse()', () => {
     });
   });
 
+  it('ignores a completed snapshot that matches the pre-send response text', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const page = new FakePage([
+      { text: 'Old answer', count: 2, stopVisible: false, copyVisible: true },
+      { text: 'New answer', count: 2, stopVisible: true, copyVisible: false },
+      { text: 'New answer', count: 2, stopVisible: false, copyVisible: true },
+    ]) as unknown as Parameters<typeof waitForResponse>[0];
+
+    const result = await waitForResponse(page, {
+      timeout: 5_000,
+      initialMsgCount: 1,
+      initialResponseText: 'Old answer',
+      quiet: true,
+    });
+
+    expect(result).toEqual({
+      text: 'New answer',
+      completed: true,
+    });
+  });
+
   it('does not complete from stable text alone when no stop or copy button is present', async () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const now = vi.spyOn(Date, 'now');
