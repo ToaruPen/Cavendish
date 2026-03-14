@@ -11,7 +11,6 @@ const RUNNER_LOCK_FILE = join(CAVENDISH_DIR, 'jobs-runner.lock');
 const RUNNER_LOCK_MAX_ATTEMPTS = 3;
 const RUNNER_LOCK_RETRY_MS = 200;
 const JOB_RETRY_DELAY_MS = 2_000;
-const JOB_RETRY_MAX_ATTEMPTS = 3;
 let runnerPromise: Promise<void> | null = null;
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
@@ -185,17 +184,9 @@ async function runJobRunnerOnce(): Promise<void> {
         if (result.outcome === 'retry') {
           const retryCount = result.record?.retryCount ?? 0;
           progress(
-            `Retrying detached job ${nextJob.jobId} after lock contention (${String(retryCount)}/${String(JOB_RETRY_MAX_ATTEMPTS)})`,
+            `Retrying detached job ${nextJob.jobId} after lock contention (${String(retryCount)})`,
             false,
           );
-          if (retryCount >= JOB_RETRY_MAX_ATTEMPTS) {
-            markUnexpectedJobFailure(
-              nextJob.jobId,
-              new Error(result.error?.message ?? 'Retry limit exceeded'),
-              'Detached runner retry limit exceeded',
-            );
-            continue;
-          }
           await sleep(JOB_RETRY_DELAY_MS);
           continue;
         }

@@ -115,8 +115,12 @@ function readJsonFile(path: string, label: string): unknown {
   }
 }
 
-function assertValidJobRecordShape(record: JobRecord, label: string): void {
-  if (!Number.isFinite(record.retryCount)) {
+function assertValidJobRecordShape(record: unknown, label: string): asserts record is JobRecord {
+  if (record === null || typeof record !== 'object') {
+    throw new Error(`${label} is not a valid job record object. Recreate the detached job and retry.`);
+  }
+  const candidate = record as Partial<JobRecord>;
+  if (typeof candidate.retryCount !== 'number' || !Number.isInteger(candidate.retryCount) || candidate.retryCount < 0) {
     throw new Error(`${label} is missing required retryCount metadata. Recreate the detached job and retry.`);
   }
 }
@@ -126,7 +130,7 @@ export function readJob(jobId: string): JobRecord | undefined {
   if (!existsSync(path)) {
     return undefined;
   }
-  const record = readJsonFile(path, `job ${jobId}`) as JobRecord | undefined;
+  const record = readJsonFile(path, `job ${jobId}`);
   if (record === undefined) {
     return undefined;
   }

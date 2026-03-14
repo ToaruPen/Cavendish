@@ -193,7 +193,7 @@ describe('job runner', () => {
     expect(store.readJob(job.jobId)?.status).toBe('completed');
   });
 
-  it('fails a job after repeated lock-contention retries', async () => {
+  it('keeps retrying queued jobs until lock contention clears', async () => {
     const lockError = JSON.stringify({
       error: true,
       category: 'cdp_unavailable',
@@ -201,10 +201,19 @@ describe('job runner', () => {
       exitCode: 2,
       action: 'wait',
     });
+    const finalLine = JSON.stringify({
+      type: 'final',
+      content: 'done after extended retry',
+      timestamp: '2026-03-14T00:00:00.000Z',
+      partial: false,
+    });
     let attempts = 0;
     const { runner, store } = await importWithMocks(() => {
       attempts += 1;
-      return makeChild([], [lockError], 2);
+      if (attempts <= 3) {
+        return makeChild([], [lockError], 2);
+      }
+      return makeChild([finalLine], [], 0);
     });
     const job = store.createJob({
       kind: 'ask',
@@ -213,11 +222,10 @@ describe('job runner', () => {
 
     await runner.runJobRunner();
 
-    expect(attempts).toBe(3);
-    expect(store.readJob(job.jobId)?.status).toBe('failed');
+    expect(attempts).toBe(4);
+    expect(store.readJob(job.jobId)?.status).toBe('completed');
     expect(store.readJob(job.jobId)?.retryCount).toBe(3);
-    expect(store.readJobError(job.jobId)?.message).toContain('Another cavendish process');
-  });
+  }, 10_000);
 
   it('fails fast when the runner lock file is corrupt', async () => {
     const { runner } = await importWithMocks(() => makeChild([], [], 0));

@@ -191,7 +191,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     status,
     completedAt: new Date().toISOString(),
     error: errorPayload,
-    exitCode,
+    exitCode: normalizedExitCode,
   });
   appendJobState(jobId, `job-${status}`);
   notifyJobCompletion(record);

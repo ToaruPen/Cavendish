@@ -202,6 +202,7 @@ describe('job worker', () => {
     try {
       await worker.runJobWorkerOrExit(job.jobId);
       expect(store.readJobError(job.jobId)?.exitCode).toBe(1);
+      expect(store.readJob(job.jobId)?.exitCode).toBe(1);
       expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = previousExitCode;

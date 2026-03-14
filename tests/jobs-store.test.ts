@@ -113,4 +113,17 @@ describe('job store', () => {
 
     expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });
+
+  it('skips job files that deserialize to null', async () => {
+    const { createJob, getJobsDir, getJobFilePath, readNextQueuedJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const invalidJobId = '00000000-0000-4000-8000-000000000098';
+    mkdirSync(join(getJobsDir(), invalidJobId), { recursive: true });
+    writeFileSync(getJobFilePath(invalidJobId), 'null\n');
+
+    expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
+  });
 });
