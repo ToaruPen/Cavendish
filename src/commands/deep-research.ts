@@ -233,7 +233,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 }
 
 function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
-  const argv = ['deep-research', '--timeout', String(v.timeoutSec)];
+  const argv = ['deep-research'];
   if (v.mode.kind === 'refresh') {
     argv.push('--chat', v.mode.chatId, '--refresh');
   } else if (v.mode.kind === 'followup') {
@@ -243,11 +243,17 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
       argv.push('--file', filePath);
     }
   }
+  argv.push('--timeout', String(v.timeoutSec));
   if (v.exportFormat !== undefined) {
     argv.push('--export', v.exportFormat);
   }
   if (v.exportPath !== undefined) {
     argv.push('--exportPath', v.exportPath);
+  }
+  // End-of-options separator so prompts starting with '--' are not
+  // misinterpreted as flags when the worker re-invokes the CLI.
+  if (v.mode.kind !== 'refresh') {
+    argv.push('--', v.mode.prompt);
   }
   return argv;
 }
@@ -256,7 +262,6 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
   const record = submitDetachedJob({
     kind: 'deep-research',
     argv: buildDeepResearchJobArgv(v),
-    stdinData: v.mode.kind === 'refresh' ? undefined : v.mode.prompt,
     notifyFile: v.notifyFile,
   });
   return {

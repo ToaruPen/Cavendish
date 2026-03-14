@@ -63,7 +63,16 @@ function parseStructuredError(line: string): StructuredErrorPayload | undefined 
 }
 
 function buildWorkerArgs(job: JobRecord): string[] {
-  return [...job.argv, '--stream', '--format', 'json', '--quiet'];
+  const workerFlags = ['--stream', '--format', 'json', '--quiet'];
+  const dashDashIdx = job.argv.indexOf('--');
+  if (dashDashIdx === -1) {
+    return [...job.argv, ...workerFlags];
+  }
+  // Insert worker flags before the '--' separator so they are not
+  // treated as positional arguments by the child's arg parser.
+  const before = job.argv.slice(0, dashDashIdx);
+  const fromDash = job.argv.slice(dashDashIdx);
+  return [...before, ...workerFlags, ...fromDash];
 }
 
 function finalizeJobStatus(event: NdjsonEvent): Extract<JobStatus, 'completed' | 'timed_out'> {

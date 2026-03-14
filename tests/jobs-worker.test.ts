@@ -40,6 +40,7 @@ async function importWithMocks(
 ): Promise<{
   store: typeof import('../src/core/jobs/store.js');
   worker: typeof import('../src/core/jobs/worker.js');
+  spawnMock: ReturnType<typeof vi.fn>;
 }> {
   vi.resetModules();
   vi.doMock('node:os', async () => {
@@ -49,12 +50,13 @@ async function importWithMocks(
       homedir: (): string => testRoot,
     };
   });
+  const spawnMock = vi.fn(() => spawnImpl());
   vi.doMock('node:child_process', () => ({
-    spawn: vi.fn(() => spawnImpl()),
+    spawn: spawnMock,
   }));
   const store = await import('../src/core/jobs/store.js');
   const worker = await import('../src/core/jobs/worker.js');
-  return { store, worker };
+  return { store, worker, spawnMock };
 }
 
 describe('job worker', () => {
@@ -245,5 +247,35 @@ describe('job worker', () => {
       worker.markUnexpectedJobFailure(job.jobId, new Error('boom'));
     }).not.toThrow();
     expect(store.readJobError(job.jobId)?.message).toBe('boom');
+  });
+
+  it('places worker flags before the -- separator in argv (#175)', async () => {
+    const finalLine = JSON.stringify({
+      type: 'final',
+      content: 'done',
+      timestamp: '2026-03-14T00:00:00.000Z',
+      partial: false,
+    });
+    const { store, worker, spawnMock } = await importWithMocks(() => makeChild([finalLine], [], 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', '--model', 'Pro', '--timeout', '120', '--', 'my prompt'],
+    });
+
+    await worker.runJobWorker(job.jobId);
+
+    const spawnArgs = spawnMock.mock.calls[0]?.[1] as string[] | undefined;
+    expect(spawnArgs).toBeDefined();
+    if (spawnArgs === undefined) {
+      throw new Error('spawn was not called');
+    }
+    // Worker flags (--stream, --format, --quiet) must appear before '--'
+    const dashDashIdx = spawnArgs.indexOf('--');
+    expect(dashDashIdx).toBeGreaterThan(-1);
+    expect(spawnArgs.indexOf('--stream')).toBeLessThan(dashDashIdx);
+    expect(spawnArgs.indexOf('--format')).toBeLessThan(dashDashIdx);
+    expect(spawnArgs.indexOf('--quiet')).toBeLessThan(dashDashIdx);
+    // Prompt must appear after '--'
+    expect(spawnArgs[dashDashIdx + 1]).toBe('my prompt');
   });
 });

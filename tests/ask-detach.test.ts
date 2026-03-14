@@ -9,6 +9,8 @@ const SAFE_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'events.ndjson');
 let jsonRawMock: ReturnType<typeof vi.fn>;
 let failValidationMock: ReturnType<typeof vi.fn>;
 let submitDetachedJobMock: ReturnType<typeof vi.fn>;
+let readStdinMock: ReturnType<typeof vi.fn>;
+let buildPromptMock: ReturnType<typeof vi.fn>;
 
 vi.mock('../src/core/browser-manager.js', () => ({
   BrowserManager: vi.fn(() => ({
@@ -22,16 +24,20 @@ vi.mock('../src/core/chatgpt-driver.js', () => ({
   ChatGPTDriver: vi.fn(() => ({})),
 }));
 
-vi.mock('../src/core/cli-args.js', () => ({
-  FORMAT_ARG: {},
-  GLOBAL_ARGS: {},
-  STREAM_ARG: {},
-  buildPrompt: vi.fn((prompt: string): string => prompt),
-  extractArgsOrFail: vi.fn((flag: string) => (flag === 'gdrive' ? ['drive-doc'] : [])),
-  readStdin: vi.fn().mockReturnValue(''),
-  rejectUnknownFlags: vi.fn().mockReturnValue(true),
-  validateFileArgs: vi.fn().mockReturnValue([SAFE_CONTEXT_PATH]),
-}));
+vi.mock('../src/core/cli-args.js', () => {
+  readStdinMock = vi.fn().mockReturnValue('');
+  buildPromptMock = vi.fn((prompt: string): string => prompt);
+  return {
+    FORMAT_ARG: {},
+    GLOBAL_ARGS: {},
+    STREAM_ARG: {},
+    buildPrompt: buildPromptMock,
+    extractArgsOrFail: vi.fn((flag: string) => (flag === 'gdrive' ? ['drive-doc'] : [])),
+    readStdin: readStdinMock,
+    rejectUnknownFlags: vi.fn().mockReturnValue(true),
+    validateFileArgs: vi.fn().mockReturnValue([SAFE_CONTEXT_PATH]),
+  };
+});
 
 vi.mock('../src/core/model-config.js', () => ({
   allowedThinkingEfforts: vi.fn().mockReturnValue(['light', 'standard', 'extended', 'deep']),
@@ -144,10 +150,10 @@ describe('ask --detach', () => {
       '--agent',
       '--thinking-effort',
       'standard',
+      '--',
+      'hello',
     ]);
-    expect(submitDetachedJobMock).toHaveBeenCalledWith(expect.objectContaining({
-      stdinData: 'hello',
-    }));
+    expect(request.stdinData).toBeUndefined();
 
     const payload = jsonRawMock.mock.calls[0]?.[0] as DetachedSubmitPayload | undefined;
     expect(payload).toBeDefined();
@@ -161,6 +167,48 @@ describe('ask --detach', () => {
     expect(payload.jobPath).toBe(SAFE_JOB_PATH);
     expect(payload.eventsPath).toBe(SAFE_EVENTS_PATH);
     expect(payload.notifyFile).toMatch(/notify\.ndjson$/);
+  });
+
+  it('includes stdin-only prompt in argv instead of stdinData (#175)', async () => {
+    // Simulate stdin-only: readStdin returns the prompt, buildPrompt returns it
+    readStdinMock.mockReturnValueOnce('stdin-only prompt');
+    buildPromptMock.mockReturnValueOnce('stdin-only prompt');
+
+    const { askCommand } = await import('../src/commands/ask.js');
+    const run = askCommand.run;
+    if (run === undefined) {
+      throw new Error('askCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: undefined,
+        model: 'Pro',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+        continue: false,
+        agent: false,
+        detach: true,
+      } as never,
+      rawArgs: [],
+      cmd: askCommand,
+    });
+
+    expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    const request = submitDetachedJobMock.mock.calls[0]?.[0] as DetachedJobRequest | undefined;
+    expect(request).toBeDefined();
+    if (request === undefined) {
+      throw new Error('Detached ask request was not captured');
+    }
+    // The prompt must be a positional arg in argv (after '--'), not in stdinData
+    expect(request.argv[0]).toBe('ask');
+    expect(request.argv.at(-2)).toBe('--');
+    expect(request.argv.at(-1)).toBe('stdin-only prompt');
+    expect(request.stdinData).toBeUndefined();
   });
 
   it('rejects --stream together with --detach', async () => {
