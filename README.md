@@ -17,6 +17,12 @@ cat src/app.ts | cavendish ask --model Pro "Review this code"
 cavendish deep-research --export pdf "State of WebAssembly in 2026"
 ```
 
+## Disclaimer
+
+> **This tool automates ChatGPT's Web UI using browser automation and may violate [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/). Its availability does not guarantee compliance with those terms. Use at your own risk.**
+>
+> This tool requires a valid ChatGPT paid subscription (Pro, Plus, Team, or Enterprise) and does not bypass any payment or authentication. It exists primarily to provide programmatic access to features not yet available through OpenAI's official API, such as Deep Research. If OpenAI releases official API support for these features, we recommend migrating to the official API.
+
 ## Features
 
 - **Multi-model support** — Pro, Thinking, and other ChatGPT models with configurable thinking effort
