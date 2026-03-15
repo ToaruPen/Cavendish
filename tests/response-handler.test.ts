@@ -248,6 +248,40 @@ describe('waitForResponse()', () => {
     }
   });
 
+  it('does not stall when assistant message leads and thinking text changes before stop button (#194)', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const now = vi.spyOn(Date, 'now');
+    let tick = 0;
+    now.mockImplementation(() => {
+      tick += 3_000;
+      return tick;
+    });
+
+    try {
+      const page = new FakePage([
+        { text: '', count: 0, stopVisible: false, copyVisible: false },
+        { text: 'Partial answer', count: 1, stopVisible: false, copyVisible: false, thinkingText: 'Thinking step 1...' },
+        { text: 'Partial answer', count: 1, stopVisible: true, copyVisible: false, thinkingText: 'Thinking step 1... step 2...' },
+        { text: 'Partial answer', count: 1, stopVisible: true, copyVisible: false, thinkingText: 'Thinking step 1... step 2... step 3...' },
+        { text: 'Final answer', count: 1, stopVisible: false, copyVisible: true },
+      ]) as unknown as Parameters<typeof waitForResponse>[0];
+
+      const result = await waitForResponse(page, {
+        timeout: 60_000,
+        stallTimeoutMs: 5_000,
+        initialMsgCount: 0,
+        quiet: true,
+      });
+
+      expect(result).toEqual({
+        text: 'Final answer',
+        completed: true,
+      });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('times out when activity stalls while the stop button remains visible', async () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const now = vi.spyOn(Date, 'now');

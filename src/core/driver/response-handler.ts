@@ -166,49 +166,58 @@ async function getResponseSnapshot(
   }
   const messageCount = await page.locator(SELECTORS.ASSISTANT_MESSAGE).count();
 
-  const latest = await page.evaluate(
-    (
-      {
-        messageSelector,
-        copySelector,
-        thinkingSelector,
-        offset,
-      }: {
-        messageSelector: string;
-        copySelector: string;
-        thinkingSelector: string;
-        offset: number;
+  let latest: { text: string; copyButtonVisible: boolean; thinkingText: string };
+  try {
+    latest = await page.evaluate(
+      (
+        {
+          messageSelector,
+          copySelector,
+          thinkingSelector,
+          offset,
+        }: {
+          messageSelector: string;
+          copySelector: string;
+          thinkingSelector: string;
+          offset: number;
+        },
+      ) => {
+        // Prevents false stall detection during long thinking (#194)
+        const thinkingEls = document.querySelectorAll(thinkingSelector);
+        const lastThinking = thinkingEls.length > 0
+          ? thinkingEls[thinkingEls.length - 1]
+          : null;
+        const thinkingText = lastThinking !== null ? lastThinking.textContent.trim() : '';
+
+        const messages = document.querySelectorAll(messageSelector);
+        if (messages.length <= offset) {
+          return { text: '', copyButtonVisible: false, thinkingText };
+        }
+
+        const target = messages[messages.length - 1];
+        const text = target.textContent.trim();
+        // The copy button lives in the enclosing <article>, not inside the
+        // assistant message element itself (ChatGPT DOM change, Chrome 145+).
+        const article = target.closest('article');
+        const copyButton = (article ?? target).querySelector<HTMLElement>(copySelector);
+        const copyButtonVisible = copyButton !== null && copyButton.getBoundingClientRect().height > 0;
+
+        return { text, copyButtonVisible, thinkingText };
       },
-    ) => {
-      // Prevents false stall detection during long thinking (#194)
-      const thinkingEls = document.querySelectorAll(thinkingSelector);
-      const lastThinking = thinkingEls.length > 0
-        ? thinkingEls[thinkingEls.length - 1]
-        : null;
-      const thinkingText = lastThinking !== null ? lastThinking.textContent.trim() : '';
-
-      const messages = document.querySelectorAll(messageSelector);
-      if (messages.length <= offset) {
-        return { text: '', copyButtonVisible: false, thinkingText };
-      }
-
-      const target = messages[messages.length - 1];
-      const text = target.textContent.trim();
-      // The copy button lives in the enclosing <article>, not inside the
-      // assistant message element itself (ChatGPT DOM change, Chrome 145+).
-      const article = target.closest('article');
-      const copyButton = (article ?? target).querySelector<HTMLElement>(copySelector);
-      const copyButtonVisible = copyButton !== null && copyButton.getBoundingClientRect().height > 0;
-
-      return { text, copyButtonVisible, thinkingText };
-    },
-    {
-      messageSelector: SELECTORS.ASSISTANT_MESSAGE,
-      copySelector: SELECTORS.COPY_BUTTON,
-      thinkingSelector: SELECTORS.THINKING_INDICATOR,
-      offset: previousCount,
-    },
-  );
+      {
+        messageSelector: SELECTORS.ASSISTANT_MESSAGE,
+        copySelector: SELECTORS.COPY_BUTTON,
+        thinkingSelector: SELECTORS.THINKING_INDICATOR,
+        offset: previousCount,
+      },
+    );
+  } catch (error: unknown) {
+    throw new CavendishError(
+      `Failed to read response snapshot (selectors: ${SELECTORS.ASSISTANT_MESSAGE}, ${SELECTORS.COPY_BUTTON}, ${SELECTORS.THINKING_INDICATOR}, offset: ${String(previousCount)}): ${errorMessage(error)}`,
+      'selector_miss',
+      'Run "cavendish status" to verify selectors and inspect the ChatGPT tab for UI changes.',
+    );
+  }
 
   return {
     text: latest.text,
