@@ -21,6 +21,7 @@ interface ResponseSnapshot {
   messageCount: number;
   stopButtonVisible: boolean;
   copyButtonVisible: boolean;
+  thinkingText: string;
 }
 
 export async function waitForResponse(
@@ -98,6 +99,7 @@ async function monitorResponse(
     messageCount: msgCountBefore,
     stopButtonVisible: false,
     copyButtonVisible: false,
+    thinkingText: '',
   };
   let started = false;
   let sawStopButton = false;
@@ -169,16 +171,25 @@ async function getResponseSnapshot(
       {
         messageSelector,
         copySelector,
+        thinkingSelector,
         offset,
       }: {
         messageSelector: string;
         copySelector: string;
+        thinkingSelector: string;
         offset: number;
       },
     ) => {
+      // Prevents false stall detection during long thinking (#194)
+      const thinkingEls = document.querySelectorAll(thinkingSelector);
+      const lastThinking = thinkingEls.length > 0
+        ? thinkingEls[thinkingEls.length - 1]
+        : null;
+      const thinkingText = lastThinking !== null ? lastThinking.textContent.trim() : '';
+
       const messages = document.querySelectorAll(messageSelector);
       if (messages.length <= offset) {
-        return { text: '', copyButtonVisible: false };
+        return { text: '', copyButtonVisible: false, thinkingText };
       }
 
       const target = messages[messages.length - 1];
@@ -189,11 +200,12 @@ async function getResponseSnapshot(
       const copyButton = (article ?? target).querySelector<HTMLElement>(copySelector);
       const copyButtonVisible = copyButton !== null && copyButton.getBoundingClientRect().height > 0;
 
-      return { text, copyButtonVisible };
+      return { text, copyButtonVisible, thinkingText };
     },
     {
       messageSelector: SELECTORS.ASSISTANT_MESSAGE,
       copySelector: SELECTORS.COPY_BUTTON,
+      thinkingSelector: SELECTORS.THINKING_INDICATOR,
       offset: previousCount,
     },
   );
@@ -203,6 +215,7 @@ async function getResponseSnapshot(
     messageCount,
     stopButtonVisible,
     copyButtonVisible: latest.copyButtonVisible,
+    thinkingText: latest.thinkingText,
   };
 }
 
@@ -236,7 +249,8 @@ function snapshotChanged(
   return current.text !== previous.text
     || current.messageCount !== previous.messageCount
     || current.stopButtonVisible !== previous.stopButtonVisible
-    || current.copyButtonVisible !== previous.copyButtonVisible;
+    || current.copyButtonVisible !== previous.copyButtonVisible
+    || current.thinkingText !== previous.thinkingText;
 }
 
 function emitChunkIfChanged(
