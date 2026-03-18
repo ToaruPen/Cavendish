@@ -34,6 +34,7 @@ cavendish deep-research --export pdf "State of WebAssembly in 2026"
 - **Streaming output** — real-time NDJSON streaming for integration with other tools
 - **Detached jobs** — submit long-running work and collect completion later via job state and notifications
 - **Health diagnostics** — built-in `doctor` command to verify CDP, auth, and selectors
+- **Selector drift detection** — `report` command validates all selectors against live DOM, tracks baseline changes, and auto-creates GitHub issues
 - **Process safety** — exclusive lock prevents concurrent access; signal-safe cleanup
 - **CLI robustness** — unknown flag detection, structured exit codes, cross-platform support (macOS / Linux / Windows)
 
@@ -198,13 +199,19 @@ cavendish doctor              # Health diagnostics (CDP, auth, selectors)
 cavendish doctor --json       # JSON output
 cavendish status              # Alias for doctor
 cavendish status --json       # JSON output (same as doctor --json)
+
+# Selector drift detection
+cavendish report                  # Validate all selectors against live ChatGPT DOM
+cavendish report --save-baseline  # Save current DOM state as baseline
+cavendish report --issue          # Auto-create GitHub issue if selectors are broken
+cavendish report --format json    # JSON output (for CI/automation)
 ```
 
 ### Common Options
 
 | Flag | Scope | Description |
 |------|-------|-------------|
-| `--format text\|json` | ask, deep-research, delete, init, jobs, list, read, projects | Output / error format (default: `json`) |
+| `--format text\|json` | ask, deep-research, delete, init, jobs, list, read, projects, report | Output / error format (default: `json`; report default: `text`) |
 | `--stream` | ask, deep-research | NDJSON streaming output |
 | `--detach` | ask, deep-research | Submit a background job and return immediately |
 | `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
