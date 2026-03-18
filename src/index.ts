@@ -14,6 +14,7 @@ import { listCommand } from './commands/list.js';
 import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
 import { readCommand } from './commands/read.js';
+import { reportCommand } from './commands/report.js';
 import { statusCommand } from './commands/status.js';
 import { registerSignalHandlers } from './core/shutdown.js';
 
@@ -38,6 +39,7 @@ const main = defineCommand({
     move: moveCommand,
     projects: projectsCommand,
     read: readCommand,
+    report: reportCommand,
     status: statusCommand,
   },
 });
