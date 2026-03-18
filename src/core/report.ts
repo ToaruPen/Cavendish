@@ -124,7 +124,8 @@ export async function validateAllSelectors(
       try {
         const count = await page.locator(selector).count();
         return { name: key, selector, count, category: categorizeSelector(key) };
-      } catch {
+      } catch (error: unknown) {
+        progress('Warning: selector ' + key + ' failed: ' + errorMessage(error), quiet);
         return { name: key, selector, count: 0, category: categorizeSelector(key) };
       }
     }),
@@ -208,7 +209,8 @@ export function loadBaseline(): DomSnapshot | null {
     const data = JSON.parse(raw) as DomSnapshot;
     if (data.version !== SNAPSHOT_VERSION || !Array.isArray(data.selectors)) {return null;}
     return data;
-  } catch {
+  } catch (error: unknown) {
+    progress('Warning: failed to load baseline: ' + errorMessage(error), false);
     return null;
   }
 }
