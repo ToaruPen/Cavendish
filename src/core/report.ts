@@ -98,6 +98,7 @@ const AUTH_SELECTORS = selectorSet([
 /** Non-CSS selectors that cannot be tested via locator. */
 const SKIP_SELECTORS = selectorSet([
   'DEEP_RESEARCH_FRAME_URL',
+  'REPORT_DOM_QUERY',
 ]);
 
 export function categorizeSelector(name: string): SelectorCategory {
@@ -150,7 +151,9 @@ export async function captureDomStructure(
     path: string;
   }
 
-  return page.evaluate((maxElements: number): RawElement[] => {
+  const domQuery = SELECTORS.REPORT_DOM_QUERY;
+
+  return page.evaluate(({ maxElements, query }): RawElement[] => {
     function getPath(el: Element): string {
       const parts: string[] = [];
       let current: Element | null = el;
@@ -165,9 +168,6 @@ export async function captureDomStructure(
       return parts.join(' > ');
     }
 
-    const query =
-      '[data-testid], [id]:not(script):not(style):not(link), '
-      + 'input[type="file"], iframe, [contenteditable="true"]';
     const nodeList = document.querySelectorAll(query);
 
     return Array.from(nodeList)
@@ -185,7 +185,7 @@ export async function captureDomStructure(
         if (type) {item.type = type;}
         return item;
       });
-  }, MAX_DOM_ELEMENTS);
+  }, { maxElements: MAX_DOM_ELEMENTS, query: domQuery });
 }
 
 // ── Environment info ──────────────────────────────────────

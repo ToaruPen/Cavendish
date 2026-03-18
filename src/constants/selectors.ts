@@ -232,6 +232,12 @@ export const SELECTORS = {
    *  Matches social login buttons with Google branding. */
   CONTINUE_WITH_GOOGLE:
     'button:has-text("Continue with Google"), button:has-text("Google で続行"), a:has-text("Continue with Google"), a:has-text("Google で続行"), [data-provider="google"]',
+
+  // ── DOM report / inspection ─────────────────────────────
+  /** Query for capturing interesting DOM elements during report inspection.
+   *  Targets elements with data-testid, id, file inputs, iframes, and contenteditable. */
+  REPORT_DOM_QUERY:
+    '[data-testid], [id]:not(script):not(style):not(link), input[type="file"], iframe, [contenteditable="true"]',
 } as const;
 
 export type SelectorKey = keyof typeof SELECTORS;
