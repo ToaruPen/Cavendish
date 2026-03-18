@@ -25,8 +25,8 @@ export const SELECTORS = {
   MODEL_MENUITEM: '[role="menuitem"]:not([data-has-submenu])',
 
   // ── File attachment ──────────────────────────────────────
-  /** Hidden file input (no id attribute) */
-  FILE_INPUT_GENERIC: 'input[type="file"]:not([id])',
+  /** Hidden file input for general file uploads (ChatGPT assigns id="upload-files") */
+  FILE_INPUT_GENERIC: '#upload-files',
 
   /** File tile that appears in the composer after a file is attached.
    *  Uses the Tailwind group name which is specific to file tiles. */
@@ -45,8 +45,8 @@ export const SELECTORS = {
   /** Any descendant that explicitly exposes a message role */
   MESSAGE_ROLE_NODE: '[data-message-author-role]',
 
-  /** Broad fallback for rendered conversation turns when role attributes drift */
-  CONVERSATION_TURN: 'main article',
+  /** Fallback for rendered conversation turns, matched via data-testid prefix */
+  CONVERSATION_TURN: 'main section[data-testid^="conversation-turn"]',
 
   /** Attachment tile still uploading (live DOM: remove button has cursor-wait) */
   UPLOAD_IN_PROGRESS: '.group\\/file-tile button.cursor-wait',
