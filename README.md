@@ -4,7 +4,7 @@
 [![Node.js](https://img.shields.io/node/v/cavendish)](https://nodejs.org/)
 [![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
 
-**Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command. Production-ready since v1.0.0.
+**Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command. Detach-first since v2.0.0.
 
 ```bash
 # Ask ChatGPT (returns job ID — detached by default)
@@ -368,6 +368,35 @@ If you run Cavendish on a shared machine:
 - Do **not** share your `~/.cavendish/chrome-profile` directory — it contains active session data.
 
 </details>
+
+## Migrating from v1.x to v2.0
+
+v2.0 changes the default execution model. `ask` and `deep-research` now run **detached** (background) by default.
+
+### Breaking changes
+
+| Before (v1.x) | After (v2.0) |
+|----------------|--------------|
+| `cavendish ask "..."` blocks and returns response | Returns job metadata (jobId) immediately |
+| `--detach` opt-in for background execution | Default behavior |
+| `--timeout` defaults: ask 120s, Pro 2400s, DR 1800s | Default: unlimited (no timeout) |
+| `--stream` + `--detach` rejected | `--stream` implies `--sync` |
+
+### Migration
+
+```bash
+# v1.x: direct response
+cavendish ask "question"
+
+# v2.0 equivalent: use --sync
+cavendish ask --sync "question"
+
+# v2.0 recommended: detach + wait
+cavendish ask "question"                # returns jobId
+cavendish jobs wait <job-id>            # returns response
+```
+
+If your agent integration pipes stdout directly, add `--sync` to preserve the v1.x behavior.
 
 ## License
 
