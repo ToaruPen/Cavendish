@@ -90,6 +90,7 @@ async function runAsk(overrides: Record<string, unknown> = {}): Promise<void> {
     format: 'json',
     continue: false,
     agent: false,
+    sync: true,
     ...overrides,
   } as unknown as Parameters<NonNullable<typeof askCommand.run>>[0]['args'];
 

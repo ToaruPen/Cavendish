@@ -102,6 +102,7 @@ async function runAsk(): Promise<void> {
     format: 'text',
     continue: false,
     agent: false,
+    sync: true,
   } as unknown as Parameters<NonNullable<typeof askCommand.run>>[0]['args'];
 
   const run = askCommand.run;

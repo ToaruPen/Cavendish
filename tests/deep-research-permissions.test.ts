@@ -50,6 +50,7 @@ async function runDR(overrides: Record<string, unknown> = {}): Promise<void> {
     prompt: 'Test query',
     format: 'text',
     timeout: '60',
+    sync: true,
     ...overrides,
   } as unknown as Parameters<NonNullable<typeof deepResearchCommand.run>>[0]['args'];
 

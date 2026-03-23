@@ -122,6 +122,7 @@ describe('ask --continue baseline capture', () => {
         format: 'json',
         continue: true,
         agent: false,
+        sync: true,
       } as never,
       rawArgs: [],
       cmd: askCommand,
