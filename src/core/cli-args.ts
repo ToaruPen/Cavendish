@@ -483,3 +483,13 @@ export function parseUploadTimeout(
   }
   return sec * 1000;
 }
+
+/** Convert timeoutSec to milliseconds, treating 0 as unlimited. */
+export function toTimeoutMs(timeoutSec: number): number {
+  return timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000;
+}
+
+/** Format a timeout for display, converting 0 to 'unlimited'. */
+export function formatTimeoutDisplay(timeoutSec: number): string {
+  return timeoutSec === 0 ? 'unlimited' : `${String(timeoutSec)}s`;
+}

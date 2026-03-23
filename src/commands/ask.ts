@@ -3,7 +3,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, formatTimeoutDisplay, parseUploadTimeout, readStdin, rejectUnknownFlags, toTimeoutMs, validateFileArgs } from '../core/cli-args.js';
 import { delay } from '../core/driver/helpers.js';
 import { CavendishError } from '../core/errors.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
@@ -99,11 +99,6 @@ function resolveTimeoutSec(
     return Number(explicitTimeout);
   }
   return 0; // unlimited
-}
-
-/** Convert timeoutSec to milliseconds, treating 0 as unlimited. */
-function toTimeoutMs(timeoutSec: number): number {
-  return timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000;
 }
 
 interface ValidatedArgs {
@@ -291,8 +286,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
  * Build the dry-run summary message for the ask command.
  */
 function dryRunMessage(v: ValidatedArgs): string {
-  const timeoutDisplay = v.timeoutSec === 0 ? 'unlimited' : `${String(v.timeoutSec)}s`;
-  const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${timeoutDisplay}`];
+  const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${formatTimeoutDisplay(v.timeoutSec)}`];
   if (v.chatId !== undefined) {parts.push(`chat: ${v.chatId}`);}
   else if (v.continueChat) {parts.push('continue: most recent');}
   if (v.stream) {parts.push('stream: true');}

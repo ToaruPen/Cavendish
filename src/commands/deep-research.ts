@@ -4,7 +4,7 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, formatTimeoutDisplay, parseUploadTimeout, readStdin, rejectUnknownFlags, toTimeoutMs, validateFileArgs } from '../core/cli-args.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
@@ -175,11 +175,6 @@ function resolveRunMode(
   return { kind: 'initial', prompt, filePaths, uploadTimeoutMs };
 }
 
-/** Convert timeoutSec to milliseconds, treating 0 as unlimited. */
-function toTimeoutMs(timeoutSec: number): number {
-  return timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000;
-}
-
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
   const isVerbose = args.verbose === true;
@@ -295,8 +290,7 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
 }
 
 function dryRunMessage(v: ValidatedArgs): string {
-  const timeoutDisplay = v.timeoutSec === 0 ? 'unlimited' : `${String(v.timeoutSec)}s`;
-  const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${timeoutDisplay}`];
+  const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${formatTimeoutDisplay(v.timeoutSec)}`];
   if (v.stream) { parts.push('stream: true'); }
   if (v.uploadTimeoutMs !== undefined) { parts.push(`uploadTimeout: ${String(v.uploadTimeoutMs / 1000)}s`); }
   if (v.mode.kind === 'initial' && v.mode.filePaths.length > 0) {

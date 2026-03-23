@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 
-import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags, toTimeoutMs } from '../core/cli-args.js';
 import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
 import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
@@ -174,7 +174,7 @@ const waitCommand = defineCommand({
       fail(`--timeout must be a non-negative number, got "${String(args.timeout)}"`);
       return;
     }
-    const timeoutMs = timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000;
+    const timeoutMs = toTimeoutMs(timeoutSec);
     try {
       const job = await waitForTerminalJob(args.jobId, timeoutMs);
       const result = readJobResult(job.jobId);
