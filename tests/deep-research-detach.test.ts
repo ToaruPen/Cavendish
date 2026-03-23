@@ -129,7 +129,7 @@ describe('deep-research --detach', () => {
       '--file',
       SAFE_RESEARCH_PATH,
       '--timeout',
-      '1800',
+      '0',
       '--export',
       'markdown',
       '--exportPath',
