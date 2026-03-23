@@ -37,6 +37,8 @@ vi.mock('../src/core/cli-args.js', () => ({
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([]),
   parseUploadTimeout: vi.fn().mockReturnValue(undefined),
+  toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+  formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
 }));
 
 vi.mock('../src/core/model-config.js', () => ({
