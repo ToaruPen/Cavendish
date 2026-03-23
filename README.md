@@ -7,14 +7,16 @@
 **Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command. Production-ready since v1.0.0.
 
 ```bash
-# Ask ChatGPT from the terminal
+# Ask ChatGPT (returns job ID — detached by default)
 cavendish ask "Explain the Observer pattern with a TypeScript example"
+# Retrieve the result
+cavendish jobs wait <job-id>
 
-# Pipe code for review
-cat src/app.ts | cavendish ask --model Pro "Review this code"
+# Synchronous mode (blocks until response)
+cavendish ask --sync "Quick question"
 
-# Deep Research with PDF export
-cavendish deep-research --export pdf "State of WebAssembly in 2026"
+# Deep Research with PDF export (synchronous)
+cavendish deep-research --sync --export pdf "State of WebAssembly in 2026"
 ```
 
 ## Disclaimer
@@ -78,47 +80,50 @@ cavendish doctor        # Health diagnostics (CDP, auth, selectors)
 ### Ask (core command)
 
 ```bash
-# Basic query
+# Basic query (returns job ID — detached by default)
 cavendish ask "Your question here"
 
-# Specify model
-cavendish ask --model pro "Your question here"
+# Wait for the result
+cavendish jobs wait <job-id>
 
-# Attach local files
-cavendish ask --file ./src/main.ts "Review this code"
+# Synchronous mode (blocks until response)
+cavendish ask --sync "Your question here"
 
-# Pipe from stdin
-cat error.log | cavendish ask "Analyze this error"
-
-# Use within a ChatGPT project
-cavendish ask --project "For-Agents" "Describe the project policy"
-
-# Continue the most recent chat
-cavendish ask --continue "Explain further"
-
-# Continue a specific chat by ID
-cavendish ask --continue --chat <chat-id> "Follow up"
-
-# Attach Google Drive files
-cavendish ask --gdrive "document.pdf" "Analyze this"
-
-# Attach GitHub repos as context
-cavendish ask --github "owner/repo" "Review this codebase"
-
-# Enable agent mode (code execution, file operations)
-cavendish ask --agent "Solve this problem"
-
-# Set thinking effort level (Thinking/Pro models)
-cavendish ask --model thinking --thinking-effort extended "Hard problem"
-
-# Streaming output (NDJSON)
+# Streaming output (implies --sync)
 cavendish ask --stream "Your question here"
 
-# Detached background job
-cavendish ask --detach --notify-file ./cavendish-jobs.ndjson "Your question here"
+# Specify model
+cavendish ask --sync --model pro "Your question here"
+
+# Attach local files
+cavendish ask --sync --file ./src/main.ts "Review this code"
+
+# Pipe from stdin
+cat error.log | cavendish ask --sync "Analyze this error"
+
+# Use within a ChatGPT project
+cavendish ask --sync --project "For-Agents" "Describe the project policy"
+
+# Continue the most recent chat
+cavendish ask --sync --continue "Explain further"
+
+# Continue a specific chat by ID
+cavendish ask --sync --continue --chat <chat-id> "Follow up"
+
+# Attach Google Drive files
+cavendish ask --sync --gdrive "document.pdf" "Analyze this"
+
+# Attach GitHub repos as context
+cavendish ask --sync --github "owner/repo" "Review this codebase"
+
+# Enable agent mode (code execution, file operations)
+cavendish ask --sync --agent "Solve this problem"
+
+# Set thinking effort level (Thinking/Pro models)
+cavendish ask --sync --model thinking --thinking-effort extended "Hard problem"
 
 # JSON output with metadata (chatId, url, model, timeoutSec)
-cavendish ask --format json "Your question here"
+cavendish ask --sync --format json "Your question here"
 
 # Dry run (validate args without executing)
 cavendish ask --dry-run "Your question here"
@@ -127,27 +132,30 @@ cavendish ask --dry-run "Your question here"
 ### Deep Research
 
 ```bash
-# Start a deep research query
+# Start a deep research query (returns job ID — detached by default)
 cavendish deep-research "Research topic"
 
+# Wait for the result
+cavendish jobs wait <job-id>
+
+# Synchronous mode (blocks until response)
+cavendish deep-research --sync "Research topic"
+
 # Attach files to the query
-cavendish deep-research --file ./data.csv "Analyze this dataset"
+cavendish deep-research --sync --file ./data.csv "Analyze this dataset"
 
 # Follow up on an existing DR session
-cavendish deep-research --chat <chat-id> "Follow up question"
+cavendish deep-research --sync --chat <chat-id> "Follow up question"
 
 # Re-run the same prompt on an existing DR session
-cavendish deep-research --chat <chat-id> --refresh
+cavendish deep-research --sync --chat <chat-id> --refresh
 
 # Export report to file (markdown, word, or pdf)
-cavendish deep-research --export markdown "Research topic"
-cavendish deep-research --export pdf --exportPath ./report.pdf "Research topic"
+cavendish deep-research --sync --export markdown "Research topic"
+cavendish deep-research --sync --export pdf --exportPath ./report.pdf "Research topic"
 
-# Streaming output
+# Streaming output (implies --sync)
 cavendish deep-research --stream "Research topic"
-
-# Detached background job
-cavendish deep-research --detach --notify-file ./cavendish-jobs.ndjson "Research topic"
 ```
 
 ### Detached Jobs
@@ -162,8 +170,6 @@ cavendish jobs status <job-id>
 # Wait for completion and print the final content
 cavendish jobs wait <job-id>
 ```
-
-> **Note**: Deep Research on broad or complex topics can exceed 30 minutes. If ChatGPT is still researching, rerun with a larger `--timeout`.
 
 ### Chat Management
 
@@ -212,10 +218,11 @@ cavendish report --format json    # JSON output (for CI/automation)
 | Flag | Scope | Description |
 |------|-------|-------------|
 | `--format text\|json` | ask, deep-research, delete, init, jobs, list, read, projects, report | Output / error format (default: `json`; report default: `text`) |
-| `--stream` | ask, deep-research | NDJSON streaming output |
-| `--detach` | ask, deep-research | Submit a background job and return immediately |
+| `--sync` | ask, deep-research | Run synchronously instead of detached (default: detached) |
+| `--stream` | ask, deep-research | NDJSON streaming output (implies `--sync`) |
+| `--detach` | ask, deep-research | Submit as detached background job (default behavior) |
 | `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
-| `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: 120, Pro: 2400, DR: 1800) |
+| `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: unlimited) |
 | `--upload-timeout <sec>` | ask, deep-research | Upload timeout for file attachments (default: 180) |
 | `--stdin` | delete, archive, move | Read conversation IDs from stdin (one per line) |
 | `--quiet` | all | Suppress progress output |
