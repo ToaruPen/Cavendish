@@ -159,8 +159,7 @@ const waitCommand = defineCommand({
     ...JOB_ID_ARGS,
     timeout: {
       type: 'string' as const,
-      description: 'Maximum wait time in seconds (default: 3600)',
-      default: '3600',
+      description: 'Maximum wait time in seconds (default: unlimited)',
     },
   },
   async run({ args }): Promise<void> {
@@ -170,13 +169,14 @@ const waitCommand = defineCommand({
       ...JOB_ID_ARGS,
       timeout: { type: 'string' as const },
     }, format)) { return; }
-    const timeoutSec = Number(args.timeout);
-    if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-      fail(`--timeout must be a positive number, got "${args.timeout}"`);
+    const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : 0;
+    if (!Number.isFinite(timeoutSec) || timeoutSec < 0) {
+      fail(`--timeout must be a non-negative number, got "${String(args.timeout)}"`);
       return;
     }
+    const timeoutMs = timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000;
     try {
-      const job = await waitForTerminalJob(args.jobId, timeoutSec * 1000);
+      const job = await waitForTerminalJob(args.jobId, timeoutMs);
       const result = readJobResult(job.jobId);
       const error = readJobError(job.jobId) ?? job.error;
       if (job.status === 'failed' || job.status === 'cancelled' || (job.status === 'timed_out' && result === undefined)) {
