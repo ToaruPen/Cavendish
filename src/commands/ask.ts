@@ -73,7 +73,11 @@ const ASK_ARGS = {
   },
   detach: {
     type: 'boolean' as const,
-    description: 'Submit as a detached background job and return immediately',
+    description: 'Submit as a detached background job (default; use --sync to override)',
+  },
+  sync: {
+    type: 'boolean' as const,
+    description: 'Run synchronously instead of detached (default: detached)',
   },
   notifyFile: {
     type: 'string' as const,

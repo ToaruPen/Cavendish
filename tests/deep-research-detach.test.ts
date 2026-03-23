@@ -150,4 +150,30 @@ describe('deep-research --detach', () => {
     expect(payload.eventsPath).toBe(SAFE_EVENTS_PATH);
     expect(payload.notifyFile).toMatch(/dr-notify\.ndjson$/);
   });
+
+  it('defaults to detach when no --detach or --sync flag is given', async () => {
+    const { deepResearchCommand } = await import('../src/commands/deep-research.js');
+    const run = deepResearchCommand.run;
+    if (run === undefined) {
+      throw new Error('deepResearchCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'research topic',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+      } as never,
+      rawArgs: [],
+      cmd: deepResearchCommand,
+    });
+
+    // Default (no --detach, no --sync) should submit a detached job
+    expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    expect(withDriverMock).not.toHaveBeenCalled();
+  });
 });
