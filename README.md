@@ -371,7 +371,7 @@ If you run Cavendish on a shared machine:
 
 ## Migrating from v1.x to v2.0
 
-v2.0 changes the default execution model. All commands now run **detached** (background) by default.
+v2.0 changes the default execution model. `ask` and `deep-research` now run **detached** (background) by default.
 
 ### Breaking changes
 
