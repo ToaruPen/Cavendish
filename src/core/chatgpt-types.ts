@@ -21,7 +21,7 @@ export interface ConversationMessage {
 }
 
 export interface WaitForResponseOptions {
-  /** Timeout in milliseconds (default: 2_400_000). */
+  /** Timeout in milliseconds. Use Number.MAX_SAFE_INTEGER for unlimited (default). */
   timeout?: number;
   /** Fail if response activity stops for longer than this after it starts. */
   stallTimeoutMs?: number;
