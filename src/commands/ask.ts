@@ -95,10 +95,11 @@ const ASK_ARGS = {
 function resolveTimeoutSec(
   explicitTimeout: string | undefined,
 ): number {
-  if (explicitTimeout !== undefined) {
-    return Number(explicitTimeout);
+  if (explicitTimeout === undefined) {
+    return 0; // unlimited
   }
-  return 0; // unlimited
+  // Empty string → NaN, caught by isFinite check in validateArgs
+  return explicitTimeout.trim().length === 0 ? NaN : Number(explicitTimeout);
 }
 
 interface ValidatedArgs {

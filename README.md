@@ -222,7 +222,7 @@ cavendish report --format json    # JSON output (for CI/automation)
 | `--stream` | ask, deep-research | NDJSON streaming output (implies `--sync`) |
 | `--detach` | ask, deep-research | Submit as detached background job (default behavior) |
 | `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
-| `--timeout <sec>` | ask, deep-research | Timeout in seconds (default: unlimited) |
+| `--timeout <sec>` | ask, deep-research, jobs wait | Timeout in seconds (default: unlimited) |
 | `--upload-timeout <sec>` | ask, deep-research | Upload timeout for file attachments (default: 180) |
 | `--stdin` | delete, archive, move | Read conversation IDs from stdin (one per line) |
 | `--quiet` | all | Suppress progress output |

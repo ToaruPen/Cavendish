@@ -97,6 +97,10 @@ interface ValidatedArgs {
 }
 
 function validateTimeout(raw: unknown, format: 'json' | 'text'): number | undefined {
+  if (typeof raw === 'string' && raw.trim().length === 0) {
+    failValidation('--timeout cannot be empty. Use: --timeout <seconds>', format);
+    return undefined;
+  }
   const sec = raw !== undefined ? Number(raw) : DEFAULT_TIMEOUT_SEC;
   if (!Number.isFinite(sec) || sec < 0) {
     failValidation(`--timeout must be a non-negative number, got "${String(raw)}"`, format);
