@@ -175,6 +175,11 @@ function resolveRunMode(
   return { kind: 'initial', prompt, filePaths, uploadTimeoutMs };
 }
 
+/** Convert timeoutSec to milliseconds, treating 0 as unlimited. */
+function toTimeoutMs(timeoutSec: number): number {
+  return timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000;
+}
+
 function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined {
   const quiet = args.quiet === true;
   const isVerbose = args.verbose === true;
@@ -237,7 +242,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     mode,
     format,
     stream,
-    timeoutMs: timeoutSec === 0 ? Number.MAX_SAFE_INTEGER : timeoutSec * 1000,
+    timeoutMs: toTimeoutMs(timeoutSec),
     timeoutSec,
     uploadTimeoutMs,
     exportFormat: exp.exportFormat,
