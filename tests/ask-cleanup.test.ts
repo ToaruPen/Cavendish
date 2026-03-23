@@ -45,6 +45,8 @@ vi.mock('../src/core/cli-args.js', () => ({
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([]),
   parseUploadTimeout: vi.fn().mockReturnValue(undefined),
+  toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+  formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
 }));
 
 vi.mock('../src/core/model-config.js', () => ({
@@ -102,6 +104,7 @@ async function runAsk(): Promise<void> {
     format: 'text',
     continue: false,
     agent: false,
+    sync: true,
   } as unknown as Parameters<NonNullable<typeof askCommand.run>>[0]['args'];
 
   const run = askCommand.run;

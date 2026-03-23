@@ -37,6 +37,8 @@ vi.mock('../src/core/cli-args.js', () => ({
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([]),
   parseUploadTimeout: vi.fn().mockReturnValue(undefined),
+  toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+  formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
 }));
 
 vi.mock('../src/core/model-config.js', () => ({
@@ -77,7 +79,7 @@ vi.mock('../src/constants/selectors.js', () => ({
   assertValidChatId: vi.fn(),
 }));
 
-async function runAsk(): Promise<void> {
+async function runAsk(overrides: Record<string, unknown> = {}): Promise<void> {
   const { askCommand } = await import('../src/commands/ask.js');
   const args = {
     _: [],
@@ -90,6 +92,8 @@ async function runAsk(): Promise<void> {
     format: 'json',
     continue: false,
     agent: false,
+    sync: true,
+    ...overrides,
   } as unknown as Parameters<NonNullable<typeof askCommand.run>>[0]['args'];
 
   const run = askCommand.run;
@@ -104,8 +108,20 @@ describe('ask timeout classification', () => {
     vi.clearAllMocks();
   });
 
-  it('routes incomplete responses through failStructured instead of stdout success output', async () => {
+  it('default timeout (unlimited): incomplete response goes to json output, not failStructured', async () => {
     await runAsk();
+
+    // With unlimited timeout (default), assertCompletedResponse skips the check,
+    // so the incomplete response flows through to json output instead of failStructured.
+    expect(failStructuredMock).not.toHaveBeenCalled();
+    expect(jsonMock).toHaveBeenCalledOnce();
+    const firstCall = jsonMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(firstCall[0]).toBe('partial text');
+    expect(firstCall[1]).toMatchObject({ partial: true });
+  });
+
+  it('explicit --timeout 120: incomplete response triggers failStructured', async () => {
+    await runAsk({ timeout: '120' });
 
     expect(failStructuredMock).toHaveBeenCalledOnce();
     const firstCall = failStructuredMock.mock.calls[0] as [unknown, unknown];

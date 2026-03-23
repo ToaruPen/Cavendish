@@ -18,11 +18,16 @@ export function validateDetachedOptions(
   format: 'json' | 'text',
   stream: boolean,
 ): { detach: boolean; notifyFile: string | undefined } | undefined {
-  const detach = args.detach === true;
-  if (stream && detach) {
-    failValidation('--stream cannot be used with --detach', format);
+  const sync = args.sync === true;
+  const explicitDetach = args.detach === true;
+  if (sync && explicitDetach) {
+    failValidation('--sync and --detach cannot be used together.', format);
     return undefined;
   }
+  // Default to detach unless --sync is given or --stream is active
+  // --stream implies sync because streaming requires a foreground process
+  const detach = (sync || stream) ? false : (args.detach !== false);
+
   const notifyFile = typeof args.notifyFile === 'string' && args.notifyFile.length > 0
     ? resolve(args.notifyFile)
     : undefined;

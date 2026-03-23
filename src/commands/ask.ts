@@ -3,7 +3,7 @@ import { defineCommand } from 'citty';
 import { assertValidChatId } from '../constants/selectors.js';
 import { BrowserManager } from '../core/browser-manager.js';
 import { ChatGPTDriver, type WaitForResponseResult } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, extractArgsOrFail, formatTimeoutDisplay, parseUploadTimeout, readStdin, rejectUnknownFlags, toTimeoutMs, validateFileArgs } from '../core/cli-args.js';
 import { delay } from '../core/driver/helpers.js';
 import { CavendishError } from '../core/errors.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
@@ -15,8 +15,6 @@ import { acquireLock, releaseLock } from '../core/process-lock.js';
 import { registerCleanup } from '../core/shutdown.js';
 
 const DEFAULT_MODEL = 'Pro';
-const DEFAULT_TIMEOUT_SEC = 120;
-const PRO_TIMEOUT_SEC = 2400;
 // Continue/chat follow-up baselines poll for at most ~2s (8 x 250ms) so the
 // existing assistant turn can settle without adding a long pre-send delay.
 const CONTINUED_CHAT_COUNT_SETTLE_MS = 250;
@@ -30,7 +28,7 @@ const ASK_ARGS = {
   },
   timeout: {
     type: 'string' as const,
-    description: 'Response timeout in seconds (model-dependent; default: 120, Pro: 2400)',
+    description: 'Response timeout in seconds (default: unlimited)',
   },
   model: {
     type: 'string' as const,
@@ -75,7 +73,11 @@ const ASK_ARGS = {
   },
   detach: {
     type: 'boolean' as const,
-    description: 'Submit as a detached background job and return immediately',
+    description: 'Submit as a detached background job (default; use --sync to override)',
+  },
+  sync: {
+    type: 'boolean' as const,
+    description: 'Run synchronously instead of detached (default: detached)',
   },
   notifyFile: {
     type: 'string' as const,
@@ -88,16 +90,16 @@ const ASK_ARGS = {
 
 /**
  * Resolve the effective timeout: use explicit --timeout if provided,
- * otherwise pick a model-appropriate default.
+ * otherwise return 0 (unlimited).
  */
 function resolveTimeoutSec(
   explicitTimeout: string | undefined,
-  model: string,
 ): number {
-  if (explicitTimeout !== undefined) {
-    return Number(explicitTimeout);
+  if (explicitTimeout === undefined) {
+    return 0; // unlimited
   }
-  return model.toLowerCase().includes('pro') ? PRO_TIMEOUT_SEC : DEFAULT_TIMEOUT_SEC;
+  // Empty string → NaN, caught by isFinite check in validateArgs
+  return explicitTimeout.trim().length === 0 ? NaN : Number(explicitTimeout);
 }
 
 interface ValidatedArgs {
@@ -219,10 +221,10 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
 
   if (!rejectUnknownFlags(ASK_ARGS, format)) {return undefined;}
 
-  const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined, model);
+  const timeoutSec = resolveTimeoutSec(args.timeout as string | undefined);
 
-  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-    failValidation(`--timeout must be a positive number, got "${String(args.timeout)}"`, format); return;
+  if (!Number.isFinite(timeoutSec) || timeoutSec < 0) {
+    failValidation(`--timeout must be a non-negative number, got "${String(args.timeout)}"`, format); return;
   }
 
   const filePaths = validateFileArgs(format);
@@ -265,7 +267,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     quiet,
     isVerbose,
     model,
-    timeoutMs: timeoutSec * 1000,
+    timeoutMs: toTimeoutMs(timeoutSec),
     timeoutSec,
     format,
     stream,
@@ -285,7 +287,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
  * Build the dry-run summary message for the ask command.
  */
 function dryRunMessage(v: ValidatedArgs): string {
-  const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
+  const parts = [`model: ${v.model}`, `format: ${v.format}`, `timeout: ${formatTimeoutDisplay(v.timeoutSec)}`];
   if (v.chatId !== undefined) {parts.push(`chat: ${v.chatId}`);}
   else if (v.continueChat) {parts.push('continue: most recent');}
   if (v.stream) {parts.push('stream: true');}
@@ -474,7 +476,7 @@ function assertCompletedResponse(
   result: WaitForResponseResult,
   timeoutSec: number,
 ): void {
-  if (result.completed || process.env.CAVENDISH_ALLOW_PARTIAL === '1') {
+  if (timeoutSec === 0 || result.completed || process.env.CAVENDISH_ALLOW_PARTIAL === '1') {
     return;
   }
 

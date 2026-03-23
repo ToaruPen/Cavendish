@@ -4,3 +4,5 @@ dist/
 *.tsbuildinfo
 *.log
 .claude/.workflow-state
+.worktrees/
+docs/superpowers/

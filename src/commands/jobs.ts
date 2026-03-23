@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty';
 
-import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags, toTimeoutMs } from '../core/cli-args.js';
 import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
 import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
@@ -159,8 +159,7 @@ const waitCommand = defineCommand({
     ...JOB_ID_ARGS,
     timeout: {
       type: 'string' as const,
-      description: 'Maximum wait time in seconds (default: 3600)',
-      default: '3600',
+      description: 'Maximum wait time in seconds (default: unlimited)',
     },
   },
   async run({ args }): Promise<void> {
@@ -170,13 +169,14 @@ const waitCommand = defineCommand({
       ...JOB_ID_ARGS,
       timeout: { type: 'string' as const },
     }, format)) { return; }
-    const timeoutSec = Number(args.timeout);
-    if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) {
-      fail(`--timeout must be a positive number, got "${args.timeout}"`);
+    const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : 0;
+    if (!Number.isFinite(timeoutSec) || timeoutSec < 0) {
+      fail(`--timeout must be a non-negative number, got "${String(args.timeout)}"`);
       return;
     }
+    const timeoutMs = toTimeoutMs(timeoutSec);
     try {
-      const job = await waitForTerminalJob(args.jobId, timeoutSec * 1000);
+      const job = await waitForTerminalJob(args.jobId, timeoutMs);
       const result = readJobResult(job.jobId);
       const error = readJobError(job.jobId) ?? job.error;
       if (job.status === 'failed' || job.status === 'cancelled' || (job.status === 'timed_out' && result === undefined)) {

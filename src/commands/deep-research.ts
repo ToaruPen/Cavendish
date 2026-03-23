@@ -4,14 +4,14 @@ import { defineCommand } from 'citty';
 
 import { assertValidChatId, SELECTORS } from '../constants/selectors.js';
 import type { ChatGPTDriver, DeepResearchExportFormat } from '../core/chatgpt-driver.js';
-import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, parseUploadTimeout, readStdin, rejectUnknownFlags, validateFileArgs } from '../core/cli-args.js';
+import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, formatTimeoutDisplay, parseUploadTimeout, readStdin, rejectUnknownFlags, toTimeoutMs, validateFileArgs } from '../core/cli-args.js';
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
 import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
-const DEFAULT_TIMEOUT_SEC = 1800; // 30 minutes
+const DEFAULT_TIMEOUT_SEC = 0; // unlimited
 
 const DEEP_RESEARCH_ARGS = {
   prompt: {
@@ -29,7 +29,7 @@ const DEEP_RESEARCH_ARGS = {
   },
   timeout: {
     type: 'string' as const,
-    description: `Response timeout in seconds (default: ${String(DEFAULT_TIMEOUT_SEC)})`,
+    description: 'Response timeout in seconds (default: unlimited)',
   },
   file: {
     type: 'string' as const,
@@ -49,7 +49,11 @@ const DEEP_RESEARCH_ARGS = {
   },
   detach: {
     type: 'boolean' as const,
-    description: 'Submit as a detached background job and return immediately',
+    description: 'Submit as a detached background job (default; use --sync to override)',
+  },
+  sync: {
+    type: 'boolean' as const,
+    description: 'Run synchronously instead of detached (default: detached)',
   },
   notifyFile: {
     type: 'string' as const,
@@ -93,9 +97,13 @@ interface ValidatedArgs {
 }
 
 function validateTimeout(raw: unknown, format: 'json' | 'text'): number | undefined {
+  if (typeof raw === 'string' && raw.trim().length === 0) {
+    failValidation('--timeout cannot be empty. Use: --timeout <seconds>', format);
+    return undefined;
+  }
   const sec = raw !== undefined ? Number(raw) : DEFAULT_TIMEOUT_SEC;
-  if (!Number.isFinite(sec) || sec <= 0) {
-    failValidation(`--timeout must be a positive number, got "${String(raw)}"`, format);
+  if (!Number.isFinite(sec) || sec < 0) {
+    failValidation(`--timeout must be a non-negative number, got "${String(raw)}"`, format);
     return undefined;
   }
   return sec;
@@ -233,7 +241,7 @@ function validateArgs(args: Record<string, unknown>): ValidatedArgs | undefined 
     mode,
     format,
     stream,
-    timeoutMs: timeoutSec * 1000,
+    timeoutMs: toTimeoutMs(timeoutSec),
     timeoutSec,
     uploadTimeoutMs,
     exportFormat: exp.exportFormat,
@@ -286,7 +294,7 @@ function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload 
 }
 
 function dryRunMessage(v: ValidatedArgs): string {
-  const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${String(v.timeoutSec)}s`];
+  const parts = [`mode: ${v.mode.kind}`, `format: ${v.format}`, `timeout: ${formatTimeoutDisplay(v.timeoutSec)}`];
   if (v.stream) { parts.push('stream: true'); }
   if (v.uploadTimeoutMs !== undefined) { parts.push(`uploadTimeout: ${String(v.uploadTimeoutMs / 1000)}s`); }
   if (v.mode.kind === 'initial' && v.mode.filePaths.length > 0) {

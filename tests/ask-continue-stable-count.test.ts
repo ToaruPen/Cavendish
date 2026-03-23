@@ -56,6 +56,8 @@ vi.mock('../src/core/cli-args.js', () => ({
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([]),
   parseUploadTimeout: vi.fn().mockReturnValue(undefined),
+  toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+  formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
 }));
 
 vi.mock('../src/core/driver/helpers.js', async (importOriginal) => {
@@ -122,6 +124,7 @@ describe('ask --continue baseline capture', () => {
         format: 'json',
         continue: true,
         agent: false,
+        sync: true,
       } as never,
       rawArgs: [],
       cmd: askCommand,

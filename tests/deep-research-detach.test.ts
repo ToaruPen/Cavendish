@@ -19,6 +19,8 @@ vi.mock('../src/core/cli-args.js', () => ({
   rejectUnknownFlags: vi.fn().mockReturnValue(true),
   validateFileArgs: vi.fn().mockReturnValue([SAFE_RESEARCH_PATH]),
   parseUploadTimeout: vi.fn().mockReturnValue(undefined),
+  toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+  formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
 }));
 
 vi.mock('../src/core/jobs/store.js', () => ({
@@ -129,7 +131,7 @@ describe('deep-research --detach', () => {
       '--file',
       SAFE_RESEARCH_PATH,
       '--timeout',
-      '1800',
+      '0',
       '--export',
       'markdown',
       '--exportPath',
@@ -149,5 +151,31 @@ describe('deep-research --detach', () => {
     expect(payload.jobPath).toBe(SAFE_JOB_PATH);
     expect(payload.eventsPath).toBe(SAFE_EVENTS_PATH);
     expect(payload.notifyFile).toMatch(/dr-notify\.ndjson$/);
+  });
+
+  it('defaults to detach when no --detach or --sync flag is given', async () => {
+    const { deepResearchCommand } = await import('../src/commands/deep-research.js');
+    const run = deepResearchCommand.run;
+    if (run === undefined) {
+      throw new Error('deepResearchCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'research topic',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+      } as never,
+      rawArgs: [],
+      cmd: deepResearchCommand,
+    });
+
+    // Default (no --detach, no --sync) should submit a detached job
+    expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    expect(withDriverMock).not.toHaveBeenCalled();
   });
 });

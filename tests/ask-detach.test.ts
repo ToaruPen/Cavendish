@@ -37,6 +37,8 @@ vi.mock('../src/core/cli-args.js', () => {
     rejectUnknownFlags: vi.fn().mockReturnValue(true),
     validateFileArgs: vi.fn().mockReturnValue([SAFE_CONTEXT_PATH]),
     parseUploadTimeout: vi.fn().mockReturnValue(undefined),
+    toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+    formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
   };
 });
 
@@ -143,7 +145,7 @@ describe('ask --detach', () => {
       '--model',
       'Pro',
       '--timeout',
-      '2400',
+      '0',
       '--file',
       SAFE_CONTEXT_PATH,
       '--gdrive',
@@ -208,7 +210,36 @@ describe('ask --detach', () => {
     expect(request.argv).not.toContain('stdin-only prompt');
   });
 
-  it('rejects --stream together with --detach', async () => {
+  it('defaults to detach when no --detach or --sync flag is given', async () => {
+    const { askCommand } = await import('../src/commands/ask.js');
+    const run = askCommand.run;
+    if (run === undefined) {
+      throw new Error('askCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'hello',
+        model: 'Pro',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+        continue: false,
+        agent: false,
+      } as never,
+      rawArgs: [],
+      cmd: askCommand,
+    });
+
+    // Default (no --detach, no --sync) should submit a detached job
+    expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    expect(failValidationMock).not.toHaveBeenCalled();
+  });
+
+  it('--stream auto-implies sync (no detach even with --detach)', async () => {
     const { askCommand } = await import('../src/commands/ask.js');
     const run = askCommand.run;
     if (run === undefined) {
@@ -233,7 +264,8 @@ describe('ask --detach', () => {
       cmd: askCommand,
     });
 
-    expect(failValidationMock).toHaveBeenCalledWith('--stream cannot be used with --detach', 'json');
+    // --stream overrides --detach to false; no validation error
+    expect(failValidationMock).not.toHaveBeenCalled();
     expect(submitDetachedJobMock).not.toHaveBeenCalled();
   });
 });

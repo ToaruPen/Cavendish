@@ -24,6 +24,8 @@ vi.mock('../src/core/cli-args.js', async (importOriginal) => {
   return {
     ...original,
     readStdin: vi.fn(() => ''),
+    toTimeoutMs: (sec: number): number => sec === 0 ? Number.MAX_SAFE_INTEGER : sec * 1000,
+    formatTimeoutDisplay: (sec: number): string => sec === 0 ? 'unlimited' : `${String(sec)}s`,
   };
 });
 
@@ -50,6 +52,7 @@ async function runDR(overrides: Record<string, unknown> = {}): Promise<void> {
     prompt: 'Test query',
     format: 'text',
     timeout: '60',
+    sync: true,
     ...overrides,
   } as unknown as Parameters<NonNullable<typeof deepResearchCommand.run>>[0]['args'];
 
