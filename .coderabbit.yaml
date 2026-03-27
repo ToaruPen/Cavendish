@@ -1,40 +1,61 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-language: ja-JP
-
-early_access: false
+language: "en-US"
 
 reviews:
-  profile: chill
-  request_changes_workflow: true
+  profile: assertive
+  review_status: true
   auto_review:
     enabled: true
     auto_incremental_review: true
-    auto_pause_after_reviewed_commits: 0
+    drafts: false
   path_instructions:
-    - path: "src/constants/selectors.ts"
-      instructions: >
-        All ChatGPT DOM selectors MUST live in this file.
-        No inline selectors are allowed elsewhere in the codebase.
-        Review any PR that adds selectors outside this file as a blocking issue.
+    - path: "**/*"
+      instructions: |
+        Role:
+        - Review PRs and Issues.
+        - Verify AC and DoD.
+        - Check documentation consistency (sync-docs).
 
-    - path: "src/core/**/*.ts"
-      instructions: >
-        Every function MUST have an explicit return type.
-        No `as any`, `@ts-ignore`, or `@ts-expect-error`.
-        Fail fast with actionable error messages — no empty catch blocks.
-        Retry logic: max 3 attempts with logging.
+        Priority (highest to lowest):
+        1. Tests and TDD
+        2. Readability and maintainability
+        3. Correctness
+        4. Security
+        5. Performance
 
-    - path: "src/**/*.ts"
-      instructions: >
-        Imports must be grouped and ordered: builtin > external > internal > relative,
-        alphabetized within each group.
+        Tests / TDD (highest priority):
+        - Follow Red -> Green -> Refactor.
+        - For behavior changes and bug fixes, require a failing test first.
+        - Implementation must be the smallest change needed to make the test pass.
+        - If behavior changes without corresponding tests, treat it as a blocker.
+        - Check happy paths, negative paths, and edge cases.
+        - Require meaningful, decisive assertions.
+        - Eliminate flaky factors from time, randomness, and I/O, and require deterministic tests.
 
-    - path: "**/*.test.ts"
-      instructions: >
-        Do NOT create fixture-based mock tests (mock DOM diverges from production too quickly).
-        Never delete or disable existing test code.
-        Bug fixes require a test that fails before and passes after the fix.
+        Readability / maintainability (highest priority):
+        - Check that names express intent.
+        - Check that functions and modules have a single responsibility and an appropriate size.
+        - Check that control flow is easy to follow, without unnecessary nesting or hidden side effects.
+        - Keep comments limited to explaining "why".
+        - Check consistency with existing style and patterns.
 
-knowledge_base:
-  code_guidelines:
-    enabled: true
+        Correctness:
+        - Check that all AC items are satisfied.
+        - Check compliance with PRD / Epic requirements.
+        - Check DB / API consistency.
+        - Check that boundary values and error paths are covered.
+
+        Security:
+        - Check input validation and sanitization.
+        - Check that AuthN / AuthZ match the requirements.
+        - Check that no secrets are hard-coded.
+
+        Performance:
+        - Point out obvious N+1 problems or unnecessary high-complexity processing.
+        - Point out signs of memory leaks or excessive retention.
+
+        Output format:
+        - Put findings first, ordered by severity.
+        - For each finding, include severity, file:line, evidence, and a proposed fix.
+        - Use blocker / must-fix / nit as the severity levels.
+        - At the end, explicitly state the verdict for AC / DoD / TDD compliance / sync-docs.
