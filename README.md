@@ -4,15 +4,15 @@
 [![Node.js](https://img.shields.io/node/v/cavendish)](https://nodejs.org/)
 [![License: ISC](https://img.shields.io/badge/license-ISC-blue.svg)](LICENSE)
 
-**Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command. Detach-first since v2.0.0.
+**Playwright-based CLI that automates ChatGPT's Web UI** — enabling coding agents (Claude Code, Codex CLI, etc.) to query ChatGPT Pro models via a single shell command. Detach-first since v2.0.0: `ask` / `deep-research` return job metadata by default, and `--sync` / `--stream` opt back into foreground output.
 
 ```bash
 # Ask ChatGPT (returns job ID — detached by default)
 cavendish ask "Explain the Observer pattern with a TypeScript example"
 # Retrieve the result
-cavendish jobs wait <job-id>
+cavendish wait <job-id>
 
-# Synchronous mode (blocks until response)
+# Synchronous mode (blocks until response content)
 cavendish ask --sync "Quick question"
 
 # Deep Research with PDF export (synchronous)
@@ -84,9 +84,9 @@ cavendish doctor        # Health diagnostics (CDP, auth, selectors)
 cavendish ask "Your question here"
 
 # Wait for the result
-cavendish jobs wait <job-id>
+cavendish wait <job-id>
 
-# Synchronous mode (blocks until response)
+# Synchronous mode (returns the actual response JSON/text instead of job metadata)
 cavendish ask --sync "Your question here"
 
 # Streaming output (implies --sync)
@@ -167,8 +167,23 @@ cavendish jobs list
 # Inspect job status
 cavendish jobs status <job-id>
 
+# Top-level alias for the common follow-up
+cavendish wait <job-id>
+
 # Wait for completion and print the final content
 cavendish jobs wait <job-id>
+
+# Long-running jobs: emit stderr status updates every 30 seconds while waiting
+cavendish jobs wait <job-id> --poll 30
+```
+
+For long-running Pro / Deep Research work in timeout-constrained shells, prefer:
+
+```bash
+cavendish ask --detach --format json "Your question here"   # returns job metadata
+cavendish jobs status <job-id>                              # check queued/running/completed
+cavendish jobs wait <job-id> --poll 30                      # keep stderr alive with progress
+cavendish jobs read <job-id>                                # inspect saved metadata anytime
 ```
 
 ### Chat Management
@@ -222,7 +237,8 @@ cavendish report --format json    # JSON output (for CI/automation)
 | `--stream` | ask, deep-research | NDJSON streaming output (implies `--sync`) |
 | `--detach` | ask, deep-research | Submit as detached background job (default behavior) |
 | `--notify-file <path>` | ask, deep-research | Append a completion notification JSON line to a local file |
-| `--timeout <sec>` | ask, deep-research, jobs wait | Timeout in seconds (default: unlimited) |
+| `--timeout <sec>` | ask, deep-research, jobs wait, wait | Timeout in seconds (default: unlimited) |
+| `--poll <sec>` | jobs wait, wait | Emit stderr status updates every N seconds while waiting |
 | `--upload-timeout <sec>` | ask, deep-research | Upload timeout for file attachments (default: 180) |
 | `--stdin` | delete, archive, move | Read conversation IDs from stdin (one per line) |
 | `--quiet` | all | Suppress progress output |
@@ -393,7 +409,7 @@ cavendish ask --sync "question"
 
 # v2.0 recommended: detach + wait
 cavendish ask "question"                # returns jobId
-cavendish jobs wait <job-id>            # returns response
+cavendish wait <job-id>                 # returns response
 ```
 
 If your agent integration pipes stdout directly, add `--sync` to preserve the v1.x behavior.

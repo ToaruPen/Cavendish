@@ -9,7 +9,7 @@ import { deepResearchCommand } from './commands/deep-research.js';
 import { deleteCommand } from './commands/delete.js';
 import { doctorCommand } from './commands/doctor.js';
 import { initCommand } from './commands/init.js';
-import { jobsCommand } from './commands/jobs.js';
+import { jobsCommand, waitCommand } from './commands/jobs.js';
 import { listCommand } from './commands/list.js';
 import { moveCommand } from './commands/move.js';
 import { projectsCommand } from './commands/projects.js';
@@ -20,7 +20,7 @@ import { registerSignalHandlers } from './core/shutdown.js';
 
 declare const __VERSION__: string;
 
-const main = defineCommand({
+export const main = defineCommand({
   meta: {
     name: 'cavendish',
     version: __VERSION__,
@@ -41,6 +41,7 @@ const main = defineCommand({
     read: readCommand,
     report: reportCommand,
     status: statusCommand,
+    wait: waitCommand,
   },
 });
 

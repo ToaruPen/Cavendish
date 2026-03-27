@@ -5,7 +5,7 @@ import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
 import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
 import { runJobWorkerOrExit } from '../core/jobs/worker.js';
-import { fail, failStructured, jsonRaw, text, validateFormat } from '../core/output-handler.js';
+import { fail, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
 const JOBS_ARGS = {
   ...GLOBAL_ARGS,
@@ -84,10 +84,23 @@ function readJobOrThrow(jobId: string): Exclude<ReturnType<typeof readJob>, unde
   }
 }
 
-async function waitForTerminalJob(jobId: string, timeoutMs: number): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
+async function waitForTerminalJob(
+  jobId: string,
+  timeoutMs: number,
+  pollIntervalMs: number | undefined,
+  quiet: boolean,
+): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
   const deadline = Date.now() + timeoutMs;
+  let nextProgressAt = pollIntervalMs !== undefined ? Date.now() : undefined;
   while (Date.now() < deadline) {
     const job = readJobOrThrow(jobId);
+    if (pollIntervalMs !== undefined && nextProgressAt !== undefined && Date.now() >= nextProgressAt) {
+      progress(
+        `Waiting for detached job ${job.jobId} (status: ${job.status}, retries: ${String(job.retryCount)})`,
+        quiet,
+      );
+      nextProgressAt = Date.now() + pollIntervalMs;
+    }
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
     }
@@ -150,7 +163,53 @@ const statusCommand = defineCommand({
   },
 });
 
-const waitCommand = defineCommand({
+const runWorkerCommand = defineCommand({
+  meta: {
+    name: 'run-worker',
+    description: 'Run a detached job worker',
+  },
+  args: RUN_WORKER_ARGS,
+  async run({ args }): Promise<void> {
+    if (!rejectUnknownFlags(RUN_WORKER_ARGS)) { return; }
+    await runJobWorkerOrExit(args.jobId);
+  },
+});
+
+const runRunnerCommand = defineCommand({
+  meta: {
+    name: 'run-runner',
+    description: 'Run the detached job runner',
+  },
+  args: RUN_RUNNER_ARGS,
+  async run(): Promise<void> {
+    if (!rejectUnknownFlags(RUN_RUNNER_ARGS)) { return; }
+    await runJobRunnerOrExit();
+  },
+});
+
+function parsePollIntervalMs(
+  rawPoll: string | undefined,
+  format: 'json' | 'text',
+): number | undefined {
+  if (rawPoll === undefined) {
+    return undefined;
+  }
+  const pollSec = Number(rawPoll);
+  if (!Number.isFinite(pollSec) || pollSec <= 0) {
+    failStructured(
+      new CavendishError(
+        `--poll must be a positive number, got "${rawPoll}"`,
+        'unknown',
+        'Use a positive number of seconds such as --poll 5.',
+      ),
+      format,
+    );
+    return undefined;
+  }
+  return Math.max(1, Math.round(pollSec * 1000));
+}
+
+export const waitCommand = defineCommand({
   meta: {
     name: 'wait',
     description: 'Wait for a detached job to finish',
@@ -161,6 +220,10 @@ const waitCommand = defineCommand({
       type: 'string' as const,
       description: 'Maximum wait time in seconds (default: unlimited)',
     },
+    poll: {
+      type: 'string' as const,
+      description: 'Emit progress updates to stderr every N seconds while waiting',
+    },
   },
   async run({ args }): Promise<void> {
     const format = validateFormat(args.format);
@@ -168,15 +231,20 @@ const waitCommand = defineCommand({
     if (!rejectUnknownFlags({
       ...JOB_ID_ARGS,
       timeout: { type: 'string' as const },
+      poll: { type: 'string' as const },
     }, format)) { return; }
     const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : 0;
     if (!Number.isFinite(timeoutSec) || timeoutSec < 0) {
       fail(`--timeout must be a non-negative number, got "${String(args.timeout)}"`);
       return;
     }
+    const pollIntervalMs = parsePollIntervalMs(args.poll, format);
+    if (args.poll !== undefined && pollIntervalMs === undefined) {
+      return;
+    }
     const timeoutMs = toTimeoutMs(timeoutSec);
     try {
-      const job = await waitForTerminalJob(args.jobId, timeoutMs);
+      const job = await waitForTerminalJob(args.jobId, timeoutMs, pollIntervalMs, args.quiet === true);
       const result = readJobResult(job.jobId);
       const error = readJobError(job.jobId) ?? job.error;
       if (job.status === 'failed' || job.status === 'cancelled' || (job.status === 'timed_out' && result === undefined)) {
@@ -207,30 +275,6 @@ const waitCommand = defineCommand({
     } catch (error: unknown) {
       failStructured(error, format);
     }
-  },
-});
-
-const runWorkerCommand = defineCommand({
-  meta: {
-    name: 'run-worker',
-    description: 'Run a detached job worker',
-  },
-  args: RUN_WORKER_ARGS,
-  async run({ args }): Promise<void> {
-    if (!rejectUnknownFlags(RUN_WORKER_ARGS)) { return; }
-    await runJobWorkerOrExit(args.jobId);
-  },
-});
-
-const runRunnerCommand = defineCommand({
-  meta: {
-    name: 'run-runner',
-    description: 'Run the detached job runner',
-  },
-  args: RUN_RUNNER_ARGS,
-  async run(): Promise<void> {
-    if (!rejectUnknownFlags(RUN_RUNNER_ARGS)) { return; }
-    await runJobRunnerOrExit();
   },
 });
 
