@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let failStructuredMock: ReturnType<typeof vi.fn>;
 let jsonRawMock: ReturnType<typeof vi.fn>;
+let progressMock: ReturnType<typeof vi.fn>;
 
 interface RunnableCommand {
   run?: (context: {
@@ -48,11 +49,12 @@ vi.mock('../src/core/jobs/runner.js', () => ({
 vi.mock('../src/core/output-handler.js', () => {
   failStructuredMock = vi.fn();
   jsonRawMock = vi.fn();
+  progressMock = vi.fn();
   return {
     fail: vi.fn(),
     failStructured: failStructuredMock,
     jsonRaw: jsonRawMock,
-    progress: vi.fn(),
+    progress: progressMock,
     text: vi.fn(),
     validateFormat: vi.fn().mockReturnValue('json'),
   };
@@ -185,5 +187,79 @@ describe('jobs command', () => {
     }));
 
     expect(failStructuredMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports --poll on jobs wait and emits periodic progress updates', async () => {
+    vi.useFakeTimers();
+    try {
+      const { jobsCommand } = await import('../src/commands/jobs.js');
+      const store = await import('../src/core/jobs/store.js');
+      vi.mocked(store.readJob)
+        .mockReturnValueOnce({
+          jobId: 'job-1',
+          kind: 'ask',
+          status: 'running',
+          submittedAt: '2026-03-14T00:00:00.000Z',
+          updatedAt: '2026-03-14T00:00:00.000Z',
+          retryCount: 0,
+        } as never)
+        .mockReturnValueOnce({
+          jobId: 'job-1',
+          kind: 'ask',
+          status: 'completed',
+          submittedAt: '2026-03-14T00:00:00.000Z',
+          updatedAt: '2026-03-14T00:00:01.000Z',
+          retryCount: 0,
+        } as never);
+      vi.mocked(store.readJobResult).mockReturnValue({
+        event: {
+          content: 'final response',
+          model: 'Pro',
+          partial: false,
+          timeoutSec: 0,
+          timestamp: '2026-03-14T00:00:01.000Z',
+        },
+      } as never);
+
+      const subCommands = jobsCommand.subCommands as unknown as {
+        wait?: RunnableCommand;
+      };
+      const waitCommand = subCommands.wait;
+      const run = waitCommand?.run;
+      if (waitCommand === undefined || run === undefined) {
+        throw new Error('jobsCommand.subCommands.wait.run is undefined');
+      }
+
+      const runPromise = Promise.resolve(run({
+        args: {
+          _: [],
+          jobId: 'job-1',
+          poll: '0.1',
+          timeout: '5',
+          format: 'json',
+          quiet: false,
+          verbose: false,
+        } as never,
+        rawArgs: [],
+        cmd: waitCommand,
+      }));
+
+      await vi.advanceTimersByTimeAsync(250);
+      await runPromise;
+
+      expect(progressMock).toHaveBeenCalled();
+      expect(jsonRawMock).toHaveBeenCalledWith({
+        content: 'final response',
+        model: 'Pro',
+        chatId: undefined,
+        url: undefined,
+        project: undefined,
+        partial: false,
+        timeoutSec: 0,
+        timestamp: '2026-03-14T00:00:01.000Z',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
