@@ -9,7 +9,7 @@ reviews:
     auto_incremental_review: true
     drafts: false
   path_instructions:
-    - path: "**/*"
+    - path: "src/**/*"
       instructions: |
         Role:
         - Review PRs and Issues.
@@ -32,7 +32,7 @@ reviews:
         - Require meaningful, decisive assertions.
         - Eliminate flaky factors from time, randomness, and I/O, and require deterministic tests.
 
-        Readability / maintainability (highest priority):
+        Readability / maintainability:
         - Check that names express intent.
         - Check that functions and modules have a single responsibility and an appropriate size.
         - Check that control flow is easy to follow, without unnecessary nesting or hidden side effects.
@@ -59,3 +59,17 @@ reviews:
         - For each finding, include severity, file:line, evidence, and a proposed fix.
         - Use blocker / must-fix / nit as the severity levels.
         - At the end, explicitly state the verdict for AC / DoD / TDD compliance / sync-docs.
+    - path: "tests/**/*"
+      instructions: |
+        Prioritize determinism, decisive assertions, and flaky-test elimination.
+        Never delete or disable existing tests.
+        Bug fixes require a test that fails before and passes after the fix.
+        Do NOT create fixture-based mock tests (mock DOM diverges from production too quickly).
+    - path: "**/*.md"
+      instructions: |
+        Prioritize clarity, accuracy, and sync-docs consistency.
+        Require tests only if behavior changes are introduced alongside documentation.
+    - path: "**/*.yaml"
+      instructions: |
+        Validate keys/values against the relevant schema.
+        Review automation and CI impact of configuration changes.
