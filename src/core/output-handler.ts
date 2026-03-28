@@ -71,7 +71,7 @@ export function json(
     timestamp: new Date().toISOString(),
     partial: metadata?.partial ?? false,
   };
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+  process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
 /**
@@ -79,7 +79,7 @@ export function json(
  * Use for list/array output where ResponsePayload is not appropriate.
  */
 export function jsonRaw(data: unknown): void {
-  process.stdout.write(`${JSON.stringify(data)}\n`);
+  process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
 }
 
 /**

@@ -194,30 +194,37 @@ describe('jobs command', () => {
     try {
       const { jobsCommand } = await import('../src/commands/jobs.js');
       const store = await import('../src/core/jobs/store.js');
-      vi.mocked(store.readJob)
-        .mockReturnValueOnce({
-          jobId: 'job-1',
-          kind: 'ask',
-          status: 'running',
-          submittedAt: '2026-03-14T00:00:00.000Z',
-          updatedAt: '2026-03-14T00:00:00.000Z',
-          retryCount: 0,
-        } as never)
-        .mockReturnValueOnce({
-          jobId: 'job-1',
-          kind: 'ask',
-          status: 'completed',
-          submittedAt: '2026-03-14T00:00:00.000Z',
-          updatedAt: '2026-03-14T00:00:01.000Z',
-          retryCount: 0,
-        } as never);
+      const runningJob = {
+        jobId: 'job-1',
+        kind: 'ask',
+        status: 'running',
+        submittedAt: '2026-03-14T00:00:00.000Z',
+        updatedAt: '2026-03-14T00:00:00.000Z',
+        retryCount: 0,
+      } as never;
+      const completedJob = {
+        jobId: 'job-1',
+        kind: 'ask',
+        status: 'completed',
+        submittedAt: '2026-03-14T00:00:00.000Z',
+        updatedAt: '2026-03-14T00:00:02.000Z',
+        retryCount: 0,
+      } as never;
+      // Return running for many iterations, then completed after ~2.2s
+      // (each loop iteration sleeps 200ms, so 11 iterations ≈ 2.2s)
+      const readJobMock = vi.mocked(store.readJob);
+      for (let i = 0; i < 11; i++) {
+        readJobMock.mockReturnValueOnce(runningJob);
+      }
+      readJobMock.mockReturnValue(completedJob);
+
       vi.mocked(store.readJobResult).mockReturnValue({
         event: {
           content: 'final response',
           model: 'Pro',
           partial: false,
           timeoutSec: 0,
-          timestamp: '2026-03-14T00:00:01.000Z',
+          timestamp: '2026-03-14T00:00:02.000Z',
         },
       } as never);
 
@@ -234,8 +241,8 @@ describe('jobs command', () => {
         args: {
           _: [],
           jobId: 'job-1',
-          poll: '0.1',
-          timeout: '5',
+          poll: '1',
+          timeout: '10',
           format: 'json',
           quiet: false,
           verbose: false,
@@ -244,10 +251,22 @@ describe('jobs command', () => {
         cmd: waitCommand,
       }));
 
-      await vi.advanceTimersByTimeAsync(250);
+      // Initial progress fires immediately (nextProgressAt = Date.now()),
+      // then every pollIntervalMs (1000ms). At T=1100: 2 calls (T=0 + T=1000).
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(progressMock).toHaveBeenCalledTimes(2);
+      expect(progressMock).toHaveBeenCalledWith(
+        expect.stringContaining('status: running'),
+        false,
+      );
+
+      // Advance past next poll boundary (T=2000ms) — third progress call
+      await vi.advanceTimersByTimeAsync(1100);
+      expect(progressMock).toHaveBeenCalledTimes(3);
+
+      // Job completes after ~2.2s
       await runPromise;
 
-      expect(progressMock).toHaveBeenCalled();
       expect(jsonRawMock).toHaveBeenCalledWith({
         content: 'final response',
         model: 'Pro',
@@ -256,7 +275,7 @@ describe('jobs command', () => {
         project: undefined,
         partial: false,
         timeoutSec: 0,
-        timestamp: '2026-03-14T00:00:01.000Z',
+        timestamp: '2026-03-14T00:00:02.000Z',
       });
     } finally {
       vi.useRealTimers();
