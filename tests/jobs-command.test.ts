@@ -234,7 +234,7 @@ describe('jobs command', () => {
         args: {
           _: [],
           jobId: 'job-1',
-          poll: '0.1',
+          poll: '1',
           timeout: '5',
           format: 'json',
           quiet: false,
@@ -244,7 +244,7 @@ describe('jobs command', () => {
         cmd: waitCommand,
       }));
 
-      await vi.advanceTimersByTimeAsync(250);
+      await vi.advanceTimersByTimeAsync(1100);
       await runPromise;
 
       expect(progressMock).toHaveBeenCalled();

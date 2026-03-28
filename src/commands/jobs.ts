@@ -206,7 +206,7 @@ function parsePollIntervalMs(
     );
     return undefined;
   }
-  return Math.max(1, Math.round(pollSec * 1000));
+  return Math.max(1000, Math.round(pollSec * 1000));
 }
 
 export const waitCommand = defineCommand({
