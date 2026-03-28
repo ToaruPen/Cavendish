@@ -94,15 +94,15 @@ async function waitForTerminalJob(
   let nextProgressAt = pollIntervalMs !== undefined ? Date.now() : undefined;
   while (Date.now() < deadline) {
     const job = readJobOrThrow(jobId);
+    if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
+      return job;
+    }
     if (pollIntervalMs !== undefined && nextProgressAt !== undefined && Date.now() >= nextProgressAt) {
       progress(
         `Waiting for detached job ${job.jobId} (status: ${job.status}, retries: ${String(job.retryCount)})`,
         quiet,
       );
       nextProgressAt = Date.now() + pollIntervalMs;
-    }
-    if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
-      return job;
     }
     await new Promise((resolve) => {
       setTimeout(resolve, 200);
@@ -206,7 +206,7 @@ function parsePollIntervalMs(
     );
     return undefined;
   }
-  return Math.max(1, Math.round(pollSec * 1000));
+  return Math.max(1000, Math.round(pollSec * 1000));
 }
 
 export const waitCommand = defineCommand({
