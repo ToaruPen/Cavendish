@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url';
  *   packageName: string;
  *   version: string;
  *   fetchImpl?: (url: string, init?: RequestInit) => Promise<RegistryResponse>;
+ *   timeoutMs?: number;
  * }} CheckPublishVersionOptions
  */
 
@@ -25,6 +26,8 @@ import { pathToFileURL } from 'node:url';
  *   reason: string;
  * }} PublishDecision
  */
+
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 /** @type {(packageName: string, version: string) => string} */
 export const buildRegistryVersionUrl = (packageName, version) => {
@@ -36,12 +39,35 @@ export const checkPublishVersion = async ({
   packageName,
   version,
   fetchImpl = fetch,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
 }) => {
-  const response = await fetchImpl(buildRegistryVersionUrl(packageName, version), {
-    headers: {
-      accept: 'application/json',
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  let response;
+  try {
+    response = await fetchImpl(buildRegistryVersionUrl(packageName, version), {
+      headers: {
+        accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.name === 'AbortError' || controller.signal.aborted)
+    ) {
+      throw new Error(
+        `Timed out checking npm registry for ${packageName}@${version} after ${String(timeoutMs)}ms`,
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (response.status === 404) {
     return {

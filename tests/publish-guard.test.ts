@@ -5,6 +5,21 @@ import {
   checkPublishVersion,
 } from '../.github/scripts/check-publish-version.mjs';
 
+type FetchImpl = NonNullable<Parameters<typeof checkPublishVersion>[0]['fetchImpl']>;
+type RegistryResponse = Awaited<ReturnType<FetchImpl>>;
+
+function makeRegistryResponse(
+  ok: boolean,
+  status: number,
+  statusText: string,
+): RegistryResponse {
+  return {
+    ok,
+    status,
+    statusText,
+  };
+}
+
 describe('buildRegistryVersionUrl', () => {
   it('encodes scoped package names and versions', () => {
     expect(buildRegistryVersionUrl('@scope/pkg', '1.2.3-beta.1')).toBe(
@@ -14,12 +29,30 @@ describe('buildRegistryVersionUrl', () => {
 });
 
 describe('checkPublishVersion', () => {
+  it('passes an abort signal to the registry fetch', async () => {
+    const fetchImpl: FetchImpl = vi.fn(() =>
+      Promise.resolve(makeRegistryResponse(true, 200, 'OK')),
+    );
+
+    await checkPublishVersion({
+      packageName: 'cavendish',
+      version: '2.1.0',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const init = vi.mocked(fetchImpl).mock.calls[0]?.[1];
+
+    expect(init?.headers).toEqual({
+      accept: 'application/json',
+    });
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('publishes when the version does not exist yet', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve({
-      ok: false,
-      status: 404,
-      statusText: 'Not Found',
-    }));
+    const fetchImpl: FetchImpl = vi.fn(() =>
+      Promise.resolve(makeRegistryResponse(false, 404, 'Not Found')),
+    );
 
     await expect(
       checkPublishVersion({
@@ -34,11 +67,9 @@ describe('checkPublishVersion', () => {
   });
 
   it('skips publish when the version already exists', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-    }));
+    const fetchImpl: FetchImpl = vi.fn(() =>
+      Promise.resolve(makeRegistryResponse(true, 200, 'OK')),
+    );
 
     await expect(
       checkPublishVersion({
@@ -53,11 +84,9 @@ describe('checkPublishVersion', () => {
   });
 
   it('fails when the registry check itself fails', async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-    }));
+    const fetchImpl: FetchImpl = vi.fn(() =>
+      Promise.resolve(makeRegistryResponse(false, 500, 'Internal Server Error')),
+    );
 
     await expect(
       checkPublishVersion({
@@ -68,5 +97,40 @@ describe('checkPublishVersion', () => {
     ).rejects.toThrow(
       'Failed to check npm registry for cavendish@2.1.0: 500 Internal Server Error',
     );
+  });
+
+  it('fails with a timeout error when the registry request hangs', async () => {
+    vi.useFakeTimers();
+
+    const fetchImpl: FetchImpl = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<RegistryResponse>((_, reject: (reason?: unknown) => void) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => {
+              const error = new Error('The operation was aborted.');
+              error.name = 'AbortError';
+              reject(error);
+            },
+            { once: true },
+          );
+        }),
+    );
+
+    const pending = checkPublishVersion({
+      packageName: 'cavendish',
+      version: '2.1.0',
+      fetchImpl,
+      timeoutMs: 10,
+    });
+    const assertion = expect(pending).rejects.toThrow(
+      'Timed out checking npm registry for cavendish@2.1.0 after 10ms',
+    );
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    await assertion;
+
+    vi.useRealTimers();
   });
 });
