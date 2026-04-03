@@ -13,5 +13,6 @@ describe('codex review workflow', () => {
     const workflow = readFileSync('.github/workflows/codex-review.yml', 'utf-8');
 
     expect(workflow).not.toContain('drop-sudo: true');
+    expect(workflow).toContain('safety-strategy: drop-sudo');
   });
 });
