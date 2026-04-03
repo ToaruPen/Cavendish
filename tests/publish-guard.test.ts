@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildRegistryVersionUrl,
@@ -29,6 +29,10 @@ describe('buildRegistryVersionUrl', () => {
 });
 
 describe('checkPublishVersion', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('passes an abort signal to the registry fetch', async () => {
     const fetchImpl: FetchImpl = vi.fn(() =>
       Promise.resolve(makeRegistryResponse(true, 200, 'OK')),
@@ -130,7 +134,5 @@ describe('checkPublishVersion', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     await assertion;
-
-    vi.useRealTimers();
   });
 });
