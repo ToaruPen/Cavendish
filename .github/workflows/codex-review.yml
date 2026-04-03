@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   review:
+    if: ${{ !endsWith(github.actor, '[bot]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -19,6 +20,6 @@ jobs:
       - name: Run Codex Review
         uses: openai/codex-action@v1
         with:
-          drop-sudo: true
+          safety-strategy: drop-sudo
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
