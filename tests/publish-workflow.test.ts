@@ -10,4 +10,11 @@ describe('publish workflow', () => {
     expect(workflow).toContain("if: steps.publish_guard.outputs.should_publish == 'true'");
     expect(workflow).toContain('node .github/scripts/check-publish-version.mjs');
   });
+
+  it('serializes parallel publish runs with a concurrency gate', () => {
+    const workflow = readFileSync('.github/workflows/publish.yml', 'utf-8');
+
+    expect(workflow).toContain('group: publish-${{ github.ref }}');
+    expect(workflow).toContain('cancel-in-progress: false');
+  });
 });
