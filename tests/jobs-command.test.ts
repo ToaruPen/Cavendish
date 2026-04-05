@@ -268,6 +268,8 @@ describe('jobs command', () => {
       await runPromise;
 
       expect(jsonRawMock).toHaveBeenCalledWith({
+        jobId: 'job-1',
+        status: 'completed',
         content: 'final response',
         model: 'Pro',
         chatId: undefined,
@@ -280,5 +282,61 @@ describe('jobs command', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('includes jobId and status in wait JSON output for timed_out jobs', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const store = await import('../src/core/jobs/store.js');
+    vi.mocked(store.readJob).mockReturnValue({
+      jobId: 'job-2',
+      kind: 'ask',
+      status: 'timed_out',
+      submittedAt: '2026-03-14T00:00:00.000Z',
+      updatedAt: '2026-03-14T00:01:00.000Z',
+      retryCount: 0,
+      partial: true,
+    } as never);
+    vi.mocked(store.readJobResult).mockReturnValue({
+      event: {
+        type: 'final',
+        content: 'partial response text',
+        model: 'Pro',
+        partial: true,
+        timeoutSec: 600,
+        timestamp: '2026-03-14T00:01:00.000Z',
+      },
+    } as never);
+    vi.mocked(store.readJobError).mockReturnValue(undefined);
+
+    const subCommands = jobsCommand.subCommands as unknown as {
+      wait?: RunnableCommand;
+    };
+    const waitCommand = subCommands.wait;
+    const run = waitCommand?.run;
+    if (waitCommand === undefined || run === undefined) {
+      throw new Error('jobsCommand.subCommands.wait.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        jobId: 'job-2',
+        timeout: '5',
+        format: 'json',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: [],
+      cmd: waitCommand,
+    });
+
+    expect(jsonRawMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: 'job-2',
+        status: 'timed_out',
+        content: 'partial response text',
+        partial: true,
+      }),
+    );
   });
 });

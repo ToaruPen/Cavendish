@@ -258,6 +258,36 @@ export function readJobResult(jobId: string): JobResultRecord | undefined {
   return readJsonFile(path, `job result ${jobId}`) as JobResultRecord | undefined;
 }
 
+/**
+ * Scan events.ndjson for the longest content from chunk/final events.
+ * Used to recover partial responses when no final event was emitted
+ * (e.g. stall-timeout where the worker exits before writing a result).
+ */
+export function recoverBestContentFromEvents(jobId: string): string | undefined {
+  const path = getJobEventsPath(jobId);
+  if (!existsSync(path)) {
+    return undefined;
+  }
+  let best: string | undefined;
+  let bestLength = 0;
+  const raw = readFileSync(path, 'utf8');
+  for (const line of raw.split('\n')) {
+    if (line.length === 0) {continue;}
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (parsed.type !== 'chunk' && parsed.type !== 'final') {continue;}
+      const content = parsed.content;
+      if (typeof content === 'string' && content.length > bestLength) {
+        best = content;
+        bestLength = content.length;
+      }
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return best;
+}
+
 export function writeJobError(jobId: string, error: StructuredErrorPayload): void {
   writeJsonAtomic(getJobErrorPath(jobId), error);
 }

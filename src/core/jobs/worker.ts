@@ -6,7 +6,7 @@ import { progress } from '../output-handler.js';
 import type { NdjsonEvent } from '../output-handler.js';
 
 import { notifyJobCompletion } from './notifier.js';
-import { appendJobEvent, readJob, readJobPrompt, updateJob, writeJobError, writeJobResult } from './store.js';
+import { appendJobEvent, readJob, readJobPrompt, recoverBestContentFromEvents, updateJob, writeJobError, writeJobResult } from './store.js';
 import type { JobRecord, JobStatus } from './types.js';
 
 export type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
@@ -175,6 +175,18 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     return { outcome: status, record };
   }
 
+  // Recover partial content from streamed chunks when no final event was
+  // emitted (e.g. stall-timeout).  This ensures result.json is populated
+  // so that `cavendish jobs wait` can return the best available content.
+  const recoveredContent = recoverBestContentFromEvents(jobId);
+  if (recoveredContent !== undefined && recoveredContent.length > 0) {
+    const now = new Date().toISOString();
+    writeJobResult(jobId, {
+      event: { type: 'final', content: recoveredContent, partial: true, timestamp: now },
+      savedAt: now,
+    });
+  }
+
   const errorPayload: StructuredErrorPayload = structuredError ?? {
     error: true,
     category: 'unknown',
@@ -201,11 +213,13 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
 
   writeJobError(jobId, errorPayload);
   const status = terminalStatusFromError(errorPayload);
+  const hasRecoveredContent = recoveredContent !== undefined && recoveredContent.length > 0;
   record = updateJob(jobId, {
     status,
     completedAt: new Date().toISOString(),
     error: errorPayload,
     exitCode: normalizedExitCode,
+    partial: hasRecoveredContent ? true : undefined,
   });
   appendJobState(jobId, `job-${status}`);
   notifyJobCompletion(record);

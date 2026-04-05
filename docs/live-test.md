@@ -91,6 +91,6 @@ The cavendish profile at `~/.cavendish/chrome-profile` is separate from your reg
 
 ## Notes
 
-- **Timeout**: Pro model needs 60–120s+. Default is 2400s for Pro.
+- **Timeout**: Pro model responses can take 5–20+ minutes. Default is unlimited (no `--timeout`). Specify `--timeout <sec>` explicitly if needed.
 - **Port conflict**: If port 9222 is in use, kill the old process first: `lsof -ti :9222 | xargs kill`.
 - **Cleanup**: Chrome stays running after cavendish exits (by design). Quit gracefully when done.
