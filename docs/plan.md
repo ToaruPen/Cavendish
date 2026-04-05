@@ -209,7 +209,7 @@ cavendish projects --name "For-Agents" --chats
 --format text     # プレーンテキスト
 --format json     # 構造化出力（デフォルト、メタデータ含む）
 --stream          # NDJSONストリーミング出力
---timeout 120     # 秒数指定（デフォルト: 120秒、Pro: 2400秒、DR: 1800秒）
+--timeout 120     # 秒数指定（デフォルト: 無制限。全モデル共通）
 ```
 
 ※ `--format` は `list`, `read`, `projects`, `status` でも利用可能。`doctor` は独自の `--json` フラグを使用。

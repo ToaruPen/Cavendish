@@ -119,6 +119,31 @@ describe('job store', () => {
     expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });
 
+  it('recovers the longest chunk content from events.ndjson', async () => {
+    const { appendJobEvent, createJob, recoverBestContentFromEvents } = await importWithMockedHome();
+    const job = createJob({ kind: 'ask', argv: ['ask', 'hello'] });
+    appendJobEvent(job.jobId, JSON.stringify({ type: 'chunk', content: 'Hello', timestamp: '2026-01-01T00:00:00Z' }));
+    appendJobEvent(job.jobId, JSON.stringify({ type: 'chunk', content: 'Hello world', timestamp: '2026-01-01T00:00:01Z' }));
+    appendJobEvent(job.jobId, JSON.stringify({ type: 'chunk', content: 'Hello world, how are you?', timestamp: '2026-01-01T00:00:02Z' }));
+    appendJobEvent(job.jobId, JSON.stringify({ type: 'state', state: 'job-running', content: '', timestamp: '2026-01-01T00:00:03Z' }));
+
+    expect(recoverBestContentFromEvents(job.jobId)).toBe('Hello world, how are you?');
+  });
+
+  it('returns undefined when events.ndjson has no chunk or final events', async () => {
+    const { appendJobEvent, createJob, recoverBestContentFromEvents } = await importWithMockedHome();
+    const job = createJob({ kind: 'ask', argv: ['ask', 'hello'] });
+    appendJobEvent(job.jobId, JSON.stringify({ type: 'state', state: 'job-running', content: '', timestamp: '2026-01-01T00:00:00Z' }));
+
+    expect(recoverBestContentFromEvents(job.jobId)).toBeUndefined();
+  });
+
+  it('returns undefined when events.ndjson does not exist', async () => {
+    const { recoverBestContentFromEvents } = await importWithMockedHome();
+
+    expect(recoverBestContentFromEvents('00000000-0000-4000-8000-000000000001')).toBeUndefined();
+  });
+
   it('skips job files that deserialize to null', async () => {
     const { createJob, getJobsDir, getJobFilePath, readNextQueuedJob } = await importWithMockedHome();
     const job = createJob({

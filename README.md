@@ -395,7 +395,7 @@ v2.0 changes the default execution model. `ask` and `deep-research` now run **de
 |----------------|--------------|
 | `cavendish ask "..."` blocks and returns response | Returns job metadata (jobId) immediately |
 | `--detach` opt-in for background execution | Default behavior |
-| `--timeout` defaults: ask 120s, Pro 2400s, DR 1800s | Default: unlimited (no timeout) |
+| `--timeout` defaults varied by model (ask 120s, Pro 2400s, DR 1800s) | Default: unlimited for all models (specify `--timeout <sec>` explicitly) |
 | `--stream` + `--detach` rejected | `--stream` implies `--sync` |
 
 ### Migration

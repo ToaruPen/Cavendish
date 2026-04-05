@@ -260,6 +260,8 @@ export const waitCommand = defineCommand({
       }
       if (format === 'json') {
         jsonRaw({
+          jobId: job.jobId,
+          status: job.status,
           content: result.event.content,
           model: result.event.model,
           chatId: result.event.chatId,

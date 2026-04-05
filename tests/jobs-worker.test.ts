@@ -144,6 +144,38 @@ describe('job worker', () => {
     expect(store.readJobError(job.jobId)?.category).toBe('timeout');
   });
 
+  it('recovers partial content from chunk events when no final event is emitted', async () => {
+    const chunk1 = JSON.stringify({ type: 'chunk', content: 'Hello', timestamp: '2026-01-01T00:00:00Z' });
+    const chunk2 = JSON.stringify({ type: 'chunk', content: 'Hello world', timestamp: '2026-01-01T00:00:01Z' });
+    const chunk3 = JSON.stringify({ type: 'chunk', content: 'Hello world, this is partial', timestamp: '2026-01-01T00:00:02Z' });
+    const errorLine = JSON.stringify({
+      error: true,
+      category: 'timeout',
+      message: 'Response stalled',
+      exitCode: 7,
+      action: 'retry',
+    });
+    const { store, worker } = await importWithMocks(() => makeChild(
+      [chunk1, chunk2, chunk3],
+      [errorLine],
+      7,
+    ));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    const result = await worker.runJobWorker(job.jobId);
+
+    expect(result.outcome).toBe('timed_out');
+    const savedResult = store.readJobResult(job.jobId);
+    expect(savedResult).toBeDefined();
+    expect(savedResult?.event.content).toBe('Hello world, this is partial');
+    expect(savedResult?.event.partial).toBe(true);
+    // JobRecord.partial must match result.json for notification consistency
+    expect(store.readJob(job.jobId)?.partial).toBe(true);
+  });
+
   it('propagates a non-zero exit code for failed worker runs', async () => {
     const errorLine = JSON.stringify({
       error: true,
