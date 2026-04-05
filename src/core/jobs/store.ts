@@ -281,8 +281,9 @@ export function recoverBestContentFromEvents(jobId: string): string | undefined 
         best = content;
         bestLength = content.length;
       }
-    } catch {
-      // skip malformed lines
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[cavendish:jobs] skipping malformed event line in ${path}: ${message}\n`);
     }
   }
   return best;
