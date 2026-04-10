@@ -15,7 +15,7 @@ class FakeModelItemsLocator {
     return new FakeModelItemsLocator(this.items.filter((item) => item.text.includes(hasText)));
   }
 
-  async count(): Promise<number> {
+  count(): Promise<number> {
     return this.items.length;
   }
 
@@ -23,12 +23,13 @@ class FakeModelItemsLocator {
     return new FakeModelItemsLocator(this.items.slice(0, 1));
   }
 
-  async click(): Promise<void> {
-    const [item] = this.items;
+  click(): Promise<void> {
+    const item = this.items.at(0);
     if (item === undefined) {
       throw new Error('No model item to click');
     }
     item.clicked = true;
+    return Promise.resolve();
   }
 }
 
@@ -39,7 +40,7 @@ class FakeModelMenuLocator {
     return Promise.resolve();
   }
 
-  first(): FakeModelMenuLocator {
+  first(): this {
     return this;
   }
 
