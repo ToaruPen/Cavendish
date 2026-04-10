@@ -21,8 +21,8 @@ export const SELECTORS = {
   /** Model picker dropdown menu */
   MODEL_MENU: '[role="menu"]',
 
-  /** Individual model option (excludes submenu triggers like Legacy models) */
-  MODEL_MENUITEM: '[role="menuitem"]:not([data-has-submenu])',
+  /** Individual model option (supports current radio-style model entries and excludes submenu triggers) */
+  MODEL_MENUITEM: ':is([role="menuitem"], [role="menuitemradio"]):not([data-has-submenu])',
 
   // ── File attachment ──────────────────────────────────────
   /** Hidden file input for general file uploads (ChatGPT assigns id="upload-files") */
