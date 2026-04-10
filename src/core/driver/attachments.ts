@@ -156,7 +156,7 @@ export async function attachFiles(
 /** Default timeout for tile appearance (raised from 10s to handle 21+ files). */
 const TILE_WAIT_TIMEOUT_MS = 60_000;
 
-export async function waitForAttachmentTiles(
+async function waitForAttachmentTiles(
   page: Page,
   expected: number,
   sendButtonSelector: string = SELECTORS.SUBMIT_BUTTON,

@@ -9,7 +9,7 @@ import { SELECTORS } from '../../constants/selectors.js';
 
 export const DEFAULT_TIMEOUT_MS = Number.MAX_SAFE_INTEGER;
 export const POLL_INTERVAL_MS = 200;
-export const SEND_BUTTON_TIMEOUT_MS = 60_000;
+const SEND_BUTTON_TIMEOUT_MS = 60_000;
 export const UPLOAD_SEND_BUTTON_TIMEOUT_MS = 180_000;
 
 export function delay(ms: number): Promise<void> {

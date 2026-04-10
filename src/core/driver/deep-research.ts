@@ -356,7 +356,7 @@ export async function exportDeepResearch(
 
 // ── Frame access (public for ChatGPTDriver facade) ──────────
 
-export function getDeepResearchContentFrame(page: Page): Frame | undefined {
+function getDeepResearchContentFrame(page: Page): Frame | undefined {
   const drFrames = page.frames().filter(
     (f) => f.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL),
   );
@@ -367,7 +367,7 @@ export function getDeepResearchContentFrame(page: Page): Frame | undefined {
   return nested[0];
 }
 
-export async function waitForDeepResearchFrame(page: Page, deadline?: number): Promise<Frame> {
+async function waitForDeepResearchFrame(page: Page, deadline?: number): Promise<Frame> {
   const pollInterval = POLL_INTERVAL_MS * 5;
   const IFRAME_WAIT_DEFAULT_MS = 15_000;
   const effectiveDeadline = computeIframeWaitDeadline(Date.now(), deadline, IFRAME_WAIT_DEFAULT_MS);
