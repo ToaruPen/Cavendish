@@ -29,6 +29,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "deadcode": "knip --files --dependencies --reporter symbols",
+    "deadcode:ci": "knip --files --dependencies --reporter github-actions",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "npm run lint && npm run typecheck && npm run deadcode && npm test && npm run build"
