@@ -7,7 +7,7 @@
 
 export type ThinkingEffortLevel = 'light' | 'standard' | 'extended' | 'deep';
 
-export type ThinkingModelCategory = 'thinking' | 'pro';
+type ThinkingModelCategory = 'thinking' | 'pro';
 
 export const THINKING_EFFORT_LEVELS: readonly ThinkingEffortLevel[] = [
   'light', 'standard', 'extended', 'deep',

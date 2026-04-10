@@ -48,7 +48,7 @@ const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
 const CDP_FETCH_TIMEOUT_MS = 5_000;
 
-export interface CdpEndpointData {
+interface CdpEndpointData {
   url?: string;
   port: number;
   pid?: number;

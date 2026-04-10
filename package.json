@@ -28,9 +28,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "deadcode": "knip --files --dependencies --reporter symbols",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run lint && npm run typecheck && npm test && npm run build"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run deadcode && npm test && npm run build"
   },
   "keywords": [
     "chatgpt",
@@ -53,6 +54,7 @@
     "eslint-plugin-import-x": "^4.16.0",
     "eslint-plugin-sonarjs": "^4.0.0",
     "jiti": "^2.6.1",
+    "knip": "^6.0.0",
     "tsup": "^8.4.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.56.0",

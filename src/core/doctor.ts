@@ -30,14 +30,14 @@ export interface DoctorCheck {
   action?: string;
 }
 
-export interface DoctorSummary {
+interface DoctorSummary {
   total: number;
   pass: number;
   fail: number;
   skip: number;
 }
 
-export interface DoctorResult {
+interface DoctorResult {
   checks: DoctorCheck[];
   summary: DoctorSummary;
 }

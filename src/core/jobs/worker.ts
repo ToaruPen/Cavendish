@@ -9,9 +9,9 @@ import { notifyJobCompletion } from './notifier.js';
 import { appendJobEvent, readJob, readJobPrompt, recoverBestContentFromEvents, updateJob, writeJobError, writeJobResult } from './store.js';
 import type { JobRecord, JobStatus } from './types.js';
 
-export type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
+type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
 
-export interface JobRunResult {
+interface JobRunResult {
   outcome: JobRunOutcome;
   record?: JobRecord;
   error?: StructuredErrorPayload;
@@ -29,7 +29,7 @@ function resolveCliEntrypoint(): string {
   return entry;
 }
 
-export function appendJobState(jobId: string, state: string): void {
+function appendJobState(jobId: string, state: string): void {
   appendJobEvent(jobId, JSON.stringify({
     type: 'state',
     state,

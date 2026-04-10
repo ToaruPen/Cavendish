@@ -28,6 +28,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Dead code check
+        run: npx knip --files --dependencies --reporter github-actions
+
       - name: Test
         run: npm test
 

@@ -7,7 +7,7 @@
 
 import { CavendishError, EXIT_CODES, classifyError } from './errors.js';
 
-export interface ResponsePayload {
+interface ResponsePayload {
   content: string;
   model?: string;
   chatId?: string;
