@@ -16,7 +16,7 @@ class FakeModelItemsLocator {
   }
 
   count(): Promise<number> {
-    return this.items.length;
+    return Promise.resolve(this.items.length);
   }
 
   first(): FakeModelItemsLocator {
