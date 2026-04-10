@@ -1,3 +1,4 @@
+import type { Page } from 'playwright-core';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SELECTORS } from '../src/constants/selectors.js';
@@ -31,12 +32,28 @@ class FakeModelItemsLocator {
     item.clicked = true;
     return Promise.resolve();
   }
+
+  evaluateAll<T>(fn: (els: { getAttribute(name: string): string | null; textContent: string }[]) => T): Promise<T> {
+    return Promise.resolve(
+      fn(
+        this.items.map((item, index) => ({
+          getAttribute: (name: string): string | null => {
+            if (name === 'data-testid') {
+              return `model-${String(index)}`;
+            }
+            return null;
+          },
+          textContent: item.text,
+        })),
+      ),
+    );
+  }
 }
 
 class FakeModelMenuLocator {
   constructor(private readonly items: FakeModelOption[]) {}
 
-  async waitFor(): Promise<void> {
+  waitFor(): Promise<void> {
     return Promise.resolve();
   }
 
@@ -53,11 +70,11 @@ class FakeModelMenuLocator {
 }
 
 class FakeClickableLocator {
-  async click(): Promise<void> {
+  click(): Promise<void> {
     return Promise.resolve();
   }
 
-  async waitFor(): Promise<void> {
+  waitFor(): Promise<void> {
     return Promise.resolve();
   }
 }
@@ -85,12 +102,8 @@ describe('ChatGPTDriver.selectModel()', () => {
       },
     } as const;
 
-    const driver = new ChatGPTDriver(page as never);
+    const driver = new ChatGPTDriver(page as unknown as Page);
     vi.spyOn(driver, 'waitForReady').mockResolvedValue(undefined);
-    vi.spyOn(driver as never, 'waitForModelMenuStable').mockResolvedValue({
-      populated: true,
-      stabilized: true,
-    });
 
     await driver.selectModel('Pro', true);
 
