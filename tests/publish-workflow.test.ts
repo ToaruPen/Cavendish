@@ -11,6 +11,14 @@ describe('publish workflow', () => {
     expect(workflow).toContain('node .github/scripts/check-publish-version.mjs');
   });
 
+  it('runs the dead code check before publishing with ignored npm scripts', () => {
+    const workflow = readFileSync('.github/workflows/publish.yml', 'utf-8');
+
+    expect(workflow).toContain('name: Dead code check');
+    expect(workflow).toContain('run: npm run deadcode:ci');
+    expect(workflow).toContain('run: npm publish --ignore-scripts');
+  });
+
   it('serializes parallel publish runs with a concurrency gate', () => {
     const workflow = readFileSync('.github/workflows/publish.yml', 'utf-8');
 
