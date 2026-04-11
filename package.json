@@ -54,7 +54,6 @@
     "eslint-import-resolver-typescript": "^4.4.0",
     "eslint-plugin-import-x": "^4.16.0",
     "eslint-plugin-sonarjs": "^4.0.0",
-    "jiti": "^2.6.1",
     "knip": "^6.0.0",
     "tsup": "^8.4.0",
     "typescript": "^5.9.0",
