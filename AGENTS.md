@@ -14,12 +14,13 @@
 - `tests/`: Vitest regression tests covering behaviors such as CDP handling, `doctor`, `init --reset`, unknown flags, and process locking.
 - `docs/plan.md`: Project plan and a structured overview of commands and design.
 - `docs/live-test.md`: Manual verification steps using a real Chrome / ChatGPT session, including CDP and dedicated profile assumptions.
-- `.github/workflows/ci.yml`: CI workflow. Runs `lint`, `typecheck`, `test`, and `build` on Ubuntu, then runs `test` on macOS and Windows.
+- `.github/workflows/ci.yml`: CI workflow. Runs `lint`, `typecheck`, `deadcode:ci`, `test`, and `build` on Ubuntu, then runs `test` on macOS and Windows.
 
 ## HOW
 
-- Runtime requirements are Node.js 20+, Google Chrome stable, and npm. The main scripts are `npm run build`, `npm run lint`, `npm run typecheck`, and `npm test`.
-- `prepublishOnly` runs `lint`, `typecheck`, `test`, and `build` in that order.
+- Runtime requirements are Node.js 20+, Google Chrome stable, and npm. The main scripts are `npm run build`, `npm run lint`, `npm run typecheck`, `npm run deadcode`, and `npm test`.
+- `prepublishOnly` runs `lint`, `typecheck`, `deadcode`, `test`, and `build` in that order.
+- The publish workflow runs `deadcode:ci` explicitly before `npm publish --ignore-scripts`, so release automation does not rely on npm lifecycle hooks for dead code enforcement.
 - Chrome uses the dedicated profile at `~/.cavendish/chrome-profile` rather than the default profile. CDP metadata is stored in `~/.cavendish/cdp-endpoint.json`.
 - `doctor` / `status` are the main entry points for checking CDP, auth, selectors, and integration health. Changes around browser connectivity or authentication should be validated through that path.
 - For real-browser-dependent changes, `docs/live-test.md` is the baseline procedure. Session persistence assumes graceful Chrome shutdown rather than force-killing processes.

@@ -279,8 +279,11 @@ npm run build        # Build (tsup -> dist/index.mjs)
 npm run dev          # Watch mode
 npm run typecheck    # Type check (tsc --noEmit)
 npm run lint         # Lint (ESLint)
+npm run deadcode     # Dead code / unused dependency check (Knip)
 npm test             # Run tests (vitest)
 ```
+
+CI enforces the dead code check with `npm run deadcode:ci`, and the publish workflow runs the same check explicitly before `npm publish --ignore-scripts`.
 
 <details>
 <summary>Project Structure</summary>
