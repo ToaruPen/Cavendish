@@ -422,6 +422,30 @@ describe('job worker', () => {
     expect(store.readJobError(job.jobId)?.message).toContain('ERR_MODULE_NOT_FOUND');
   });
 
+  it('caps captured stderr in fallback error details', async () => {
+    const stderrLines = Array.from({ length: 500 }, (_unused, index) => `stderr line ${String(index).padStart(3, '0')}`);
+    const { store, worker } = await importWithMocks(() => makeChild([], stderrLines, 1));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    const result = await worker.runJobWorker(job.jobId);
+
+    expect(result.outcome).toBe('failed');
+    const message = store.readJobError(job.jobId)?.message;
+    if (message === undefined) {
+      throw new Error('job error message was not recorded');
+    }
+    expect(message).toContain('[stderr truncated');
+    expect(message).toContain('stderr line 499');
+    expect(message).not.toContain('stderr line 000');
+    const retainedLineCount = message
+      .split('\n')
+      .filter((line) => line.startsWith('stderr line')).length;
+    expect(retainedLineCount).toBeLessThanOrEqual(100);
+  });
+
   it('surfaces child stdin EPIPE as a structured job error without throwing', async () => {
     const { store, worker } = await importWithMocks(() => makeChildWithStdinError('EPIPE', 0));
     const job = store.createJob({

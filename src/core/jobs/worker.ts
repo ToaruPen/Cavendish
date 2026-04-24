@@ -11,10 +11,60 @@ import type { JobRecord, JobStatus } from './types.js';
 
 type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
 
+const STDERR_LINE_LIMIT = 100;
+const STDERR_BYTES_LIMIT = 16 * 1024;
+const STDERR_TRUNCATION_MARKER = '[stderr truncated: keeping the most recent output]';
+
 interface JobRunResult {
   outcome: JobRunOutcome;
   record?: JobRecord;
   error?: StructuredErrorPayload;
+}
+
+interface StderrCapture {
+  lines: string[];
+  bytes: number;
+  truncated: boolean;
+}
+
+function createStderrCapture(): StderrCapture {
+  return {
+    lines: [],
+    bytes: 0,
+    truncated: false,
+  };
+}
+
+function stderrLineBytes(line: string): number {
+  return Buffer.byteLength(line, 'utf8') + 1;
+}
+
+function trimStderrCapture(capture: StderrCapture): void {
+  while (capture.lines.length > 0) {
+    const lineLimit = capture.truncated ? STDERR_LINE_LIMIT - 1 : STDERR_LINE_LIMIT;
+    if (capture.lines.length <= lineLimit && capture.bytes <= STDERR_BYTES_LIMIT) {
+      return;
+    }
+    const removed = capture.lines.shift();
+    if (removed === undefined) {
+      return;
+    }
+    capture.bytes -= stderrLineBytes(removed);
+    capture.truncated = true;
+  }
+}
+
+function appendCapturedStderr(capture: StderrCapture, line: string): void {
+  capture.lines.push(line);
+  capture.bytes += stderrLineBytes(line);
+  trimStderrCapture(capture);
+}
+
+function formatCapturedStderr(capture: StderrCapture): string[] {
+  if (!capture.truncated) {
+    return [...capture.lines];
+  }
+  return [STDERR_TRUNCATION_MARKER, ...capture.lines];
 }
 
 function normalizeFailureExitCode(exitCode: number | undefined): number {
@@ -153,7 +203,7 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
   let finalEvent: NdjsonEvent | undefined;
   let structuredError: StructuredErrorPayload | undefined;
   let stdinError: StructuredErrorPayload | undefined;
-  const stderrLines: string[] = [];
+  const stderrCapture = createStderrCapture();
 
   child.stdin.on('error', (error: unknown) => {
     stdinError = makeStdinErrorPayload(error);
@@ -183,7 +233,7 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
       structuredError = parsed;
       return;
     }
-    stderrLines.push(line);
+    appendCapturedStderr(stderrCapture, line);
     appendStderrEvent(jobId, line);
   });
 
@@ -201,7 +251,7 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
     exitCode,
     finalEvent,
     structuredError: structuredError ?? stdinError,
-    stderrLines,
+    stderrLines: formatCapturedStderr(stderrCapture),
   };
 }
 
