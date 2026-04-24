@@ -305,7 +305,7 @@ export const waitCommand = defineCommand({
         timeoutMs,
         pollIntervalMs,
         args.quiet === true,
-        args.timeout === undefined,
+        timeoutSec === 0,
       );
       const result = readJobResult(job.jobId);
       const error = readJobError(job.jobId) ?? job.error;

@@ -532,4 +532,81 @@ describe('jobs command', () => {
       vi.useRealTimers();
     }
   });
+
+  it('fails jobs wait with no-progress for explicit unlimited timeout when worker pid is dead', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-14T00:06:00.000Z'));
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      const error = new Error('no such process') as NodeJS.ErrnoException;
+      error.code = 'ESRCH';
+      throw error;
+    });
+    try {
+      const { jobsCommand } = await import('../src/commands/jobs.js');
+      const store = await import('../src/core/jobs/store.js');
+      vi.mocked(store.readJob)
+        .mockReturnValueOnce({
+          jobId: 'job-dead-explicit',
+          kind: 'ask',
+          status: 'running',
+          submittedAt: '2026-03-14T00:00:00.000Z',
+          updatedAt: '2026-03-14T00:00:00.000Z',
+          retryCount: 0,
+          workerPid: 65432,
+        } as never)
+        .mockReturnValue({
+          jobId: 'job-dead-explicit',
+          kind: 'ask',
+          status: 'completed',
+          submittedAt: '2026-03-14T00:00:00.000Z',
+          updatedAt: '2026-03-14T00:06:01.000Z',
+          retryCount: 0,
+        } as never);
+      vi.mocked(store.readJobResult).mockReturnValue({
+        event: {
+          content: 'should not be returned',
+          partial: false,
+          timestamp: '2026-03-14T00:06:01.000Z',
+        },
+      } as never);
+
+      const subCommands = jobsCommand.subCommands as unknown as {
+        wait?: RunnableCommand;
+      };
+      const waitCommand = subCommands.wait;
+      const run = waitCommand?.run;
+      if (waitCommand === undefined || run === undefined) {
+        throw new Error('jobsCommand.subCommands.wait.run is undefined');
+      }
+
+      const runPromise = Promise.resolve(run({
+        args: {
+          _: [],
+          jobId: 'job-dead-explicit',
+          poll: '1',
+          timeout: '0',
+          format: 'json',
+          quiet: false,
+          verbose: false,
+        } as never,
+        rawArgs: [],
+        cmd: waitCommand,
+      }));
+      await vi.advanceTimersByTimeAsync(250);
+      await runPromise;
+
+      expect(killSpy).toHaveBeenCalledWith(65432, 0);
+      expect(failStructuredMock).toHaveBeenCalledTimes(1);
+      const firstCall = failStructuredMock.mock.calls[0] as unknown as [
+        { category?: string; message?: string },
+        string,
+      ];
+      expect(firstCall[0].category).toBe('job_no_progress');
+      expect(firstCall[0].message).toContain('no progress');
+      expect(jsonRawMock).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });

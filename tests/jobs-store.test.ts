@@ -248,4 +248,51 @@ describe('job store', () => {
       nowSpy.mockRestore();
     }
   });
+
+  it('records terminal state and notification when stale running recovery reaches max retries', async () => {
+    const {
+      createJob,
+      getJobEventsPath,
+      getJobFilePath,
+      readJob,
+      readNextQueuedJob,
+      updateJob,
+    } = await importWithMockedHome();
+    const notifyFile = join(testRoot, 'notify.ndjson');
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+      notifyFile,
+    });
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+      retryCount: 3,
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+
+    try {
+      expect(readNextQueuedJob()).toBeUndefined();
+
+      const failedJob = readJob(job.jobId);
+      expect(failedJob?.status).toBe('failed');
+      expect(failedJob?.error?.category).toBe('job_no_progress');
+      expect(readFileSync(getJobEventsPath(job.jobId), 'utf8')).toContain('"state":"job-failed"');
+      const notification = JSON.parse(readFileSync(notifyFile, 'utf8').trim()) as {
+        jobId?: string;
+        status?: string;
+        errorMessage?: string;
+      };
+      expect(notification.jobId).toBe(job.jobId);
+      expect(notification.status).toBe('failed');
+      expect(notification.errorMessage).toContain('did not make progress');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
 });

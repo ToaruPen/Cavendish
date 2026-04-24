@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { CAVENDISH_DIR } from '../browser-manager.js';
 import type { StructuredErrorPayload } from '../errors.js';
 
+import { notifyJobCompletion } from './notifier.js';
 import type { DetachedJobRequest, JobKind, JobRecord, JobResultRecord, JobStatus } from './types.js';
 
 const JOBS_DIR = join(CAVENDISH_DIR, 'jobs');
@@ -279,7 +280,7 @@ function recoverStaleRunningJob(job: JobRecord, reason: string): JobRecord {
       action: 'Inspect the job events and submit the job again if needed.',
     };
     writeJobError(job.jobId, error);
-    return updateJob(job.jobId, {
+    const record = updateJob(job.jobId, {
       status: 'failed',
       completedAt: new Date().toISOString(),
       error,
@@ -287,6 +288,14 @@ function recoverStaleRunningJob(job: JobRecord, reason: string): JobRecord {
       workerPid: undefined,
       lastRetryError: reason,
     });
+    appendJobEvent(job.jobId, JSON.stringify({
+      type: 'state',
+      state: 'job-failed',
+      content: '',
+      timestamp: new Date().toISOString(),
+    }));
+    notifyJobCompletion(record);
+    return record;
   }
   return updateJob(job.jobId, {
     status: 'queued',
