@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { StructuredErrorPayload } from '../src/core/errors.js';
+
 const NOTIFY_FILE = join(process.cwd(), '.tmp-tests', 'notify.ndjson');
 const SUBMIT_RESULT_PATH = join(process.cwd(), '.tmp-tests', 'submit-result.json');
 const SUBMIT_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'submit-events.ndjson');
@@ -18,6 +20,12 @@ let writeJobErrorMock: ReturnType<typeof vi.fn>;
 let testRoot: string;
 let cliEntry: string;
 let spawnedChild: ReturnType<typeof makeSpawnChild> | undefined;
+
+interface FailedJobUpdate {
+  status?: string;
+  exitCode?: number;
+  error?: StructuredErrorPayload;
+}
 
 function makeSpawnChild(): EventEmitter & { unref: ReturnType<typeof vi.fn> } {
   const child = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
@@ -133,10 +141,25 @@ describe('submitDetachedJob', () => {
       })).rejects.toThrow('spawn failed');
 
       expect(writeJobErrorMock).toHaveBeenCalledOnce();
-      expect(updateJobMock).toHaveBeenCalledWith('job-123', expect.objectContaining({
-        status: 'failed',
+      const writeCall = writeJobErrorMock.mock.calls[0] as [string, StructuredErrorPayload] | undefined;
+      expect(writeCall?.[0]).toBe('job-123');
+      expect(writeCall?.[1]).toMatchObject({
+        error: true,
+        category: 'unknown',
+        message: 'spawn failed',
         exitCode: 1,
-      }));
+        action: 'Fix the detached runner launch failure and retry the command.',
+      });
+      const updateCall = updateJobMock.mock.calls[0] as [string, FailedJobUpdate] | undefined;
+      expect(updateCall?.[0]).toBe('job-123');
+      expect(updateCall?.[1].status).toBe('failed');
+      expect(updateCall?.[1].exitCode).toBe(1);
+      expect(updateCall?.[1].error).toMatchObject({
+        category: 'unknown',
+        message: 'spawn failed',
+        exitCode: 1,
+        action: 'Fix the detached runner launch failure and retry the command.',
+      });
     } finally {
       process.argv[1] = previousArgv1;
     }
@@ -179,10 +202,25 @@ describe('submitDetachedJob', () => {
         exitCode: 1,
       });
       expect(writeJobErrorMock).toHaveBeenCalledOnce();
-      expect(updateJobMock).toHaveBeenCalledWith('job-123', expect.objectContaining({
-        status: 'failed',
+      const writeCall = writeJobErrorMock.mock.calls[0] as [string, StructuredErrorPayload] | undefined;
+      expect(writeCall?.[0]).toBe('job-123');
+      expect(writeCall?.[1]).toMatchObject({
+        error: true,
+        category: 'unknown',
         exitCode: 1,
-      }));
+        action: 'Fix the detached runner launch failure and retry the command.',
+      });
+      expect(writeCall?.[1].message).toContain('Detached runner exited during startup');
+      const updateCall = updateJobMock.mock.calls[0] as [string, FailedJobUpdate] | undefined;
+      expect(updateCall?.[0]).toBe('job-123');
+      expect(updateCall?.[1].status).toBe('failed');
+      expect(updateCall?.[1].exitCode).toBe(1);
+      expect(updateCall?.[1].error).toMatchObject({
+        category: 'unknown',
+        exitCode: 1,
+        action: 'Fix the detached runner launch failure and retry the command.',
+      });
+      expect(updateCall?.[1].error?.message).toContain('Detached runner exited during startup');
       expect(readJobMock).toHaveBeenCalledWith('job-123');
     } finally {
       process.argv[1] = previousArgv1;

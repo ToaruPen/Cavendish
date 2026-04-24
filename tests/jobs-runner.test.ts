@@ -334,14 +334,21 @@ describe('job runner', () => {
     });
 
     const runPromise = runner.runJobRunner();
-    await Promise.race([
-      cleanupRegistered,
-      new Promise<never>((_resolve, reject) => {
-        setTimeout(() => {
-          reject(new Error('cleanup registration timed out'));
-        }, 1_000);
-      }),
-    ]);
+    let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        cleanupRegistered,
+        new Promise<never>((_resolve, reject) => {
+          cleanupTimeout = setTimeout(() => {
+            reject(new Error('cleanup registration timed out'));
+          }, 1_000);
+        }),
+      ]);
+    } finally {
+      if (cleanupTimeout !== undefined) {
+        clearTimeout(cleanupTimeout);
+      }
+    }
     expect(cleanupCallback).toBeDefined();
     await cleanupCallback?.();
     await runPromise;
