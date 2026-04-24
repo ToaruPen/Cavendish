@@ -213,7 +213,7 @@ export async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
       };
     }
 
-    await plusBtn.first().click();
+    await plusBtn.click();
     try {
       await page.locator(SELECTORS.MENU_ITEM).first().waitFor({
         state: 'visible',
@@ -237,8 +237,9 @@ export async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
   } catch (error: unknown) {
     return {
       name: 'gdrive_picker',
-      status: 'skip',
-      detail: `Check failed: ${errorMessage(error)}`,
+      status: 'fail',
+      detail: `Failed to verify Google Drive menu: ${errorMessage(error)}`,
+      action: 'Verify the composer + menu is visible and check the Chrome console for errors',
     };
   }
 }

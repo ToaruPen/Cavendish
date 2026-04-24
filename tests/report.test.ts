@@ -61,6 +61,29 @@ describe('validateAllSelectors', () => {
       count: 1,
     }));
   });
+
+  it('does not count Deep Research selector matches from the outer page', async () => {
+    const page = {
+      locator: (selector: string) => ({
+        count: () => Promise.resolve(selector === 'main' ? 1 : 0),
+      }),
+      frames: () => [
+        {
+          url: () => 'https://chatgpt.com/app/deep_research/session',
+          locator: () => ({
+            count: () => Promise.resolve(0),
+          }),
+        },
+      ],
+    };
+
+    const results = await validateAllSelectors(page as unknown as Parameters<typeof validateAllSelectors>[0], true);
+    const deepResearchReportRoot = results.find((result) => result.name === 'DEEP_RESEARCH_REPORT_ROOT');
+
+    expect(deepResearchReportRoot).toEqual(expect.objectContaining({
+      count: 0,
+    }));
+  });
 });
 
 // ── compareWithBaseline ───────────────────────────────────

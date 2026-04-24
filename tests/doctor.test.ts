@@ -61,13 +61,15 @@ describe('checkGoogleDrive', () => {
       },
       locator: (selector: string) => {
         if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+          const click = (): Promise<void> => {
+            interactions.push('click:plus');
+            return Promise.resolve();
+          };
           return {
             count: () => Promise.resolve(1),
+            click,
             first: () => ({
-              click: () => {
-                interactions.push('click:plus');
-                return Promise.resolve();
-              },
+              click,
             }),
           };
         }
@@ -95,6 +97,44 @@ describe('checkGoogleDrive', () => {
       detail: 'Google Drive menu entry found',
     });
     expect(interactions).toEqual(['click:plus', 'key:Escape']);
+  });
+
+  it('fails with actionable detail when the composer plus menu cannot open', async () => {
+    const page = {
+      keyboard: {
+        press: () => Promise.resolve(),
+      },
+      locator: (selector: string) => {
+        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+          const click = (): Promise<void> => Promise.reject(new Error('menu blocked'));
+          return {
+            count: () => Promise.resolve(1),
+            click,
+            first: () => ({
+              click,
+            }),
+          };
+        }
+        if (selector === SELECTORS.MENU_ITEM) {
+          return {
+            first: () => ({
+              waitFor: () => Promise.resolve(),
+            }),
+            filter: () => ({
+              count: () => Promise.resolve(0),
+            }),
+          };
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      },
+    };
+
+    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+
+    expect(result.name).toBe('gdrive_picker');
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('menu blocked');
+    expect(result.action).toContain('composer + menu');
   });
 });
 

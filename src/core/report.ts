@@ -106,16 +106,15 @@ function isDeepResearchSelector(key: SelectorKey): boolean {
 }
 
 async function countSelector(page: Page, key: SelectorKey, selector: string): Promise<number> {
-  const pageCount = await page.locator(selector).count();
   if (!isDeepResearchSelector(key)) {
-    return pageCount;
+    return page.locator(selector).count();
   }
   const frameCounts = await Promise.all(
     page.frames()
       .filter((frame) => frame.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL))
       .map((frame) => frame.locator(selector).count()),
   );
-  return frameCounts.reduce((sum, count) => sum + count, pageCount);
+  return frameCounts.reduce((sum, count) => sum + count, 0);
 }
 
 export function categorizeSelector(name: string): SelectorCategory {
