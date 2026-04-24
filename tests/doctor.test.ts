@@ -87,7 +87,7 @@ describe('checkGoogleDrive', () => {
           };
           return {
             count: () => Promise.resolve(1),
-            click: () => Promise.reject(new Error('strict mode violation')),
+            click: firstClick,
             first: () => ({
               click: firstClick,
             }),
@@ -129,14 +129,15 @@ describe('checkGoogleDrive', () => {
       },
       locator: (selector: string) => {
         if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+          const click = (): Promise<void> => {
+            interactions.push('click:plus');
+            return Promise.resolve();
+          };
           return {
             count: () => Promise.resolve(1),
-            click: () => Promise.reject(new Error('strict mode violation')),
+            click,
             first: () => ({
-              click: () => {
-                interactions.push('click:plus');
-                return Promise.resolve();
-              },
+              click,
             }),
           };
         }
