@@ -8,6 +8,7 @@ const NOTIFY_FILE = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/notify.ndjson';
 
 let spawnMock: ReturnType<typeof vi.fn>;
 let createJobMock: ReturnType<typeof vi.fn>;
+let readJobMock: ReturnType<typeof vi.fn>;
 let unrefMock: ReturnType<typeof vi.fn>;
 let updateJobMock: ReturnType<typeof vi.fn>;
 let writeJobErrorMock: ReturnType<typeof vi.fn>;
@@ -32,6 +33,11 @@ vi.mock('node:child_process', () => {
 });
 
 vi.mock('../src/core/jobs/store.js', () => {
+  readJobMock = vi.fn(() => ({
+    jobId: 'job-123',
+    kind: 'ask',
+    status: 'queued',
+  }));
   updateJobMock = vi.fn();
   writeJobErrorMock = vi.fn();
   createJobMock = vi.fn(() => ({
@@ -41,6 +47,7 @@ vi.mock('../src/core/jobs/store.js', () => {
   }));
   return {
     createJob: createJobMock,
+    readJob: readJobMock,
     updateJob: updateJobMock,
     writeJobError: writeJobErrorMock,
   };
@@ -133,6 +140,12 @@ describe('submitDetachedJob', () => {
       });
       return child;
     });
+    readJobMock.mockReturnValue({
+      jobId: 'job-123',
+      kind: 'ask',
+      status: 'failed',
+      exitCode: 1,
+    });
     try {
       const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
 
@@ -141,12 +154,17 @@ describe('submitDetachedJob', () => {
         argv: ['ask', 'hello'],
       });
 
-      expect(record.jobId).toBe('job-123');
+      expect(record).toMatchObject({
+        jobId: 'job-123',
+        status: 'failed',
+        exitCode: 1,
+      });
       expect(writeJobErrorMock).toHaveBeenCalledOnce();
       expect(updateJobMock).toHaveBeenCalledWith('job-123', expect.objectContaining({
         status: 'failed',
         exitCode: 1,
       }));
+      expect(readJobMock).toHaveBeenCalledWith('job-123');
     } finally {
       process.argv[1] = previousArgv1;
     }

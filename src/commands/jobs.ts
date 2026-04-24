@@ -1,9 +1,12 @@
+import { existsSync, statSync } from 'node:fs';
+
 import { defineCommand } from 'citty';
 
 import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags, toTimeoutMs } from '../core/cli-args.js';
 import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
 import { runJobRunnerOrExit } from '../core/jobs/runner.js';
-import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
+import { getJobEventsPath, readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
+import type { JobRecord } from '../core/jobs/types.js';
 import { runJobWorkerOrExit } from '../core/jobs/worker.js';
 import { fail, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
@@ -32,6 +35,10 @@ const RUN_WORKER_ARGS = {
 
 const RUN_RUNNER_ARGS = {};
 const WAIT_RUNNING_STALL_MS = 5 * 60 * 1000;
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
+}
 
 function formatJobText(jobId: string, kind: string, status: string): string {
   return `${jobId}\t${kind}\t${status}`;
@@ -85,6 +92,41 @@ function readJobOrThrow(jobId: string): Exclude<ReturnType<typeof readJob>, unde
   }
 }
 
+function isWorkerPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error: unknown) {
+    return isErrnoException(error) && error.code === 'EPERM';
+  }
+}
+
+function latestProgressMs(job: JobRecord): number | undefined {
+  const timestamps = [Date.parse(job.updatedAt)].filter((value) => Number.isFinite(value));
+  const eventsPath = getJobEventsPath(job.jobId);
+  if (existsSync(eventsPath)) {
+    timestamps.push(statSync(eventsPath).mtimeMs);
+  }
+  if (timestamps.length === 0) {
+    return undefined;
+  }
+  return Math.max(...timestamps);
+}
+
+function noProgressMsForRunningJob(job: JobRecord): number | undefined {
+  if (job.status !== 'running') {
+    return undefined;
+  }
+  if (job.workerPid !== undefined && isWorkerPidAlive(job.workerPid)) {
+    return undefined;
+  }
+  const progressMs = latestProgressMs(job);
+  if (progressMs === undefined) {
+    return undefined;
+  }
+  return Date.now() - progressMs;
+}
+
 async function waitForTerminalJob(
   jobId: string,
   timeoutMs: number,
@@ -99,9 +141,8 @@ async function waitForTerminalJob(
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
     }
-    const updatedAtMs = Date.parse(job.updatedAt);
-    const noProgressMs = Date.now() - updatedAtMs;
-    if (detectNoProgress && job.status === 'running' && Number.isFinite(updatedAtMs) && noProgressMs >= WAIT_RUNNING_STALL_MS) {
+    const noProgressMs = noProgressMsForRunningJob(job);
+    if (detectNoProgress && noProgressMs !== undefined && noProgressMs >= WAIT_RUNNING_STALL_MS) {
       const message = `Detached job ${job.jobId} has made no progress for ${String(Math.round(noProgressMs / 1000))}s.`;
       if (pollIntervalMs !== undefined) {
         progress(message, quiet);

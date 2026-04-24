@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 
 import { CavendishError } from '../errors.js';
 
-import { createJob, updateJob, writeJobError } from './store.js';
+import { createJob, readJob, updateJob, writeJobError } from './store.js';
 import type { DetachedJobRequest, JobRecord } from './types.js';
 
 const STARTUP_OBSERVE_MS = 500;
@@ -79,5 +79,5 @@ export async function submitDetachedJob(request: DetachedJobRequest): Promise<Jo
     markLaunchFailed(error);
     throw error;
   }
-  return record;
+  return readJob(record.jobId) ?? record;
 }
