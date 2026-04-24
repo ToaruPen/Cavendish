@@ -21,6 +21,16 @@ function normalizeFailureExitCode(exitCode: number | undefined): number {
   return typeof exitCode === 'number' && exitCode !== 0 ? exitCode : 1;
 }
 
+function normalizeStructuredExitCode(
+  exitCode: number,
+  structuredError: StructuredErrorPayload | undefined,
+): number {
+  if (structuredError === undefined) {
+    return normalizeFailureExitCode(exitCode);
+  }
+  return Math.max(exitCode, normalizeFailureExitCode(structuredError.exitCode));
+}
+
 function resolveCliEntrypoint(): string {
   const entry = process.argv[1];
   if (typeof entry !== 'string' || entry.length === 0) {
@@ -209,7 +219,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   appendJobState(jobId, 'job-running');
 
   const { exitCode, finalEvent, structuredError, stderrLines } = await runWorkerAttempt(jobId, record);
-  const normalizedExitCode = structuredError === undefined ? normalizeFailureExitCode(exitCode) : exitCode;
+  const normalizedExitCode = normalizeStructuredExitCode(exitCode, structuredError);
 
   if (finalEvent !== undefined) {
     writeJobResult(jobId, {

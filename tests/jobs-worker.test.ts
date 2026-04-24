@@ -435,5 +435,7 @@ describe('job worker', () => {
     });
     expect(store.readJobError(job.jobId)?.message).toContain('stdin closed before the prompt could be delivered');
     expect(store.readJob(job.jobId)?.status).toBe('failed');
+    expect(store.readJob(job.jobId)?.exitCode).toBe(store.readJobError(job.jobId)?.exitCode);
+    expect(store.readJob(job.jobId)?.exitCode).toBeGreaterThan(0);
   });
 });
