@@ -13,7 +13,10 @@ export type ErrorCategory =
   | 'chrome_close_failed'
   | 'auth_expired'
   | 'cloudflare_blocked'
+  | 'browser_disconnected'
   | 'selector_miss'
+  | 'job_no_progress'
+  | 'runner_killed'
   | 'timeout'
   | 'unknown';
 
@@ -28,6 +31,9 @@ export const EXIT_CODES: Readonly<Record<ErrorCategory, number>> = {
   timeout: 7,
   chrome_launch_failed: 8,
   chrome_close_failed: 9,
+  browser_disconnected: 10,
+  runner_killed: 11,
+  job_no_progress: 12,
 };
 
 /** Suggested user actions per error category. */
@@ -44,8 +50,14 @@ const DEFAULT_ACTIONS: Readonly<Record<ErrorCategory, string>> = {
     'Open Chrome and log in to ChatGPT, then retry.',
   cloudflare_blocked:
     'Open the ChatGPT tab in Chrome and solve the Cloudflare challenge manually.',
+  browser_disconnected:
+    'Chrome was closed or crashed. Restart Chrome and re-run the command.',
   selector_miss:
     'ChatGPT UI may have changed. Run "cavendish status" and check for updates.',
+  job_no_progress:
+    'Inspect the detached job events, then restart Chrome and retry the job if no worker is active.',
+  runner_killed:
+    'Restart the detached job; the runner process was interrupted before it could finish.',
   timeout:
     'Increase --timeout or check if ChatGPT is responding in the browser.',
   unknown:
@@ -104,6 +116,17 @@ export function classifyError(error: unknown): CavendishError {
 
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
+
+  // Browser/CDP target closure must be checked before selector classifiers:
+  // Playwright often includes "waiting for locator" in the same message.
+  if (
+    lower.includes('target page, context or browser has been closed') ||
+    lower.includes('target closed') ||
+    lower.includes('browser has been closed') ||
+    lower.includes('page has been closed')
+  ) {
+    return new CavendishError(message, 'browser_disconnected');
+  }
 
   // CDP / Chrome connection errors
   if (

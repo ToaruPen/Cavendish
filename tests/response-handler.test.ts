@@ -214,6 +214,31 @@ describe('waitForResponse()', () => {
     );
   });
 
+  it('classifies stop-button probe browser closure as browser disconnected', async () => {
+    const { waitForResponse } = await import('../src/core/driver/response-handler.js');
+    const page = {
+      locator(selector: string) {
+        if (selector === SELECTORS.STOP_BUTTON) {
+          return {
+            isVisible: () => Promise.reject(new Error('Target page, context or browser has been closed')),
+          };
+        }
+        if (selector === SELECTORS.ASSISTANT_MESSAGE) {
+          return {
+            count: () => Promise.resolve(0),
+          };
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      },
+    } as unknown as Parameters<typeof waitForResponse>[0];
+
+    await expect(waitForResponse(page, {
+      timeout: 5_000,
+      initialMsgCount: 0,
+      quiet: true,
+    })).rejects.toHaveProperty('category', 'browser_disconnected');
+  });
+
   it('does not stall when thinking text changes despite no assistant message output (#194)', async () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const now = vi.spyOn(Date, 'now');

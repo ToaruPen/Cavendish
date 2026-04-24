@@ -7,7 +7,7 @@ import type { Page } from 'playwright-core';
 
 import { SELECTORS } from '../../constants/selectors.js';
 import type { WaitForResponseOptions, WaitForResponseResult } from '../chatgpt-types.js';
-import { CavendishError } from '../errors.js';
+import { CavendishError, classifyError } from '../errors.js';
 import { errorMessage, progress } from '../output-handler.js';
 
 import { DEFAULT_TIMEOUT_MS, delay, POLL_INTERVAL_MS } from './helpers.js';
@@ -81,6 +81,13 @@ function resolveStallTimeout(timeout: number): number {
     timeout,
     Math.max(MIN_STALL_TIMEOUT_MS, Math.floor(timeout / 4)),
   );
+}
+
+function rethrowBrowserDisconnect(error: unknown): void {
+  const classified = classifyError(error);
+  if (classified.category === 'browser_disconnected' || classified.category === 'cdp_unavailable') {
+    throw classified;
+  }
 }
 
 async function monitorResponse(
@@ -158,6 +165,7 @@ async function getResponseSnapshot(
   try {
     stopButtonVisible = await page.locator(SELECTORS.STOP_BUTTON).isVisible();
   } catch (error: unknown) {
+    rethrowBrowserDisconnect(error);
     throw new CavendishError(
       `Failed to inspect stop button visibility (selector: ${SELECTORS.STOP_BUTTON}): ${errorMessage(error)}`,
       'selector_miss',
@@ -212,6 +220,7 @@ async function getResponseSnapshot(
       },
     );
   } catch (error: unknown) {
+    rethrowBrowserDisconnect(error);
     throw new CavendishError(
       `Failed to read response snapshot (selectors: ${SELECTORS.ASSISTANT_MESSAGE}, ${SELECTORS.COPY_BUTTON}, ${SELECTORS.THINKING_INDICATOR}, offset: ${String(previousCount)}): ${errorMessage(error)}`,
       'selector_miss',
