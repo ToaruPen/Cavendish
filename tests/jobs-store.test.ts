@@ -156,4 +156,63 @@ describe('job store', () => {
 
     expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
   });
+
+  it('recovers a stale running job whose worker pid is no longer alive', async () => {
+    const { createJob, readJob, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    updateJob(job.jobId, {
+      status: 'running',
+      workerPid: 987_654,
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      const error = new Error('no such process') as NodeJS.ErrnoException;
+      error.code = 'ESRCH';
+      throw error;
+    });
+
+    try {
+      const next = readNextQueuedJob();
+
+      expect(next?.jobId).toBe(job.jobId);
+      expect(next?.status).toBe('queued');
+      expect(next?.retryCount).toBe(1);
+      expect(next?.workerPid).toBeUndefined();
+      expect(next?.lastRetryError).toContain('worker process 987654 is no longer running');
+      expect(readJob(job.jobId)?.status).toBe('queued');
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('recovers a stale running job when updatedAt has not advanced', async () => {
+    const { createJob, getJobFilePath, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+
+    try {
+      const next = readNextQueuedJob();
+
+      expect(next?.jobId).toBe(job.jobId);
+      expect(next?.status).toBe('queued');
+      expect(next?.retryCount).toBe(1);
+      expect(next?.lastRetryError).toContain('no progress');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
 });

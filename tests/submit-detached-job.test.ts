@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -13,12 +14,18 @@ let writeJobErrorMock: ReturnType<typeof vi.fn>;
 let testRoot: string;
 let cliEntry: string;
 
+function makeSpawnChild(): EventEmitter & { unref: ReturnType<typeof vi.fn> } {
+  const child = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
+  child.unref = unrefMock;
+  queueMicrotask(() => {
+    child.emit('spawn');
+  });
+  return child;
+}
+
 vi.mock('node:child_process', () => {
   unrefMock = vi.fn();
-  spawnMock = vi.fn(() => ({
-    once: vi.fn(),
-    unref: unrefMock,
-  }));
+  spawnMock = vi.fn(() => makeSpawnChild());
   return {
     spawn: spawnMock,
   };
@@ -56,7 +63,7 @@ describe('submitDetachedJob', () => {
     process.argv[1] = cliEntry;
     try {
       const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
-      const record: { jobId: string; kind: string } = submitDetachedJob({
+      const record: { jobId: string; kind: string } = await submitDetachedJob({
         kind: 'ask',
         argv: ['ask', 'hello'],
         prompt: 'hello from stdin',
@@ -101,11 +108,40 @@ describe('submitDetachedJob', () => {
     });
     try {
       const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
-      expect(() => submitDetachedJob({
+      await expect(submitDetachedJob({
         kind: 'ask',
         argv: ['ask', 'hello'],
-      })).toThrow('spawn failed');
+      })).rejects.toThrow('spawn failed');
 
+      expect(writeJobErrorMock).toHaveBeenCalledOnce();
+      expect(updateJobMock).toHaveBeenCalledWith('job-123', expect.objectContaining({
+        status: 'failed',
+        exitCode: 1,
+      }));
+    } finally {
+      process.argv[1] = previousArgv1;
+    }
+  });
+
+  it('marks the job failed when the detached runner exits non-zero immediately after spawn', async () => {
+    const previousArgv1 = process.argv[1];
+    process.argv[1] = cliEntry;
+    spawnMock.mockImplementationOnce(() => {
+      const child = makeSpawnChild();
+      queueMicrotask(() => {
+        child.emit('exit', 1, null);
+      });
+      return child;
+    });
+    try {
+      const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
+
+      const record = await submitDetachedJob({
+        kind: 'ask',
+        argv: ['ask', 'hello'],
+      });
+
+      expect(record.jobId).toBe('job-123');
       expect(writeJobErrorMock).toHaveBeenCalledOnce();
       expect(updateJobMock).toHaveBeenCalledWith('job-123', expect.objectContaining({
         status: 'failed',

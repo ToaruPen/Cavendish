@@ -3,13 +3,14 @@ import { join } from 'node:path';
 
 import { CAVENDISH_DIR } from '../browser-manager.js';
 import { progress } from '../output-handler.js';
+import { registerCleanup } from '../shutdown.js';
 
 import { readNextQueuedJob } from './store.js';
-import { markUnexpectedJobFailure, runJobWorker } from './worker.js';
+import { markJobRunnerKilled, markUnexpectedJobFailure, runJobWorker } from './worker.js';
 
 const RUNNER_LOCK_FILE = join(CAVENDISH_DIR, 'jobs-runner.lock');
-const RUNNER_LOCK_MAX_ATTEMPTS = 3;
-const RUNNER_LOCK_RETRY_MS = 200;
+const RUNNER_LOCK_MAX_ATTEMPTS = 11;
+const RUNNER_LOCK_RETRY_MS = 500;
 const JOB_RETRY_DELAY_MS = 2_000;
 let runnerPromise: Promise<void> | null = null;
 
@@ -192,6 +193,9 @@ async function runJobRunnerOnce(): Promise<void> {
       if (nextJob === undefined) {
         return;
       }
+      const unregisterKilledCleanup = registerCleanup(() => {
+        markJobRunnerKilled(nextJob.jobId);
+      });
       try {
         const result = await runJobWorker(nextJob.jobId);
         if (result.outcome === 'retry') {
@@ -206,6 +210,8 @@ async function runJobRunnerOnce(): Promise<void> {
       } catch (error: unknown) {
         markUnexpectedJobFailure(nextJob.jobId, error, 'Detached runner job failed');
         continue;
+      } finally {
+        unregisterKilledCleanup();
       }
     }
   } finally {

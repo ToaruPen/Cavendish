@@ -31,6 +31,7 @@ const RUN_WORKER_ARGS = {
 };
 
 const RUN_RUNNER_ARGS = {};
+const WAIT_RUNNING_STALL_MS = 5 * 60 * 1000;
 
 function formatJobText(jobId: string, kind: string, status: string): string {
   return `${jobId}\t${kind}\t${status}`;
@@ -89,6 +90,7 @@ async function waitForTerminalJob(
   timeoutMs: number,
   pollIntervalMs: number | undefined,
   quiet: boolean,
+  detectNoProgress: boolean,
 ): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
   const deadline = Date.now() + timeoutMs;
   let nextProgressAt = pollIntervalMs !== undefined ? Date.now() : undefined;
@@ -96,6 +98,19 @@ async function waitForTerminalJob(
     const job = readJobOrThrow(jobId);
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
+    }
+    const updatedAtMs = Date.parse(job.updatedAt);
+    const noProgressMs = Date.now() - updatedAtMs;
+    if (detectNoProgress && job.status === 'running' && Number.isFinite(updatedAtMs) && noProgressMs >= WAIT_RUNNING_STALL_MS) {
+      const message = `Detached job ${job.jobId} has made no progress for ${String(Math.round(noProgressMs / 1000))}s.`;
+      if (pollIntervalMs !== undefined) {
+        progress(message, quiet);
+      }
+      throw new CavendishError(
+        message,
+        'job_no_progress',
+        `Inspect job ${job.jobId} with \`cavendish jobs read ${job.jobId}\`, then restart Chrome and retry if needed.`,
+      );
     }
     if (pollIntervalMs !== undefined && nextProgressAt !== undefined && Date.now() >= nextProgressAt) {
       progress(
@@ -244,7 +259,13 @@ export const waitCommand = defineCommand({
     }
     const timeoutMs = toTimeoutMs(timeoutSec);
     try {
-      const job = await waitForTerminalJob(args.jobId, timeoutMs, pollIntervalMs, args.quiet === true);
+      const job = await waitForTerminalJob(
+        args.jobId,
+        timeoutMs,
+        pollIntervalMs,
+        args.quiet === true,
+        args.timeout === undefined,
+      );
       const result = readJobResult(job.jobId);
       const error = readJobError(job.jobId) ?? job.error;
       if (job.status === 'failed' || job.status === 'cancelled' || (job.status === 'timed_out' && result === undefined)) {

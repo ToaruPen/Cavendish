@@ -339,4 +339,60 @@ describe('jobs command', () => {
       }),
     );
   });
+
+  it('fails jobs wait with a no-progress error when a running job has stale updatedAt', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-14T00:06:00.000Z'));
+    try {
+      const { jobsCommand } = await import('../src/commands/jobs.js');
+      const store = await import('../src/core/jobs/store.js');
+      vi.mocked(store.readJob).mockReturnValue({
+        jobId: 'job-stalled',
+        kind: 'ask',
+        status: 'running',
+        submittedAt: '2026-03-14T00:00:00.000Z',
+        updatedAt: '2026-03-14T00:00:00.000Z',
+        retryCount: 0,
+      } as never);
+
+      const subCommands = jobsCommand.subCommands as unknown as {
+        wait?: RunnableCommand;
+      };
+      const waitCommand = subCommands.wait;
+      const run = waitCommand?.run;
+      if (waitCommand === undefined || run === undefined) {
+        throw new Error('jobsCommand.subCommands.wait.run is undefined');
+      }
+
+      await run({
+        args: {
+          _: [],
+          jobId: 'job-stalled',
+          poll: '1',
+          timeout: undefined,
+          format: 'json',
+          quiet: false,
+          verbose: false,
+        } as never,
+        rawArgs: [],
+        cmd: waitCommand,
+      });
+
+      expect(progressMock).toHaveBeenCalledWith(
+        expect.stringContaining('no progress'),
+        false,
+      );
+      expect(failStructuredMock).toHaveBeenCalledTimes(1);
+      const firstCall = failStructuredMock.mock.calls[0] as unknown as [
+        { category?: string; message?: string },
+        string,
+      ];
+      expect(firstCall[0].category).toBe('job_no_progress');
+      expect(firstCall[0].message).toContain('no progress');
+      expect(firstCall[1]).toBe('json');
+      expect(jsonRawMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

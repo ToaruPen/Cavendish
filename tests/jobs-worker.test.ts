@@ -12,12 +12,14 @@ function makeChild(
   stdoutLines: string[],
   stderrLines: string[],
   exitCode: number,
-): EventEmitter & { stdin: PassThrough; stdout: PassThrough; stderr: PassThrough } {
+): EventEmitter & { pid: number; stdin: PassThrough; stdout: PassThrough; stderr: PassThrough } {
   const child = new EventEmitter() as EventEmitter & {
+    pid: number;
     stdin: PassThrough;
     stdout: PassThrough;
     stderr: PassThrough;
   };
+  child.pid = 12345;
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
@@ -29,6 +31,31 @@ function makeChild(
     for (const line of stderrLines) {
       child.stderr.write(`${line}\n`);
     }
+    child.stderr.end();
+    child.emit('close', exitCode);
+  });
+  return child;
+}
+
+function makeChildWithStdinError(
+  errorCode: string,
+  exitCode: number,
+): EventEmitter & { pid: number; stdin: PassThrough; stdout: PassThrough; stderr: PassThrough } {
+  const child = new EventEmitter() as EventEmitter & {
+    pid: number;
+    stdin: PassThrough;
+    stdout: PassThrough;
+    stderr: PassThrough;
+  };
+  child.pid = 12345;
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  queueMicrotask(() => {
+    const error = new Error(`write ${errorCode}`) as NodeJS.ErrnoException;
+    error.code = errorCode;
+    child.stdin.emit('error', error);
+    child.stdout.end();
     child.stderr.end();
     child.emit('close', exitCode);
   });
@@ -91,6 +118,7 @@ describe('job worker', () => {
 
     expect(result.outcome).toBe('completed');
     expect(store.readJob(job.jobId)?.status).toBe('completed');
+    expect(store.readJob(job.jobId)?.workerPid).toBeUndefined();
     expect(store.readJobResult(job.jobId)?.event.content).toBe('done');
     expect(readFileSync(notifyFile, 'utf8')).toContain('"jobId"');
   });
@@ -115,6 +143,7 @@ describe('job worker', () => {
     expect(result.record?.retryCount).toBe(1);
     expect(store.readJob(job.jobId)?.status).toBe('queued');
     expect(store.readJob(job.jobId)?.startedAt).toBeUndefined();
+    expect(store.readJob(job.jobId)?.workerPid).toBeUndefined();
     expect(store.readJob(job.jobId)?.retryCount).toBe(1);
     expect(store.readJob(job.jobId)?.lastRetriedAt).toBeDefined();
     expect(store.readJob(job.jobId)?.lastRetryError).toContain('Another cavendish process');
@@ -318,5 +347,93 @@ describe('job worker', () => {
     expect(spawnArgs).toContain('--quiet');
     // Prompt must be piped via stdin from the prompt file
     expect(capturedStdinData).toBe('my prompt from file');
+  });
+
+  it('records child worker pid while the child process is running', async () => {
+    const finalLine = JSON.stringify({
+      type: 'final',
+      content: 'done',
+      timestamp: '2026-03-14T00:00:00.000Z',
+      partial: false,
+    });
+    let observedWorkerPid: number | undefined;
+    const { store, worker } = await importWithMocks(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        pid: number;
+        stdin: PassThrough;
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
+      child.pid = 12345;
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stderr = new PassThrough();
+      child.stdin.on('finish', () => {
+        const jobs = store.listJobs();
+        observedWorkerPid = jobs[0]?.workerPid;
+      });
+      setTimeout(() => {
+        child.stdout.write(`${finalLine}\n`);
+        child.stdout.end();
+        child.stderr.end();
+        child.emit('close', 0);
+      }, 0);
+      return child;
+    });
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    await worker.runJobWorker(job.jobId);
+
+    expect(observedWorkerPid).toBe(12345);
+    expect(store.readJob(job.jobId)?.workerPid).toBeUndefined();
+  });
+
+  it('records non-JSON stderr lines in events and fallback error details', async () => {
+    const { store, worker } = await importWithMocks(() => makeChild([], [
+      'node:internal/modules/esm/resolve: boom',
+      'Error [ERR_MODULE_NOT_FOUND]: Cannot find package',
+    ], 1));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    const result = await worker.runJobWorker(job.jobId);
+
+    expect(result.outcome).toBe('failed');
+    const events = readFileSync(store.getJobEventsPath(job.jobId), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type?: string; line?: string });
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'stderr',
+        line: 'node:internal/modules/esm/resolve: boom',
+      }),
+      expect.objectContaining({
+        type: 'stderr',
+        line: 'Error [ERR_MODULE_NOT_FOUND]: Cannot find package',
+      }),
+    ]));
+    expect(store.readJobError(job.jobId)?.message).toContain('Detached worker stderr:');
+    expect(store.readJobError(job.jobId)?.message).toContain('ERR_MODULE_NOT_FOUND');
+  });
+
+  it('surfaces child stdin EPIPE as a structured job error without throwing', async () => {
+    const { store, worker } = await importWithMocks(() => makeChildWithStdinError('EPIPE', 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+      prompt: 'x'.repeat(1024 * 1024),
+    });
+
+    await expect(worker.runJobWorker(job.jobId)).resolves.toMatchObject({
+      outcome: 'failed',
+    });
+    expect(store.readJobError(job.jobId)?.message).toContain('stdin closed before the prompt could be delivered');
+    expect(store.readJob(job.jobId)?.status).toBe('failed');
   });
 });

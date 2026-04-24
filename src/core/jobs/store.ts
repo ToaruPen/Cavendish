@@ -18,6 +18,8 @@ const FILE_MODE = 0o600;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_KINDS: readonly JobKind[] = ['ask', 'deep-research'];
 const JOB_STATUSES: readonly JobStatus[] = ['queued', 'running', 'completed', 'failed', 'timed_out', 'cancelled'];
+const STALE_RUNNING_JOB_MS = 30 * 60 * 1000;
+const STALE_RUNNING_JOB_MAX_RETRIES = 3;
 
 function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true, mode: DIR_MODE });
@@ -28,6 +30,10 @@ function assertValidJobId(jobId: string): void {
   if (!UUID_PATTERN.test(jobId)) {
     throw new Error(`Invalid job ID: ${jobId}`);
   }
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
 }
 
 function writeJsonAtomic(path: string, data: unknown): void {
@@ -196,6 +202,7 @@ function assertValidJobRecordShape(record: unknown, label: string): asserts reco
   assertOptionalStringField(candidate.lastRetryError, 'lastRetryError', label);
   assertOptionalBooleanField(candidate.partial, 'partial', label);
   assertOptionalNumberField(candidate.exitCode, 'exitCode', label);
+  assertOptionalNumberField(candidate.workerPid, 'workerPid', label);
 }
 
 export function readJob(jobId: string): JobRecord | undefined {
@@ -230,12 +237,79 @@ export function listJobs(): JobRecord[] {
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 }
 
+function isWorkerPidDead(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error: unknown) {
+    if (isErrnoException(error) && error.code === 'EPERM') {
+      return false;
+    }
+    if (isErrnoException(error) && error.code === 'ESRCH') {
+      return true;
+    }
+    return true;
+  }
+}
+
+function staleRunningReason(job: JobRecord, nowMs: number): string | undefined {
+  if (job.status !== 'running') {
+    return undefined;
+  }
+  if (job.workerPid !== undefined && isWorkerPidDead(job.workerPid)) {
+    return `worker process ${String(job.workerPid)} is no longer running`;
+  }
+  const updatedAtMs = Date.parse(job.updatedAt);
+  if (Number.isFinite(updatedAtMs) && nowMs - updatedAtMs >= STALE_RUNNING_JOB_MS) {
+    return `no progress for ${String(Math.round((nowMs - updatedAtMs) / 1000))}s`;
+  }
+  return undefined;
+}
+
+function recoverStaleRunningJob(job: JobRecord, reason: string): JobRecord {
+  const retryCount = Number.isFinite(job.retryCount) ? job.retryCount : 0;
+  if (retryCount >= STALE_RUNNING_JOB_MAX_RETRIES) {
+    const error: StructuredErrorPayload = {
+      error: true,
+      category: 'job_no_progress',
+      message: `Detached job ${job.jobId} did not make progress: ${reason}.`,
+      exitCode: 12,
+      action: 'Inspect the job events and submit the job again if needed.',
+    };
+    writeJobError(job.jobId, error);
+    return updateJob(job.jobId, {
+      status: 'failed',
+      completedAt: new Date().toISOString(),
+      error,
+      exitCode: error.exitCode,
+      workerPid: undefined,
+      lastRetryError: reason,
+    });
+  }
+  return updateJob(job.jobId, {
+    status: 'queued',
+    startedAt: undefined,
+    workerPid: undefined,
+    retryCount: retryCount + 1,
+    lastRetriedAt: new Date().toISOString(),
+    lastRetryError: `Recovered stale running job: ${reason}`,
+  });
+}
+
 export function readNextQueuedJob(): JobRecord | undefined {
   const jobs = listJobs();
+  const nowMs = Date.now();
   for (let index = jobs.length - 1; index >= 0; index -= 1) {
     const job = jobs[index];
     if (job.status === 'queued') {
       return job;
+    }
+    const staleReason = staleRunningReason(job, nowMs);
+    if (staleReason !== undefined) {
+      const recovered = recoverStaleRunningJob(job, staleReason);
+      if (recovered.status === 'queued') {
+        return recovered;
+      }
     }
   }
   return undefined;

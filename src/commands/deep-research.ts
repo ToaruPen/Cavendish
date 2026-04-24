@@ -274,8 +274,8 @@ function buildDeepResearchJobArgv(v: ValidatedArgs): string[] {
   return argv;
 }
 
-function submitDetachedDeepResearchJob(v: ValidatedArgs): DetachedSubmitPayload {
-  const record = submitDetachedJob({
+async function submitDetachedDeepResearchJob(v: ValidatedArgs): Promise<DetachedSubmitPayload> {
+  const record = await submitDetachedJob({
     kind: 'deep-research',
     argv: buildDeepResearchJobArgv(v),
     prompt: v.mode.kind !== 'refresh' ? v.mode.prompt : undefined,
@@ -306,10 +306,10 @@ function dryRunMessage(v: ValidatedArgs): string {
   return `[dry-run] Would send Deep Research query (${parts.join(', ')})`;
 }
 
-function handleDryRunOrDetach(
+async function handleDryRunOrDetach(
   args: Record<string, unknown>,
   validated: ValidatedArgs,
-): boolean {
+): Promise<boolean> {
   if (args.dryRun === true) {
     progress(dryRunMessage(validated), false);
     return true;
@@ -317,7 +317,7 @@ function handleDryRunOrDetach(
   if (!validated.detach) {
     return false;
   }
-  const payload = submitDetachedDeepResearchJob(validated);
+  const payload = await submitDetachedDeepResearchJob(validated);
   writeDetachedSubmit(payload, validated.format);
   return true;
 }
@@ -444,7 +444,7 @@ export const deepResearchCommand = defineCommand({
       quiet, isVerbose, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath,
     } = v;
 
-    if (handleDryRunOrDetach(args, v)) {
+    if (await handleDryRunOrDetach(args, v)) {
       return;
     }
 
