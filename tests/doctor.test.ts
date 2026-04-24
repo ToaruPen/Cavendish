@@ -10,6 +10,26 @@ import {
   formatTextOutput,
 } from '../src/core/doctor.js';
 
+interface MockFilteredMenuItem {
+  count: () => Promise<number>;
+  first: () => {
+    isVisible: () => Promise<boolean>;
+  };
+}
+
+function isGoogleDriveMenuLabel(label: string): boolean {
+  return MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((candidate) => candidate === label);
+}
+
+function makeFilteredMenuItem(count: number, visible: boolean): MockFilteredMenuItem {
+  return {
+    count: () => Promise.resolve(count),
+    first: () => ({
+      isVisible: () => Promise.resolve(visible),
+    }),
+  };
+}
+
 describe('buildSummary', () => {
   it('counts pass/fail/skip correctly', () => {
     const checks: DoctorCheck[] = [
@@ -78,11 +98,10 @@ describe('checkGoogleDrive', () => {
             first: () => ({
               waitFor: () => Promise.resolve(),
             }),
-            filter: ({ hasText }: { hasText: string }) => ({
-              count: () => Promise.resolve(
-                MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((label) => label === hasText) ? 1 : 0,
-              ),
-            }),
+            filter: ({ hasText }: { hasText: string }) => makeFilteredMenuItem(
+              isGoogleDriveMenuLabel(hasText) ? 1 : 0,
+              isGoogleDriveMenuLabel(hasText),
+            ),
           };
         }
         throw new Error(`Unexpected selector: ${selector}`);
@@ -130,9 +149,7 @@ describe('checkGoogleDrive', () => {
               if (!MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((label) => label === hasText)) {
                 throw new Error(`Unexpected menu label: ${hasText}`);
               }
-              return {
-                count: () => Promise.resolve(0),
-              };
+              return makeFilteredMenuItem(0, false);
             },
           };
         }
@@ -148,6 +165,41 @@ describe('checkGoogleDrive', () => {
       detail: 'Composer + menu opened but Google Drive menu entry was not found',
     });
     expect(interactions).toEqual(['click:plus', 'key:Escape']);
+  });
+
+  it('skips when the Google Drive entry exists in DOM but is hidden', async () => {
+    const page = {
+      keyboard: {
+        press: () => Promise.resolve(),
+      },
+      locator: (selector: string) => {
+        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+          return {
+            count: () => Promise.resolve(1),
+            first: () => ({
+              click: () => Promise.resolve(),
+            }),
+          };
+        }
+        if (selector === SELECTORS.MENU_ITEM) {
+          return {
+            first: () => ({
+              waitFor: () => Promise.resolve(),
+            }),
+            filter: ({ hasText }: { hasText: string }) => makeFilteredMenuItem(
+              isGoogleDriveMenuLabel(hasText) ? 1 : 0,
+              false,
+            ),
+          };
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      },
+    };
+
+    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+
+    expect(result.status).toBe('skip');
+    expect(result.detail).toBe('Composer + menu opened but Google Drive menu entry was not found');
   });
 
   it('fails with actionable detail when the composer plus menu cannot open', async () => {

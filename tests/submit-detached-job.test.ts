@@ -149,11 +149,18 @@ describe('submitDetachedJob', () => {
       });
       return child;
     });
-    readJobMock.mockReturnValue({
+    readJobMock.mockReturnValueOnce({
       jobId: 'job-123',
       kind: 'ask',
       status: 'failed',
       exitCode: 1,
+      argv: [],
+      submittedAt: '2026-03-14T00:00:00.000Z',
+      updatedAt: '2026-03-14T00:00:00.000Z',
+      retryCount: 0,
+      resultPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-result.json',
+      eventsPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-events.ndjson',
+      errorPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-error.json',
     });
     try {
       const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
@@ -196,7 +203,10 @@ describe('submitDetachedJob', () => {
       await vi.advanceTimersByTimeAsync(501);
       await submitPromise;
 
-      spawnedChild?.emit('exit', 1, null);
+      if (spawnedChild === undefined) {
+        throw new Error('Expected detached child process to be captured');
+      }
+      spawnedChild.emit('exit', 1, null);
 
       expect(writeJobErrorMock).not.toHaveBeenCalled();
       expect(updateJobMock).not.toHaveBeenCalled();

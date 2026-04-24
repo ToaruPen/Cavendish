@@ -220,10 +220,10 @@ export async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
         timeout: DOCTOR_CHECK_TIMEOUT_MS,
       });
       const labels = MENU_LABELS.ADD_FROM_GOOGLE_DRIVE;
-      const counts = await Promise.all(
-        labels.map((label) => page.locator(SELECTORS.MENU_ITEM).filter({ hasText: label }).count()),
+      const visibleMatches = await Promise.all(
+        labels.map((label) => page.locator(SELECTORS.MENU_ITEM).filter({ hasText: label }).first().isVisible()),
       );
-      if (counts.some((count) => count > 0)) {
+      if (visibleMatches.some((visible) => visible)) {
         return { name: 'gdrive_picker', status: 'pass', detail: 'Google Drive menu entry found' };
       }
       return {

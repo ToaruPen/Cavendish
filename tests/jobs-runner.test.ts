@@ -303,6 +303,10 @@ describe('job runner', () => {
 
   it('registers cleanup that marks the in-flight job failed when the runner receives SIGTERM', async () => {
     let cleanupCallback: (() => void | Promise<void>) | undefined;
+    let resolveCleanupRegistered: (() => void) | undefined;
+    const cleanupRegistered = new Promise<void>((resolve) => {
+      resolveCleanupRegistered = resolve;
+    });
     const finalLine = JSON.stringify({
       type: 'final',
       content: 'done',
@@ -315,6 +319,7 @@ describe('job runner', () => {
         vi.doMock('../src/core/shutdown.js', () => ({
           registerCleanup: (fn: () => void | Promise<void>): (() => void) => {
             cleanupCallback = fn;
+            resolveCleanupRegistered?.();
             return (): void => {
               cleanupCallback = undefined;
             };
@@ -328,9 +333,7 @@ describe('job runner', () => {
     });
 
     const runPromise = runner.runJobRunner();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0);
-    });
+    await cleanupRegistered;
     expect(cleanupCallback).toBeDefined();
     await cleanupCallback?.();
     await runPromise;
