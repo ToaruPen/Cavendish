@@ -168,16 +168,23 @@ describe('checkGoogleDrive', () => {
   });
 
   it('skips when the Google Drive entry exists in DOM but is hidden', async () => {
+    const interactions: string[] = [];
     const page = {
       keyboard: {
-        press: () => Promise.resolve(),
+        press: (key: string): Promise<void> => {
+          interactions.push(`key:${key}`);
+          return Promise.resolve();
+        },
       },
       locator: (selector: string) => {
         if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
           return {
             count: () => Promise.resolve(1),
             first: () => ({
-              click: () => Promise.resolve(),
+              click: () => {
+                interactions.push('click:plus');
+                return Promise.resolve();
+              },
             }),
           };
         }
@@ -200,6 +207,7 @@ describe('checkGoogleDrive', () => {
 
     expect(result.status).toBe('skip');
     expect(result.detail).toBe('Composer + menu opened but Google Drive menu entry was not found');
+    expect(interactions).toEqual(['click:plus', 'key:Escape']);
   });
 
   it('fails with actionable detail when the composer plus menu cannot open', async () => {

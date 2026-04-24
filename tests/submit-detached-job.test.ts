@@ -4,7 +4,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const NOTIFY_FILE = '/Users/sankenbisha/Dev/cavendish/.tmp-tests/notify.ndjson';
+const NOTIFY_FILE = join(process.cwd(), '.tmp-tests', 'notify.ndjson');
+const SUBMIT_RESULT_PATH = join(process.cwd(), '.tmp-tests', 'submit-result.json');
+const SUBMIT_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'submit-events.ndjson');
+const SUBMIT_ERROR_PATH = join(process.cwd(), '.tmp-tests', 'submit-error.json');
 
 let spawnMock: ReturnType<typeof vi.fn>;
 let createJobMock: ReturnType<typeof vi.fn>;
@@ -42,9 +45,9 @@ vi.mock('../src/core/jobs/store.js', () => {
     submittedAt: '2026-03-14T00:00:00.000Z',
     updatedAt: '2026-03-14T00:00:00.000Z',
     retryCount: 0,
-    resultPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-result.json',
-    eventsPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-events.ndjson',
-    errorPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-error.json',
+    resultPath: SUBMIT_RESULT_PATH,
+    eventsPath: SUBMIT_EVENTS_PATH,
+    errorPath: SUBMIT_ERROR_PATH,
   }));
   updateJobMock = vi.fn();
   writeJobErrorMock = vi.fn();
@@ -158,9 +161,9 @@ describe('submitDetachedJob', () => {
       submittedAt: '2026-03-14T00:00:00.000Z',
       updatedAt: '2026-03-14T00:00:00.000Z',
       retryCount: 0,
-      resultPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-result.json',
-      eventsPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-events.ndjson',
-      errorPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-error.json',
+      resultPath: SUBMIT_RESULT_PATH,
+      eventsPath: SUBMIT_EVENTS_PATH,
+      errorPath: SUBMIT_ERROR_PATH,
     });
     try {
       const { submitDetachedJob } = await import('../src/core/jobs/submit.js');

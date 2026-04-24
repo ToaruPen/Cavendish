@@ -274,6 +274,7 @@ describe('job runner', () => {
       const runPromise = runner.runJobRunner();
       await vi.advanceTimersByTimeAsync(1_100);
       await expect(runPromise).resolves.toBeUndefined();
+      expect(killSpy).toHaveBeenCalledWith(99999, 0);
     } finally {
       killSpy.mockRestore();
       vi.useRealTimers();
