@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-import type { StructuredErrorPayload } from '../errors.js';
+import { EXIT_CODES, type StructuredErrorPayload } from '../errors.js';
 import { progress } from '../output-handler.js';
 import type { NdjsonEvent } from '../output-handler.js';
 
@@ -388,7 +388,7 @@ export function markJobRunnerKilled(jobId: string): void {
     error: true,
     category: 'runner_killed',
     message: `Detached runner was interrupted while job ${jobId} was running.`,
-    exitCode: 11,
+    exitCode: EXIT_CODES.runner_killed,
     action: 'Restart the detached job; the runner process was interrupted before it could finish.',
   };
   writeJobError(jobId, fallback);

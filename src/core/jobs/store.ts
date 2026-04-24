@@ -3,7 +3,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFile
 import { dirname, join } from 'node:path';
 
 import { CAVENDISH_DIR } from '../browser-manager.js';
-import type { StructuredErrorPayload } from '../errors.js';
+import { EXIT_CODES, type StructuredErrorPayload } from '../errors.js';
 
 import { notifyJobCompletion } from './notifier.js';
 import { isWorkerPidAlive, latestJobProgressMs } from './pid-utils.js';
@@ -258,7 +258,7 @@ function recoverStaleRunningJob(job: JobRecord, reason: string): JobRecord {
       error: true,
       category: 'job_no_progress',
       message: `Detached job ${job.jobId} did not make progress: ${reason}.`,
-      exitCode: 12,
+      exitCode: EXIT_CODES.job_no_progress,
       action: 'Inspect the job events and submit the job again if needed.',
     };
     writeJobError(job.jobId, error);
