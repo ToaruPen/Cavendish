@@ -256,8 +256,10 @@ function staleRunningReason(job: JobRecord, nowMs: number): string | undefined {
   if (job.status !== 'running') {
     return undefined;
   }
-  if (job.workerPid !== undefined && isWorkerPidDead(job.workerPid)) {
-    return `worker process ${String(job.workerPid)} is no longer running`;
+  if (job.workerPid !== undefined) {
+    return isWorkerPidDead(job.workerPid)
+      ? `worker process ${String(job.workerPid)} is no longer running`
+      : undefined;
   }
   const updatedAtMs = Date.parse(job.updatedAt);
   if (Number.isFinite(updatedAtMs) && nowMs - updatedAtMs >= STALE_RUNNING_JOB_MS) {
