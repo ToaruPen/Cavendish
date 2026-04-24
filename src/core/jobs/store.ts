@@ -6,6 +6,7 @@ import { CAVENDISH_DIR } from '../browser-manager.js';
 import type { StructuredErrorPayload } from '../errors.js';
 
 import { notifyJobCompletion } from './notifier.js';
+import { isWorkerPidAlive, latestJobProgressMs } from './pid-utils.js';
 import type { DetachedJobRequest, JobKind, JobRecord, JobResultRecord, JobStatus } from './types.js';
 
 const JOBS_DIR = join(CAVENDISH_DIR, 'jobs');
@@ -31,10 +32,6 @@ function assertValidJobId(jobId: string): void {
   if (!UUID_PATTERN.test(jobId)) {
     throw new Error(`Invalid job ID: ${jobId}`);
   }
-}
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error;
 }
 
 function writeJsonAtomic(path: string, data: unknown): void {
@@ -238,33 +235,18 @@ export function listJobs(): JobRecord[] {
     .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 }
 
-function isWorkerPidDead(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error: unknown) {
-    if (isErrnoException(error) && error.code === 'EPERM') {
-      return false;
-    }
-    if (isErrnoException(error) && error.code === 'ESRCH') {
-      return true;
-    }
-    return true;
-  }
-}
-
 function staleRunningReason(job: JobRecord, nowMs: number): string | undefined {
   if (job.status !== 'running') {
     return undefined;
   }
   if (job.workerPid !== undefined) {
-    return isWorkerPidDead(job.workerPid)
+    return !isWorkerPidAlive(job.workerPid)
       ? `worker process ${String(job.workerPid)} is no longer running`
       : undefined;
   }
-  const updatedAtMs = Date.parse(job.updatedAt);
-  if (Number.isFinite(updatedAtMs) && nowMs - updatedAtMs >= STALE_RUNNING_JOB_MS) {
-    return `no progress for ${String(Math.round((nowMs - updatedAtMs) / 1000))}s`;
+  const progressMs = latestJobProgressMs(job);
+  if (progressMs !== undefined && nowMs - progressMs >= STALE_RUNNING_JOB_MS) {
+    return `no progress for ${String(Math.round((nowMs - progressMs) / 1000))}s`;
   }
   return undefined;
 }

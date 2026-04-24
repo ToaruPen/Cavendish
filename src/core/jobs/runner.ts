@@ -5,6 +5,7 @@ import { CAVENDISH_DIR } from '../browser-manager.js';
 import { progress } from '../output-handler.js';
 import { registerCleanup } from '../shutdown.js';
 
+import { isErrnoException, isWorkerPidAlive } from './pid-utils.js';
 import { readNextQueuedJob } from './store.js';
 import { markJobRunnerKilled, markUnexpectedJobFailure, runJobWorker } from './worker.js';
 
@@ -13,19 +14,6 @@ const RUNNER_LOCK_MAX_ATTEMPTS = 11;
 const RUNNER_LOCK_RETRY_MS = 500;
 const JOB_RETRY_DELAY_MS = 2_000;
 let runnerPromise: Promise<void> | null = null;
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error;
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return isErrnoException(error) && error.code === 'EPERM';
-  }
-}
 
 function readLockPidFromPath(path: string): number | null {
   try {
@@ -119,7 +107,7 @@ function tryAcquireRunnerLock(): boolean {
   if (existingPid === process.pid) {
     return true;
   }
-  if (existingPid !== null && isProcessAlive(existingPid)) {
+  if (existingPid !== null && isWorkerPidAlive(existingPid)) {
     return false;
   }
   if (tryClaimStaleLock(existingPid)) {

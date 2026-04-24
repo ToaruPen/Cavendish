@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -244,6 +244,35 @@ describe('job store', () => {
       expect(next?.status).toBe('queued');
       expect(next?.retryCount).toBe(1);
       expect(next?.lastRetryError).toContain('no progress');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not recover a running job when events file mtime shows progress', async () => {
+    const { appendJobEvent, createJob, getJobEventsPath, getJobFilePath, readJob, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    appendJobEvent(job.jobId, '{"type":"chunk","timestamp":"2026-03-14T00:30:00.000Z"}');
+    const eventsTime = new Date('2026-03-14T00:30:00.000Z');
+    utimesSync(getJobEventsPath(job.jobId), eventsTime, eventsTime);
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+
+    try {
+      expect(readNextQueuedJob()).toBeUndefined();
+      expect(readJob(job.jobId)?.status).toBe('running');
+      expect(readJob(job.jobId)?.retryCount).toBe(0);
     } finally {
       nowSpy.mockRestore();
     }
