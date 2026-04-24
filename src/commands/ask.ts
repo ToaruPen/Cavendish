@@ -541,7 +541,12 @@ export const askCommand = defineCommand({
     const validated = validateArgs(args);
     if (validated === undefined) {return;}
 
-    if (await handleDryRunOrDetach(args, validated)) {
+    try {
+      if (await handleDryRunOrDetach(args, validated)) {
+        return;
+      }
+    } catch (error: unknown) {
+      failStructured(error, validated.format);
       return;
     }
 

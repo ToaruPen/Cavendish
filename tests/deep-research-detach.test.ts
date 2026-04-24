@@ -7,6 +7,7 @@ const SAFE_JOB_PATH = join(process.cwd(), '.tmp-tests', 'dr-job.json');
 const SAFE_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'dr-events.ndjson');
 
 let jsonRawMock: ReturnType<typeof vi.fn>;
+let failStructuredMock: ReturnType<typeof vi.fn>;
 let submitDetachedJobMock: ReturnType<typeof vi.fn>;
 let withDriverMock: ReturnType<typeof vi.fn>;
 
@@ -42,10 +43,12 @@ vi.mock('../src/core/jobs/submit.js', () => {
 
 vi.mock('../src/core/output-handler.js', () => {
   jsonRawMock = vi.fn();
+  failStructuredMock = vi.fn();
   return {
     emitFinal: vi.fn(),
     emitState: vi.fn(),
     errorMessage: vi.fn((e: unknown): string => (e instanceof Error ? e.message : String(e))),
+    failStructured: failStructuredMock,
     failValidation: vi.fn(),
     json: vi.fn(),
     jsonRaw: jsonRawMock,
@@ -176,6 +179,34 @@ describe('deep-research --detach', () => {
 
     // Default (no --detach, no --sync) should submit a detached job
     expect(submitDetachedJobMock).toHaveBeenCalledOnce();
+    expect(withDriverMock).not.toHaveBeenCalled();
+  });
+
+  it('routes detached submit failures through failStructured', async () => {
+    submitDetachedJobMock.mockRejectedValueOnce(new Error('runner startup failed'));
+    const { deepResearchCommand } = await import('../src/commands/deep-research.js');
+    const run = deepResearchCommand.run;
+    if (run === undefined) {
+      throw new Error('deepResearchCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'research topic',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+        detach: true,
+      } as never,
+      rawArgs: [],
+      cmd: deepResearchCommand,
+    });
+
+    expect(failStructuredMock).toHaveBeenCalledWith(expect.any(Error), 'json');
+    expect(jsonRawMock).not.toHaveBeenCalled();
     expect(withDriverMock).not.toHaveBeenCalled();
   });
 });

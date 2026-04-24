@@ -8,7 +8,7 @@ import { FORMAT_ARG, GLOBAL_ARGS, STREAM_ARG, buildPrompt, formatTimeoutDisplay,
 import { type DetachedSubmitPayload, validateDetachedOptions, writeDetachedSubmit } from '../core/jobs/helpers.js';
 import { getJobFilePath } from '../core/jobs/store.js';
 import { submitDetachedJob } from '../core/jobs/submit.js';
-import { emitFinal, emitState, errorMessage, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
+import { emitFinal, emitState, errorMessage, failStructured, failValidation, json, progress, text, validateFormat, verbose } from '../core/output-handler.js';
 import { withDriver } from '../core/with-driver.js';
 
 const DEFAULT_TIMEOUT_SEC = 0; // unlimited
@@ -444,7 +444,12 @@ export const deepResearchCommand = defineCommand({
       quiet, isVerbose, mode, format, stream, timeoutMs, timeoutSec, exportFormat, exportPath,
     } = v;
 
-    if (await handleDryRunOrDetach(args, v)) {
+    try {
+      if (await handleDryRunOrDetach(args, v)) {
+        return;
+      }
+    } catch (error: unknown) {
+      failStructured(error, v.format);
       return;
     }
 
