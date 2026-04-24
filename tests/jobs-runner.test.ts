@@ -329,11 +329,11 @@ describe('job runner', () => {
     });
     expect(cleanupCallback).toBeDefined();
     await cleanupCallback?.();
+    await runPromise;
 
     const failedJob = store.readJob(job.jobId);
     expect(failedJob?.status).toBe('failed');
     expect(failedJob?.error?.category).toBe('runner_killed');
     expect(failedJob?.workerPid).toBeUndefined();
-    await runPromise;
   });
 });

@@ -156,6 +156,19 @@ function terminalStatusFromError(error: StructuredErrorPayload): Extract<JobStat
   return error.category === 'timeout' ? 'timed_out' : 'failed';
 }
 
+function terminalOutcomeFromRecord(job: JobRecord): JobRunResult | undefined {
+  if (job.status === 'completed') {
+    return { outcome: 'completed', record: job };
+  }
+  if (job.status === 'timed_out') {
+    return { outcome: 'timed_out', record: job, error: job.error };
+  }
+  if (job.status === 'failed' || job.status === 'cancelled') {
+    return { outcome: 'failed', record: job, error: job.error };
+  }
+  return undefined;
+}
+
 function makeStdinErrorPayload(error: unknown): StructuredErrorPayload {
   const message = error instanceof Error ? error.message : String(error);
   const code = error instanceof Error && 'code' in error
@@ -270,6 +283,13 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
 
   const { exitCode, finalEvent, structuredError, stderrLines } = await runWorkerAttempt(jobId, record);
   const normalizedExitCode = normalizeStructuredExitCode(exitCode, structuredError);
+  const terminalRecord = readJob(jobId);
+  if (terminalRecord !== undefined) {
+    const terminalOutcome = terminalOutcomeFromRecord(terminalRecord);
+    if (terminalOutcome !== undefined) {
+      return terminalOutcome;
+    }
+  }
 
   if (finalEvent !== undefined) {
     writeJobResult(jobId, {
@@ -303,7 +323,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     });
   }
 
-  const errorPayload: StructuredErrorPayload = structuredError ?? {
+  const baseErrorPayload: StructuredErrorPayload = structuredError ?? {
     error: true,
     category: 'unknown',
     message: stderrLines.length > 0
@@ -311,6 +331,10 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
       : `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
     exitCode: normalizedExitCode,
     action: 'Inspect the job error output and retry the command.',
+  };
+  const errorPayload: StructuredErrorPayload = {
+    ...baseErrorPayload,
+    exitCode: normalizedExitCode,
   };
 
   if (isLockContentionError(errorPayload)) {
@@ -384,14 +408,6 @@ export function markUnexpectedJobFailure(jobId: string, error: unknown, label = 
 }
 
 export function markJobRunnerKilled(jobId: string): void {
-  const fallback: StructuredErrorPayload = {
-    error: true,
-    category: 'runner_killed',
-    message: `Detached runner was interrupted while job ${jobId} was running.`,
-    exitCode: EXIT_CODES.runner_killed,
-    action: 'Restart the detached job; the runner process was interrupted before it could finish.',
-  };
-  writeJobError(jobId, fallback);
   let job: JobRecord | undefined;
   try {
     job = readJob(jobId);
@@ -405,6 +421,14 @@ export function markJobRunnerKilled(jobId: string): void {
   if (job?.status !== 'running') {
     return;
   }
+  const fallback: StructuredErrorPayload = {
+    error: true,
+    category: 'runner_killed',
+    message: `Detached runner was interrupted while job ${jobId} was running.`,
+    exitCode: EXIT_CODES.runner_killed,
+    action: 'Restart the detached job; the runner process was interrupted before it could finish.',
+  };
+  writeJobError(jobId, fallback);
   const record = updateJob(jobId, {
     status: 'failed',
     completedAt: new Date().toISOString(),

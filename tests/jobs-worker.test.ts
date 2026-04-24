@@ -290,10 +290,39 @@ describe('job worker', () => {
 
     try {
       await worker.runJobWorkerOrExit(job.jobId);
+      expect(store.readJobError(job.jobId)?.exitCode).toBe(1);
+      expect(store.readJob(job.jobId)?.exitCode).toBe(1);
       expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = previousExitCode;
     }
+  });
+
+  it('does not overwrite terminal job errors with runner_killed', async () => {
+    const { store, worker } = await importWithMocks(() => makeChild([], [], 0));
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const originalError = {
+      error: true as const,
+      category: 'timeout' as const,
+      message: 'already timed out',
+      exitCode: 7,
+      action: 'retry',
+    };
+    store.writeJobError(job.jobId, originalError);
+    store.updateJob(job.jobId, {
+      status: 'timed_out',
+      error: originalError,
+      exitCode: 7,
+    });
+
+    worker.markJobRunnerKilled(job.jobId);
+
+    expect(store.readJob(job.jobId)?.status).toBe('timed_out');
+    expect(store.readJob(job.jobId)?.error?.category).toBe('timeout');
+    expect(store.readJobError(job.jobId)?.category).toBe('timeout');
   });
 
   it('records fallback errors even when job metadata becomes unreadable', async () => {
