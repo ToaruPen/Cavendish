@@ -14,6 +14,7 @@ let updateJobMock: ReturnType<typeof vi.fn>;
 let writeJobErrorMock: ReturnType<typeof vi.fn>;
 let testRoot: string;
 let cliEntry: string;
+let spawnedChild: ReturnType<typeof makeSpawnChild> | undefined;
 
 function makeSpawnChild(): EventEmitter & { unref: ReturnType<typeof vi.fn> } {
   const child = new EventEmitter() as EventEmitter & { unref: ReturnType<typeof vi.fn> };
@@ -56,6 +57,7 @@ vi.mock('../src/core/jobs/store.js', () => {
 describe('submitDetachedJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    spawnedChild = undefined;
     testRoot = mkdtempSync(join(process.cwd(), '.tmp-submit-'));
     cliEntry = join(testRoot, 'index.mjs');
     writeFileSync(cliEntry, '');
@@ -166,6 +168,33 @@ describe('submitDetachedJob', () => {
       }));
       expect(readJobMock).toHaveBeenCalledWith('job-123');
     } finally {
+      process.argv[1] = previousArgv1;
+    }
+  });
+
+  it('stops observing runner exits after the startup window', async () => {
+    vi.useFakeTimers();
+    const previousArgv1 = process.argv[1];
+    process.argv[1] = cliEntry;
+    spawnMock.mockImplementationOnce(() => {
+      spawnedChild = makeSpawnChild();
+      return spawnedChild;
+    });
+    try {
+      const { submitDetachedJob } = await import('../src/core/jobs/submit.js');
+      const submitPromise = submitDetachedJob({
+        kind: 'ask',
+        argv: ['ask', 'hello'],
+      });
+      await vi.advanceTimersByTimeAsync(501);
+      await submitPromise;
+
+      spawnedChild?.emit('exit', 1, null);
+
+      expect(writeJobErrorMock).not.toHaveBeenCalled();
+      expect(updateJobMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
       process.argv[1] = previousArgv1;
     }
   });

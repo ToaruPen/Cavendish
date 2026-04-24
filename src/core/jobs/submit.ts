@@ -21,8 +21,20 @@ function resolveCliEntrypoint(): string {
 
 function waitForRunnerSpawn(child: ChildProcess): Promise<void> {
   return new Promise((resolve, reject) => {
-    child.once('spawn', resolve);
-    child.once('error', reject);
+    const cleanup = (): void => {
+      child.off('spawn', onSpawn);
+      child.off('error', onError);
+    };
+    const onSpawn = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
   });
 }
 
@@ -31,8 +43,7 @@ function observeEarlyRunnerExit(
   markLaunchFailed: (error: unknown) => void,
 ): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, STARTUP_OBSERVE_MS);
-    child.once('exit', (code, signal) => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       clearTimeout(timer);
       if ((code ?? 0) !== 0 || signal !== null) {
         markLaunchFailed(
@@ -40,7 +51,12 @@ function observeEarlyRunnerExit(
         );
       }
       resolve();
-    });
+    };
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      resolve();
+    }, STARTUP_OBSERVE_MS);
+    child.once('exit', onExit);
   });
 }
 
