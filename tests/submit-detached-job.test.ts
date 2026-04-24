@@ -38,6 +38,13 @@ vi.mock('../src/core/jobs/store.js', () => {
     jobId: 'job-123',
     kind: 'ask',
     status: 'queued',
+    argv: [],
+    submittedAt: '2026-03-14T00:00:00.000Z',
+    updatedAt: '2026-03-14T00:00:00.000Z',
+    retryCount: 0,
+    resultPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-result.json',
+    eventsPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-events.ndjson',
+    errorPath: '/Users/sankenbisha/Dev/cavendish/.tmp-tests/submit-error.json',
   }));
   updateJobMock = vi.fn();
   writeJobErrorMock = vi.fn();

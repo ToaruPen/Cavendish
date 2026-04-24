@@ -213,7 +213,7 @@ export async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
       };
     }
 
-    await plusBtn.click();
+    await plusBtn.first().click();
     try {
       await page.locator(SELECTORS.MENU_ITEM).first().waitFor({
         state: 'visible',

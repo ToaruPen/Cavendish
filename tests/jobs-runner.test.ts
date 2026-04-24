@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
@@ -257,6 +257,7 @@ describe('job runner', () => {
   }, 10_000);
 
   it('keeps retrying runner lock acquisition when a live owner releases shortly after submit', async () => {
+    vi.useFakeTimers();
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
       return true;
     });
@@ -266,13 +267,16 @@ describe('job runner', () => {
     mkdirSync(cavendishDir, { recursive: true });
     writeFileSync(lockFile, '99999\n');
     setTimeout(() => {
-      unlinkSync(lockFile);
+      rmSync(lockFile, { force: true });
     }, 650);
 
     try {
-      await expect(runner.runJobRunner()).resolves.toBeUndefined();
+      const runPromise = runner.runJobRunner();
+      await vi.advanceTimersByTimeAsync(1_100);
+      await expect(runPromise).resolves.toBeUndefined();
     } finally {
       killSpy.mockRestore();
+      vi.useRealTimers();
     }
   }, 10_000);
 

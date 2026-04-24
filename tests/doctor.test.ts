@@ -61,15 +61,15 @@ describe('checkGoogleDrive', () => {
       },
       locator: (selector: string) => {
         if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
-          const click = (): Promise<void> => {
+          const firstClick = (): Promise<void> => {
             interactions.push('click:plus');
             return Promise.resolve();
           };
           return {
             count: () => Promise.resolve(1),
-            click,
+            click: () => Promise.reject(new Error('strict mode violation')),
             first: () => ({
-              click,
+              click: firstClick,
             }),
           };
         }
@@ -95,6 +95,57 @@ describe('checkGoogleDrive', () => {
       name: 'gdrive_picker',
       status: 'pass',
       detail: 'Google Drive menu entry found',
+    });
+    expect(interactions).toEqual(['click:plus', 'key:Escape']);
+  });
+
+  it('skips when the composer plus menu opens but the Google Drive entry is absent', async () => {
+    const interactions: string[] = [];
+    const page = {
+      keyboard: {
+        press: (key: string): Promise<void> => {
+          interactions.push(`key:${key}`);
+          return Promise.resolve();
+        },
+      },
+      locator: (selector: string) => {
+        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+          return {
+            count: () => Promise.resolve(1),
+            click: () => Promise.reject(new Error('strict mode violation')),
+            first: () => ({
+              click: () => {
+                interactions.push('click:plus');
+                return Promise.resolve();
+              },
+            }),
+          };
+        }
+        if (selector === SELECTORS.MENU_ITEM) {
+          return {
+            first: () => ({
+              waitFor: () => Promise.resolve(),
+            }),
+            filter: ({ hasText }: { hasText: string }) => {
+              if (!MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((label) => label === hasText)) {
+                throw new Error(`Unexpected menu label: ${hasText}`);
+              }
+              return {
+                count: () => Promise.resolve(0),
+              };
+            },
+          };
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      },
+    };
+
+    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+
+    expect(result).toEqual({
+      name: 'gdrive_picker',
+      status: 'skip',
+      detail: 'Composer + menu opened but Google Drive menu entry was not found',
     });
     expect(interactions).toEqual(['click:plus', 'key:Escape']);
   });
