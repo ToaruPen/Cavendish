@@ -101,6 +101,23 @@ const SKIP_SELECTORS = selectorSet([
   'REPORT_DOM_QUERY',
 ]);
 
+function isDeepResearchSelector(key: SelectorKey): boolean {
+  return key.startsWith('DEEP_RESEARCH_') && key !== 'DEEP_RESEARCH_FRAME_URL';
+}
+
+async function countSelector(page: Page, key: SelectorKey, selector: string): Promise<number> {
+  const pageCount = await page.locator(selector).count();
+  if (!isDeepResearchSelector(key)) {
+    return pageCount;
+  }
+  const frameCounts = await Promise.all(
+    page.frames()
+      .filter((frame) => frame.url().includes(SELECTORS.DEEP_RESEARCH_FRAME_URL))
+      .map((frame) => frame.locator(selector).count()),
+  );
+  return frameCounts.reduce((sum, count) => sum + count, pageCount);
+}
+
 export function categorizeSelector(name: string): SelectorCategory {
   if (HOMEPAGE_SELECTORS.has(name)) {return 'homepage';}
   if (AUTH_SELECTORS.has(name)) {return 'auth';}
@@ -123,7 +140,7 @@ export async function validateAllSelectors(
     keys.map(async (key): Promise<SelectorResult> => {
       const selector = SELECTORS[key];
       try {
-        const count = await page.locator(selector).count();
+        const count = await countSelector(page, key, selector);
         return { name: key, selector, count, category: categorizeSelector(key) };
       } catch (error: unknown) {
         progress('Warning: selector ' + key + ' failed: ' + errorMessage(error), quiet);

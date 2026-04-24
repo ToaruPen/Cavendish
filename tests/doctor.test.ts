@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { MENU_LABELS, SELECTORS } from '../src/constants/selectors.js';
 import {
   type CheckStatus,
   type DoctorCheck,
   buildDoctorResult,
   buildSummary,
+  checkGoogleDrive,
   formatTextOutput,
 } from '../src/core/doctor.js';
 
@@ -44,6 +46,55 @@ describe('buildDoctorResult', () => {
 
     expect(result.checks).toBe(checks);
     expect(result.summary).toEqual({ total: 1, pass: 1, fail: 0, skip: 0 });
+  });
+});
+
+describe('checkGoogleDrive', () => {
+  it('opens the composer plus menu and passes when the Google Drive entry is visible', async () => {
+    const interactions: string[] = [];
+    const page = {
+      keyboard: {
+        press: (key: string): Promise<void> => {
+          interactions.push(`key:${key}`);
+          return Promise.resolve();
+        },
+      },
+      locator: (selector: string) => {
+        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+          return {
+            count: () => Promise.resolve(1),
+            first: () => ({
+              click: () => {
+                interactions.push('click:plus');
+                return Promise.resolve();
+              },
+            }),
+          };
+        }
+        if (selector === SELECTORS.MENU_ITEM) {
+          return {
+            first: () => ({
+              waitFor: () => Promise.resolve(),
+            }),
+            filter: ({ hasText }: { hasText: string }) => ({
+              count: () => Promise.resolve(
+                MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((label) => label === hasText) ? 1 : 0,
+              ),
+            }),
+          };
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      },
+    };
+
+    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+
+    expect(result).toEqual({
+      name: 'gdrive_picker',
+      status: 'pass',
+      detail: 'Google Drive menu entry found',
+    });
+    expect(interactions).toEqual(['click:plus', 'key:Escape']);
   });
 });
 

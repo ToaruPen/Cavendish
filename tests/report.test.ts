@@ -10,6 +10,7 @@ import {
   compareWithBaseline,
   determineBroken,
   formatReportText,
+  validateAllSelectors,
 } from '../src/core/report.js';
 
 // ── categorizeSelector ────────────────────────────────────
@@ -34,6 +35,31 @@ describe('categorizeSelector', () => {
 
   it('defaults unknown names to contextual', () => {
     expect(categorizeSelector('NONEXISTENT_SELECTOR')).toBe('contextual');
+  });
+});
+
+describe('validateAllSelectors', () => {
+  it('counts Deep Research selectors inside the matching iframe', async () => {
+    const page = {
+      locator: () => ({
+        count: () => Promise.resolve(0),
+      }),
+      frames: () => [
+        {
+          url: () => 'https://chatgpt.com/app/deep_research/session',
+          locator: (selector: string) => ({
+            count: () => Promise.resolve(selector === '.deep-research-app' ? 1 : 0),
+          }),
+        },
+      ],
+    };
+
+    const results = await validateAllSelectors(page as unknown as Parameters<typeof validateAllSelectors>[0], true);
+    const deepResearchApp = results.find((result) => result.name === 'DEEP_RESEARCH_APP');
+
+    expect(deepResearchApp).toEqual(expect.objectContaining({
+      count: 1,
+    }));
   });
 });
 
