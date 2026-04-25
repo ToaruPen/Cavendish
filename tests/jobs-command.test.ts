@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let failStructuredMock: ReturnType<typeof vi.fn>;
+let failValidationMock: ReturnType<typeof vi.fn>;
 let jsonRawMock: ReturnType<typeof vi.fn>;
 let progressMock: ReturnType<typeof vi.fn>;
 
@@ -49,11 +50,13 @@ vi.mock('../src/core/jobs/runner.js', () => ({
 
 vi.mock('../src/core/output-handler.js', () => {
   failStructuredMock = vi.fn();
+  failValidationMock = vi.fn();
   jsonRawMock = vi.fn();
   progressMock = vi.fn();
   return {
     fail: vi.fn(),
     failStructured: failStructuredMock,
+    failValidation: failValidationMock,
     jsonRaw: jsonRawMock,
     progress: progressMock,
     text: vi.fn(),
@@ -339,6 +342,36 @@ describe('jobs command', () => {
         partial: true,
       }),
     );
+  });
+
+  it('emits a JSON validation error when --timeout is invalid and --format=json', async () => {
+    const { jobsCommand } = await import('../src/commands/jobs.js');
+    const subCommands = jobsCommand.subCommands as unknown as { wait?: RunnableCommand };
+    const waitCommand = subCommands.wait;
+    const run = waitCommand?.run;
+    if (waitCommand === undefined || run === undefined) {
+      throw new Error('jobsCommand.subCommands.wait.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        jobId: 'job-id',
+        timeout: 'not-a-number',
+        format: 'json',
+        quiet: false,
+        verbose: false,
+      } as never,
+      rawArgs: [],
+      cmd: waitCommand,
+    });
+
+    expect(failValidationMock).toHaveBeenCalledTimes(1);
+    expect(failValidationMock).toHaveBeenCalledWith(
+      expect.stringContaining('--timeout must be a non-negative number'),
+      'json',
+    );
+    expect(jsonRawMock).not.toHaveBeenCalled();
   });
 
   it('fails jobs wait with a no-progress error when a running job has stale updatedAt', async () => {

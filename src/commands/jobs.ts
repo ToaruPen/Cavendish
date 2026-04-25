@@ -7,7 +7,7 @@ import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
 import type { JobRecord } from '../core/jobs/types.js';
 import { runJobWorkerOrExit } from '../core/jobs/worker.js';
-import { fail, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
+import { fail, failStructured, failValidation, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
 const JOBS_ARGS = {
   ...GLOBAL_ARGS,
@@ -265,7 +265,7 @@ export const waitCommand = defineCommand({
     }, format)) { return; }
     const timeoutSec = args.timeout !== undefined ? Number(args.timeout) : 0;
     if (!Number.isFinite(timeoutSec) || timeoutSec < 0) {
-      fail(`--timeout must be a non-negative number, got "${String(args.timeout)}"`);
+      failValidation(`--timeout must be a non-negative number, got "${String(args.timeout)}"`, format);
       return;
     }
     const pollIntervalMs = parsePollIntervalMs(args.poll, format);

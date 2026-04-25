@@ -187,8 +187,42 @@ describe('job store', () => {
     }
   });
 
-  it('does not recover a stale running job while its worker pid is still alive', async () => {
+  it('does not recover a running job while its worker pid is alive and recently progressed', async () => {
     const { createJob, getJobFilePath, readJob, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+      workerPid: 12345,
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    // 5 minutes after last progress — well within the 30-minute threshold.
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:05:00.000Z').getTime(),
+    );
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    try {
+      const next = readNextQueuedJob();
+
+      expect(next).toBeUndefined();
+      expect(killSpy).toHaveBeenCalledWith(12345, 0);
+      expect(readJob(job.jobId)?.status).toBe('running');
+      expect(readJob(job.jobId)?.retryCount).toBe(0);
+      expect(readJob(job.jobId)?.workerPid).toBe(12345);
+    } finally {
+      killSpy.mockRestore();
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('recovers a stale running job when alive worker pid shows no progress', async () => {
+    const { createJob, getJobFilePath, readNextQueuedJob, updateJob } = await importWithMockedHome();
     const job = createJob({
       kind: 'deep-research',
       argv: ['deep-research', 'topic'],
@@ -209,11 +243,15 @@ describe('job store', () => {
     try {
       const next = readNextQueuedJob();
 
-      expect(next).toBeUndefined();
+      expect(next?.jobId).toBe(job.jobId);
+      expect(next?.status).toBe('queued');
+      expect(next?.retryCount).toBe(1);
+      expect(next?.lastRetryError).toContain('no progress');
+      expect(next?.workerPid).toBeUndefined();
+      // Liveness probe is allowed; a destructive signal must not be sent.
       expect(killSpy).toHaveBeenCalledWith(12345, 0);
-      expect(readJob(job.jobId)?.status).toBe('running');
-      expect(readJob(job.jobId)?.retryCount).toBe(0);
-      expect(readJob(job.jobId)?.workerPid).toBe(12345);
+      const destructiveCall = killSpy.mock.calls.find((call) => call[1] !== 0);
+      expect(destructiveCall).toBeUndefined();
     } finally {
       killSpy.mockRestore();
       nowSpy.mockRestore();
