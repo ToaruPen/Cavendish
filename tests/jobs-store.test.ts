@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -155,5 +155,173 @@ describe('job store', () => {
     writeFileSync(getJobFilePath(invalidJobId), 'null\n');
 
     expect(readNextQueuedJob()?.jobId).toBe(job.jobId);
+  });
+
+  it('recovers a stale running job whose worker pid is no longer alive', async () => {
+    const { createJob, readJob, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    updateJob(job.jobId, {
+      status: 'running',
+      workerPid: 987_654,
+    });
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      const error = new Error('no such process') as NodeJS.ErrnoException;
+      error.code = 'ESRCH';
+      throw error;
+    });
+
+    try {
+      const next = readNextQueuedJob();
+
+      expect(next?.jobId).toBe(job.jobId);
+      expect(next?.status).toBe('queued');
+      expect(next?.retryCount).toBe(1);
+      expect(next?.workerPid).toBeUndefined();
+      expect(next?.lastRetryError).toContain('worker process 987654 is no longer running');
+      expect(readJob(job.jobId)?.status).toBe('queued');
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('does not recover a stale running job while its worker pid is still alive', async () => {
+    const { createJob, getJobFilePath, readJob, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+      workerPid: 12345,
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    try {
+      const next = readNextQueuedJob();
+
+      expect(next).toBeUndefined();
+      expect(killSpy).toHaveBeenCalledWith(12345, 0);
+      expect(readJob(job.jobId)?.status).toBe('running');
+      expect(readJob(job.jobId)?.retryCount).toBe(0);
+      expect(readJob(job.jobId)?.workerPid).toBe(12345);
+    } finally {
+      killSpy.mockRestore();
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('recovers a stale running job when updatedAt has not advanced', async () => {
+    const { createJob, getJobFilePath, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+
+    try {
+      const next = readNextQueuedJob();
+
+      expect(next?.jobId).toBe(job.jobId);
+      expect(next?.status).toBe('queued');
+      expect(next?.retryCount).toBe(1);
+      expect(next?.lastRetryError).toContain('no progress');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not recover a running job when events file mtime shows progress', async () => {
+    const { appendJobEvent, createJob, getJobEventsPath, getJobFilePath, readJob, readNextQueuedJob, updateJob } = await importWithMockedHome();
+    const job = createJob({
+      kind: 'deep-research',
+      argv: ['deep-research', 'topic'],
+    });
+    appendJobEvent(job.jobId, '{"type":"chunk","timestamp":"2026-03-14T00:30:00.000Z"}');
+    const eventsTime = new Date('2026-03-14T00:30:00.000Z');
+    utimesSync(getJobEventsPath(job.jobId), eventsTime, eventsTime);
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+
+    try {
+      expect(readNextQueuedJob()).toBeUndefined();
+      expect(readJob(job.jobId)?.status).toBe('running');
+      expect(readJob(job.jobId)?.retryCount).toBe(0);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('records terminal state and notification when stale running recovery reaches max retries', async () => {
+    const {
+      createJob,
+      getJobEventsPath,
+      getJobFilePath,
+      readJob,
+      readNextQueuedJob,
+      updateJob,
+    } = await importWithMockedHome();
+    const notifyFile = join(testRoot, 'notify.ndjson');
+    const job = createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+      notifyFile,
+    });
+    const runningJob = updateJob(job.jobId, {
+      status: 'running',
+      retryCount: 3,
+    });
+    writeFileSync(getJobFilePath(job.jobId), `${JSON.stringify({
+      ...runningJob,
+      updatedAt: '2026-03-14T00:00:00.000Z',
+    }, null, 2)}\n`);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(
+      new Date('2026-03-14T00:31:00.000Z').getTime(),
+    );
+
+    try {
+      expect(readNextQueuedJob()).toBeUndefined();
+
+      const failedJob = readJob(job.jobId);
+      expect(failedJob?.status).toBe('failed');
+      expect(failedJob?.error?.category).toBe('job_no_progress');
+      expect(readFileSync(getJobEventsPath(job.jobId), 'utf8')).toContain('"state":"job-failed"');
+      const notification = JSON.parse(readFileSync(notifyFile, 'utf8').trim()) as {
+        jobId?: string;
+        status?: string;
+        errorMessage?: string;
+      };
+      expect(notification.jobId).toBe(job.jobId);
+      expect(notification.status).toBe('failed');
+      expect(notification.errorMessage).toContain('did not make progress');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

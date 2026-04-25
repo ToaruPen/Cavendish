@@ -3,28 +3,17 @@ import { join } from 'node:path';
 
 import { CAVENDISH_DIR } from '../browser-manager.js';
 import { progress } from '../output-handler.js';
+import { registerCleanup } from '../shutdown.js';
 
+import { isErrnoException, isWorkerPidAlive } from './pid-utils.js';
 import { readNextQueuedJob } from './store.js';
-import { markUnexpectedJobFailure, runJobWorker } from './worker.js';
+import { markJobRunnerKilled, markUnexpectedJobFailure, runJobWorker } from './worker.js';
 
 const RUNNER_LOCK_FILE = join(CAVENDISH_DIR, 'jobs-runner.lock');
-const RUNNER_LOCK_MAX_ATTEMPTS = 3;
-const RUNNER_LOCK_RETRY_MS = 200;
+const RUNNER_LOCK_MAX_ATTEMPTS = 11;
+const RUNNER_LOCK_RETRY_MS = 500;
 const JOB_RETRY_DELAY_MS = 2_000;
 let runnerPromise: Promise<void> | null = null;
-
-function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error;
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return isErrnoException(error) && error.code === 'EPERM';
-  }
-}
 
 function readLockPidFromPath(path: string): number | null {
   try {
@@ -118,7 +107,7 @@ function tryAcquireRunnerLock(): boolean {
   if (existingPid === process.pid) {
     return true;
   }
-  if (existingPid !== null && isProcessAlive(existingPid)) {
+  if (existingPid !== null && isWorkerPidAlive(existingPid)) {
     return false;
   }
   if (tryClaimStaleLock(existingPid)) {
@@ -192,6 +181,9 @@ async function runJobRunnerOnce(): Promise<void> {
       if (nextJob === undefined) {
         return;
       }
+      const unregisterKilledCleanup = registerCleanup(() => {
+        markJobRunnerKilled(nextJob.jobId);
+      });
       try {
         const result = await runJobWorker(nextJob.jobId);
         if (result.outcome === 'retry') {
@@ -206,6 +198,8 @@ async function runJobRunnerOnce(): Promise<void> {
       } catch (error: unknown) {
         markUnexpectedJobFailure(nextJob.jobId, error, 'Detached runner job failed');
         continue;
+      } finally {
+        unregisterKilledCleanup();
       }
     }
   } finally {

@@ -2,8 +2,10 @@ import { defineCommand } from 'citty';
 
 import { FORMAT_ARG, GLOBAL_ARGS, rejectUnknownFlags, toTimeoutMs } from '../core/cli-args.js';
 import { CavendishError, type StructuredErrorPayload } from '../core/errors.js';
+import { isWorkerPidAlive, latestJobProgressMs } from '../core/jobs/pid-utils.js';
 import { runJobRunnerOrExit } from '../core/jobs/runner.js';
 import { readJobError, readJobResult, readJob, listJobs } from '../core/jobs/store.js';
+import type { JobRecord } from '../core/jobs/types.js';
 import { runJobWorkerOrExit } from '../core/jobs/worker.js';
 import { fail, failStructured, jsonRaw, progress, text, validateFormat } from '../core/output-handler.js';
 
@@ -31,6 +33,7 @@ const RUN_WORKER_ARGS = {
 };
 
 const RUN_RUNNER_ARGS = {};
+const WAIT_RUNNING_STALL_MS = 5 * 60 * 1000;
 
 function formatJobText(jobId: string, kind: string, status: string): string {
   return `${jobId}\t${kind}\t${status}`;
@@ -84,11 +87,26 @@ function readJobOrThrow(jobId: string): Exclude<ReturnType<typeof readJob>, unde
   }
 }
 
+function noProgressMsForRunningJob(job: JobRecord): number | undefined {
+  if (job.status !== 'running') {
+    return undefined;
+  }
+  if (job.workerPid !== undefined && isWorkerPidAlive(job.workerPid)) {
+    return undefined;
+  }
+  const progressMs = latestJobProgressMs(job);
+  if (progressMs === undefined) {
+    return undefined;
+  }
+  return Date.now() - progressMs;
+}
+
 async function waitForTerminalJob(
   jobId: string,
   timeoutMs: number,
   pollIntervalMs: number | undefined,
   quiet: boolean,
+  detectNoProgress: boolean,
 ): Promise<Exclude<ReturnType<typeof readJob>, undefined>> {
   const deadline = Date.now() + timeoutMs;
   let nextProgressAt = pollIntervalMs !== undefined ? Date.now() : undefined;
@@ -96,6 +114,18 @@ async function waitForTerminalJob(
     const job = readJobOrThrow(jobId);
     if (job.status === 'completed' || job.status === 'failed' || job.status === 'timed_out' || job.status === 'cancelled') {
       return job;
+    }
+    const noProgressMs = noProgressMsForRunningJob(job);
+    if (detectNoProgress && noProgressMs !== undefined && noProgressMs >= WAIT_RUNNING_STALL_MS) {
+      const message = `Detached job ${job.jobId} has made no progress for ${String(Math.round(noProgressMs / 1000))}s.`;
+      if (pollIntervalMs !== undefined) {
+        progress(message, quiet);
+      }
+      throw new CavendishError(
+        message,
+        'job_no_progress',
+        `Inspect job ${job.jobId} with \`cavendish jobs read ${job.jobId}\`, then restart Chrome and retry if needed.`,
+      );
     }
     if (pollIntervalMs !== undefined && nextProgressAt !== undefined && Date.now() >= nextProgressAt) {
       progress(
@@ -244,7 +274,13 @@ export const waitCommand = defineCommand({
     }
     const timeoutMs = toTimeoutMs(timeoutSec);
     try {
-      const job = await waitForTerminalJob(args.jobId, timeoutMs, pollIntervalMs, args.quiet === true);
+      const job = await waitForTerminalJob(
+        args.jobId,
+        timeoutMs,
+        pollIntervalMs,
+        args.quiet === true,
+        timeoutSec === 0,
+      );
       const result = readJobResult(job.jobId);
       const error = readJobError(job.jobId) ?? job.error;
       if (job.status === 'failed' || job.status === 'cancelled' || (job.status === 'timed_out' && result === undefined)) {

@@ -7,6 +7,7 @@ const SAFE_JOB_PATH = join(process.cwd(), '.tmp-tests', 'job.json');
 const SAFE_EVENTS_PATH = join(process.cwd(), '.tmp-tests', 'events.ndjson');
 
 let jsonRawMock: ReturnType<typeof vi.fn>;
+let failStructuredMock: ReturnType<typeof vi.fn>;
 let failValidationMock: ReturnType<typeof vi.fn>;
 let submitDetachedJobMock: ReturnType<typeof vi.fn>;
 let readStdinMock: ReturnType<typeof vi.fn>;
@@ -67,12 +68,13 @@ vi.mock('../src/core/jobs/submit.js', () => {
 
 vi.mock('../src/core/output-handler.js', () => {
   jsonRawMock = vi.fn();
+  failStructuredMock = vi.fn();
   failValidationMock = vi.fn();
   return {
     emitChunk: vi.fn(),
     emitFinal: vi.fn(),
     errorMessage: vi.fn((e: unknown): string => (e instanceof Error ? e.message : String(e))),
-    failStructured: vi.fn(),
+    failStructured: failStructuredMock,
     failValidation: failValidationMock,
     json: vi.fn(),
     jsonRaw: jsonRawMock,
@@ -237,6 +239,36 @@ describe('ask --detach', () => {
     // Default (no --detach, no --sync) should submit a detached job
     expect(submitDetachedJobMock).toHaveBeenCalledOnce();
     expect(failValidationMock).not.toHaveBeenCalled();
+  });
+
+  it('routes detached submit failures through failStructured', async () => {
+    submitDetachedJobMock.mockRejectedValueOnce(new Error('runner startup failed'));
+    const { askCommand } = await import('../src/commands/ask.js');
+    const run = askCommand.run;
+    if (run === undefined) {
+      throw new Error('askCommand.run is undefined');
+    }
+
+    await run({
+      args: {
+        _: [],
+        prompt: 'hello',
+        model: 'Pro',
+        quiet: false,
+        verbose: false,
+        stream: false,
+        dryRun: false,
+        format: 'json',
+        continue: false,
+        agent: false,
+        detach: true,
+      } as never,
+      rawArgs: [],
+      cmd: askCommand,
+    });
+
+    expect(failStructuredMock).toHaveBeenCalledWith(expect.any(Error), 'json');
+    expect(jsonRawMock).not.toHaveBeenCalled();
   });
 
   it('--stream auto-implies sync (no detach even with --detach)', async () => {

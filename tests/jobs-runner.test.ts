@@ -13,12 +13,14 @@ function makeChild(
   stdoutLines: string[],
   stderrLines: string[],
   exitCode: number,
-): EventEmitter & { stdout: PassThrough; stderr: PassThrough } {
+): EventEmitter & { pid: number; stdin: PassThrough; stdout: PassThrough; stderr: PassThrough } {
   const child = new EventEmitter() as EventEmitter & {
+    pid: number;
     stdin: PassThrough;
     stdout: PassThrough;
     stderr: PassThrough;
   };
+  child.pid = 12345;
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
@@ -41,12 +43,14 @@ function makeDelayedChild(
   stderrLines: string[],
   exitCode: number,
   delayMs: number,
-): EventEmitter & { stdout: PassThrough; stderr: PassThrough } {
+): EventEmitter & { pid: number; stdin: PassThrough; stdout: PassThrough; stderr: PassThrough } {
   const child = new EventEmitter() as EventEmitter & {
+    pid: number;
     stdin: PassThrough;
     stdout: PassThrough;
     stderr: PassThrough;
   };
+  child.pid = 12345;
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
@@ -66,6 +70,7 @@ function makeDelayedChild(
 
 async function importWithMocks(
   spawnImpl: () => ReturnType<typeof makeChild>,
+  beforeImport?: () => void,
 ): Promise<{
   runner: typeof import('../src/core/jobs/runner.js');
   store: typeof import('../src/core/jobs/store.js');
@@ -84,6 +89,7 @@ async function importWithMocks(
       spawn: spawnMock,
     };
   });
+  beforeImport?.();
   const runner = await import('../src/core/jobs/runner.js');
   const store = await import('../src/core/jobs/store.js');
   return { runner, store };
@@ -248,7 +254,32 @@ describe('job runner', () => {
     await expect(runner.runJobRunner()).rejects.toThrow(/could not acquire queue lock/);
 
     killSpy.mockRestore();
-  });
+  }, 10_000);
+
+  it('keeps retrying runner lock acquisition when a live owner releases shortly after submit', async () => {
+    vi.useFakeTimers();
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      return true;
+    });
+    const { runner } = await importWithMocks(() => makeChild([], [], 0));
+    const cavendishDir = join(testRoot, '.cavendish');
+    const lockFile = join(cavendishDir, 'jobs-runner.lock');
+    mkdirSync(cavendishDir, { recursive: true });
+    writeFileSync(lockFile, '99999\n');
+    setTimeout(() => {
+      rmSync(lockFile, { force: true });
+    }, 650);
+
+    try {
+      const runPromise = runner.runJobRunner();
+      await vi.advanceTimersByTimeAsync(1_100);
+      await expect(runPromise).resolves.toBeUndefined();
+      expect(killSpy).toHaveBeenCalledWith(99999, 0);
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  }, 10_000);
 
   it('reuses the same in-process runner promise for concurrent calls', async () => {
     const finalLine = JSON.stringify({
@@ -269,5 +300,62 @@ describe('job runner', () => {
     ]);
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers cleanup that marks the in-flight job failed when the runner receives SIGTERM', async () => {
+    let cleanupCallback: (() => void | Promise<void>) | undefined;
+    let resolveCleanupRegistered: (() => void) | undefined;
+    const cleanupRegistered = new Promise<void>((resolve) => {
+      resolveCleanupRegistered = resolve;
+    });
+    const finalLine = JSON.stringify({
+      type: 'final',
+      content: 'done',
+      timestamp: '2026-03-14T00:00:00.000Z',
+      partial: false,
+    });
+    const { runner, store } = await importWithMocks(
+      () => makeDelayedChild([finalLine], [], 0, 100),
+      () => {
+        vi.doMock('../src/core/shutdown.js', () => ({
+          registerCleanup: (fn: () => void | Promise<void>): (() => void) => {
+            cleanupCallback = fn;
+            resolveCleanupRegistered?.();
+            return (): void => {
+              cleanupCallback = undefined;
+            };
+          },
+        }));
+      },
+    );
+    const job = store.createJob({
+      kind: 'ask',
+      argv: ['ask', 'hello'],
+    });
+
+    const runPromise = runner.runJobRunner();
+    let cleanupTimeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        cleanupRegistered,
+        new Promise<never>((_resolve, reject) => {
+          cleanupTimeout = setTimeout(() => {
+            reject(new Error('cleanup registration timed out'));
+          }, 1_000);
+        }),
+      ]);
+    } finally {
+      if (cleanupTimeout !== undefined) {
+        clearTimeout(cleanupTimeout);
+      }
+    }
+    expect(cleanupCallback).toBeDefined();
+    await cleanupCallback?.();
+    await runPromise;
+
+    const failedJob = store.readJob(job.jobId);
+    expect(failedJob?.status).toBe('failed');
+    expect(failedJob?.error?.category).toBe('runner_killed');
+    expect(failedJob?.workerPid).toBeUndefined();
   });
 });

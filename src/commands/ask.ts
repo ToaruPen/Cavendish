@@ -365,8 +365,8 @@ async function captureInitialFollowUpBaseline(
   };
 }
 
-function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
-  const record = submitDetachedJob({
+async function submitDetachedAskJob(validated: ValidatedArgs): Promise<DetachedSubmitPayload> {
+  const record = await submitDetachedJob({
     kind: 'ask',
     argv: buildAskJobArgv(validated),
     prompt: validated.prompt,
@@ -384,10 +384,10 @@ function submitDetachedAskJob(validated: ValidatedArgs): DetachedSubmitPayload {
   };
 }
 
-function handleDryRunOrDetach(
+async function handleDryRunOrDetach(
   args: Record<string, unknown>,
   validated: ValidatedArgs,
-): boolean {
+): Promise<boolean> {
   if (args.dryRun === true) {
     progress(dryRunMessage(validated), false);
     return true;
@@ -395,7 +395,7 @@ function handleDryRunOrDetach(
   if (!validated.detach) {
     return false;
   }
-  const payload = submitDetachedAskJob(validated);
+  const payload = await submitDetachedAskJob(validated);
   writeDetachedSubmit(payload, validated.format);
   return true;
 }
@@ -541,7 +541,12 @@ export const askCommand = defineCommand({
     const validated = validateArgs(args);
     if (validated === undefined) {return;}
 
-    if (handleDryRunOrDetach(args, validated)) {
+    try {
+      if (await handleDryRunOrDetach(args, validated)) {
+        return;
+      }
+    } catch (error: unknown) {
+      failStructured(error, validated.format);
       return;
     }
 

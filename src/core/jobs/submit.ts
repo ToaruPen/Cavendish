@@ -1,9 +1,11 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 import { CavendishError } from '../errors.js';
 
-import { createJob, updateJob, writeJobError } from './store.js';
+import { createJob, readJob, updateJob, writeJobError } from './store.js';
 import type { DetachedJobRequest, JobRecord } from './types.js';
+
+const STARTUP_OBSERVE_MS = 500;
 
 function resolveCliEntrypoint(): string {
   const entry = process.argv[1];
@@ -17,7 +19,48 @@ function resolveCliEntrypoint(): string {
   return entry;
 }
 
-export function submitDetachedJob(request: DetachedJobRequest): JobRecord {
+function waitForRunnerSpawn(child: ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      child.off('spawn', onSpawn);
+      child.off('error', onError);
+    };
+    const onSpawn = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
+  });
+}
+
+function observeEarlyRunnerExit(
+  child: ChildProcess,
+  markLaunchFailed: (error: unknown) => void,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      clearTimeout(timer);
+      if ((code ?? 0) !== 0 || signal !== null) {
+        markLaunchFailed(
+          new Error(`Detached runner exited during startup (code: ${String(code)}, signal: ${String(signal)})`),
+        );
+      }
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      resolve();
+    }, STARTUP_OBSERVE_MS);
+    child.once('exit', onExit);
+  });
+}
+
+export async function submitDetachedJob(request: DetachedJobRequest): Promise<JobRecord> {
   const record = createJob(request);
   const markLaunchFailed = (error: unknown): void => {
     const payload = {
@@ -44,13 +87,13 @@ export function submitDetachedJob(request: DetachedJobRequest): JobRecord {
         stdio: 'ignore',
       },
     );
-    child.once('error', (error: unknown): void => {
-      markLaunchFailed(error);
-    });
+    const earlyExitPromise = observeEarlyRunnerExit(child, markLaunchFailed);
+    await waitForRunnerSpawn(child);
+    await earlyExitPromise;
     child.unref();
   } catch (error: unknown) {
     markLaunchFailed(error);
     throw error;
   }
-  return record;
+  return readJob(record.jobId) ?? record;
 }

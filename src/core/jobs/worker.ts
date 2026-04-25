@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
-import type { StructuredErrorPayload } from '../errors.js';
+import { EXIT_CODES, type StructuredErrorPayload } from '../errors.js';
 import { progress } from '../output-handler.js';
 import type { NdjsonEvent } from '../output-handler.js';
 
@@ -11,14 +11,74 @@ import type { JobRecord, JobStatus } from './types.js';
 
 type JobRunOutcome = 'completed' | 'failed' | 'timed_out' | 'retry';
 
+const STDERR_LINE_LIMIT = 100;
+const STDERR_BYTES_LIMIT = 16 * 1024;
+const STDERR_TRUNCATION_MARKER = '[stderr truncated: keeping the most recent output]';
+
 interface JobRunResult {
   outcome: JobRunOutcome;
   record?: JobRecord;
   error?: StructuredErrorPayload;
 }
 
+interface StderrCapture {
+  lines: string[];
+  bytes: number;
+  truncated: boolean;
+}
+
+function createStderrCapture(): StderrCapture {
+  return {
+    lines: [],
+    bytes: 0,
+    truncated: false,
+  };
+}
+
+function stderrLineBytes(line: string): number {
+  return Buffer.byteLength(line, 'utf8') + 1;
+}
+
+function trimStderrCapture(capture: StderrCapture): void {
+  while (capture.lines.length > 0) {
+    const lineLimit = capture.truncated ? STDERR_LINE_LIMIT - 1 : STDERR_LINE_LIMIT;
+    if (capture.lines.length <= lineLimit && capture.bytes <= STDERR_BYTES_LIMIT) {
+      return;
+    }
+    const removed = capture.lines.shift();
+    if (removed === undefined) {
+      return;
+    }
+    capture.bytes -= stderrLineBytes(removed);
+    capture.truncated = true;
+  }
+}
+
+function appendCapturedStderr(capture: StderrCapture, line: string): void {
+  capture.lines.push(line);
+  capture.bytes += stderrLineBytes(line);
+  trimStderrCapture(capture);
+}
+
+function formatCapturedStderr(capture: StderrCapture): string[] {
+  if (!capture.truncated) {
+    return [...capture.lines];
+  }
+  return [STDERR_TRUNCATION_MARKER, ...capture.lines];
+}
+
 function normalizeFailureExitCode(exitCode: number | undefined): number {
   return typeof exitCode === 'number' && exitCode !== 0 ? exitCode : 1;
+}
+
+function normalizeStructuredExitCode(
+  exitCode: number,
+  structuredError: StructuredErrorPayload | undefined,
+): number {
+  if (structuredError === undefined) {
+    return normalizeFailureExitCode(exitCode);
+  }
+  return Math.max(exitCode, normalizeFailureExitCode(structuredError.exitCode));
 }
 
 function resolveCliEntrypoint(): string {
@@ -45,19 +105,26 @@ function parseEvent(line: string): NdjsonEvent | undefined {
       return undefined;
     }
     return parsed as unknown as NdjsonEvent;
-  } catch {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[cavendish:jobs] failed to parse worker event: ${message}\n`);
     return undefined;
   }
 }
 
 function parseStructuredError(line: string): StructuredErrorPayload | undefined {
+  if (!line.trimStart().startsWith('{')) {
+    return undefined;
+  }
   try {
     const parsed = JSON.parse(line) as Record<string, unknown>;
     if (parsed.error === true && typeof parsed.message === 'string' && typeof parsed.category === 'string') {
       return parsed as unknown as StructuredErrorPayload;
     }
     return undefined;
-  } catch {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[cavendish:jobs] failed to parse worker stderr as JSON: ${message}\n`);
     return undefined;
   }
 }
@@ -89,10 +156,49 @@ function terminalStatusFromError(error: StructuredErrorPayload): Extract<JobStat
   return error.category === 'timeout' ? 'timed_out' : 'failed';
 }
 
+function terminalOutcomeFromRecord(job: JobRecord): JobRunResult | undefined {
+  if (job.status === 'completed') {
+    return { outcome: 'completed', record: job };
+  }
+  if (job.status === 'timed_out') {
+    return { outcome: 'timed_out', record: job, error: job.error };
+  }
+  if (job.status === 'failed' || job.status === 'cancelled') {
+    return { outcome: 'failed', record: job, error: job.error };
+  }
+  return undefined;
+}
+
+function makeStdinErrorPayload(error: unknown): StructuredErrorPayload {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = error instanceof Error && 'code' in error
+    ? String((error as NodeJS.ErrnoException).code)
+    : undefined;
+  const detail = code === 'EPIPE'
+    ? 'Detached worker stdin closed before the prompt could be delivered (EPIPE).'
+    : `Detached worker stdin failed before the prompt could be delivered: ${message}`;
+  return {
+    error: true,
+    category: 'unknown',
+    message: detail,
+    exitCode: 1,
+    action: 'Inspect the detached worker process output and retry the command.',
+  };
+}
+
+function appendStderrEvent(jobId: string, line: string): void {
+  appendJobEvent(jobId, JSON.stringify({
+    type: 'stderr',
+    line,
+    timestamp: new Date().toISOString(),
+  }));
+}
+
 async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
   exitCode: number;
   finalEvent?: NdjsonEvent;
   structuredError?: StructuredErrorPayload;
+  stderrLines: string[];
 }> {
   const child = spawn(process.execPath, [resolveCliEntrypoint(), ...buildWorkerArgs(job)], {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -101,10 +207,28 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
       CAVENDISH_ALLOW_PARTIAL: '1',
     },
   });
-  child.stdin.end(readJobPrompt(job.jobId));
+  if (typeof child.pid === 'number') {
+    updateJob(jobId, {
+      workerPid: child.pid,
+    });
+  }
 
   let finalEvent: NdjsonEvent | undefined;
   let structuredError: StructuredErrorPayload | undefined;
+  let stdinError: StructuredErrorPayload | undefined;
+  const stderrCapture = createStderrCapture();
+
+  child.stdin.on('error', (error: unknown) => {
+    stdinError = makeStdinErrorPayload(error);
+    process.stderr.write(`[cavendish:jobs] ${stdinError.message}\n`);
+  });
+
+  try {
+    child.stdin.end(readJobPrompt(job.jobId));
+  } catch (error: unknown) {
+    stdinError = makeStdinErrorPayload(error);
+    process.stderr.write(`[cavendish:jobs] ${stdinError.message}\n`);
+  }
 
   const stdoutRl = createInterface({ input: child.stdout });
   stdoutRl.on('line', (line) => {
@@ -120,7 +244,10 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
     const parsed = parseStructuredError(line);
     if (parsed !== undefined) {
       structuredError = parsed;
+      return;
     }
+    appendCapturedStderr(stderrCapture, line);
+    appendStderrEvent(jobId, line);
   });
 
   const exitCode = await new Promise<number>((resolve, reject) => {
@@ -136,7 +263,8 @@ async function runWorkerAttempt(jobId: string, job: JobRecord): Promise<{
   return {
     exitCode,
     finalEvent,
-    structuredError,
+    structuredError: structuredError ?? stdinError,
+    stderrLines: formatCapturedStderr(stderrCapture),
   };
 }
 
@@ -153,8 +281,15 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
   });
   appendJobState(jobId, 'job-running');
 
-  const { exitCode, finalEvent, structuredError } = await runWorkerAttempt(jobId, record);
-  const normalizedExitCode = structuredError === undefined ? normalizeFailureExitCode(exitCode) : exitCode;
+  const { exitCode, finalEvent, structuredError, stderrLines } = await runWorkerAttempt(jobId, record);
+  const normalizedExitCode = normalizeStructuredExitCode(exitCode, structuredError);
+  const terminalRecord = readJob(jobId);
+  if (terminalRecord !== undefined) {
+    const terminalOutcome = terminalOutcomeFromRecord(terminalRecord);
+    if (terminalOutcome !== undefined) {
+      return terminalOutcome;
+    }
+  }
 
   if (finalEvent !== undefined) {
     writeJobResult(jobId, {
@@ -169,6 +304,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
       url: finalEvent.url,
       partial: finalEvent.partial,
       exitCode,
+      workerPid: undefined,
     });
     appendJobState(jobId, `job-${status}`);
     notifyJobCompletion(record);
@@ -187,12 +323,18 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     });
   }
 
-  const errorPayload: StructuredErrorPayload = structuredError ?? {
+  const baseErrorPayload: StructuredErrorPayload = structuredError ?? {
     error: true,
     category: 'unknown',
-    message: `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
+    message: stderrLines.length > 0
+      ? `Detached worker exited without a final event (exit code: ${String(exitCode)})\nDetached worker stderr:\n${stderrLines.join('\n')}`
+      : `Detached worker exited without a final event (exit code: ${String(exitCode)})`,
     exitCode: normalizedExitCode,
     action: 'Inspect the job error output and retry the command.',
+  };
+  const errorPayload: StructuredErrorPayload = {
+    ...baseErrorPayload,
+    exitCode: normalizedExitCode,
   };
 
   if (isLockContentionError(errorPayload)) {
@@ -202,6 +344,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
       retryCount: (Number.isFinite(latest.retryCount) ? latest.retryCount : 0) + 1,
       lastRetriedAt: new Date().toISOString(),
       lastRetryError: errorPayload.message,
+      workerPid: undefined,
     }));
     appendJobState(jobId, 'job-queued');
     return {
@@ -220,6 +363,7 @@ export async function runJobWorker(jobId: string): Promise<JobRunResult> {
     error: errorPayload,
     exitCode: normalizedExitCode,
     partial: hasRecoveredContent ? true : undefined,
+    workerPid: undefined,
   });
   appendJobState(jobId, `job-${status}`);
   notifyJobCompletion(record);
@@ -256,10 +400,44 @@ export function markUnexpectedJobFailure(jobId: string, error: unknown, label = 
       completedAt: new Date().toISOString(),
       error: fallback,
       exitCode: 1,
+      workerPid: undefined,
     });
     appendJobState(jobId, 'job-failed');
     notifyJobCompletion(record);
   }
+}
+
+export function markJobRunnerKilled(jobId: string): void {
+  let job: JobRecord | undefined;
+  try {
+    job = readJob(jobId);
+  } catch (readError: unknown) {
+    progress(
+      `Detached runner failed to load job metadata for ${jobId}: ${readError instanceof Error ? readError.message : String(readError)}`,
+      false,
+    );
+    return;
+  }
+  if (job?.status !== 'running') {
+    return;
+  }
+  const fallback: StructuredErrorPayload = {
+    error: true,
+    category: 'runner_killed',
+    message: `Detached runner was interrupted while job ${jobId} was running.`,
+    exitCode: EXIT_CODES.runner_killed,
+    action: 'Restart the detached job; the runner process was interrupted before it could finish.',
+  };
+  writeJobError(jobId, fallback);
+  const record = updateJob(jobId, {
+    status: 'failed',
+    completedAt: new Date().toISOString(),
+    error: fallback,
+    exitCode: fallback.exitCode,
+    workerPid: undefined,
+  });
+  appendJobState(jobId, 'job-failed');
+  notifyJobCompletion(record);
 }
 
 export async function runJobWorkerOrExit(jobId: string): Promise<void> {

@@ -74,6 +74,9 @@ describe('EXIT_CODES', () => {
       'auth_expired',
       'cloudflare_blocked',
       'selector_miss',
+      'browser_disconnected',
+      'job_no_progress',
+      'runner_killed',
       'timeout',
       'unknown',
     ];
@@ -192,6 +195,22 @@ describe('classifyError', () => {
       'Timeout 30000ms exceeded. waiting for locator(\'[data-testid="prompt-textarea"]\')',
     );
     expect(classifyError(err).category).toBe('selector_miss');
+  });
+
+  it('classifies Playwright browser closure before locator selector misses', () => {
+    const err = new Error(
+      'Timeout 30000ms exceeded. waiting for locator("[data-testid=\\"stop-button\\"]")\nTarget page, context or browser has been closed',
+    );
+    const classified = classifyError(err);
+
+    expect(classified.category).toBe('browser_disconnected');
+    expect(classified.action).toBe('Chrome was closed or crashed. Restart Chrome and re-run the command.');
+  });
+
+  it('classifies target closed as browser disconnected', () => {
+    const err = new Error('Target closed while waiting for selector');
+
+    expect(classifyError(err).category).toBe('browser_disconnected');
   });
 
   it('classifies timeout with "selector" in human text as timeout, not selector_miss', () => {

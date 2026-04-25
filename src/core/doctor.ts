@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 
 import type { Page } from 'playwright-core';
 
-import { CHATGPT_BASE_URL, SELECTORS } from '../constants/selectors.js';
+import { CHATGPT_BASE_URL, MENU_LABELS, SELECTORS } from '../constants/selectors.js';
 
 import { BrowserManager, CDP_ENDPOINT_FILE, CHROME_PROFILE_DIR, resolveCdpBaseUrl } from './browser-manager.js';
 import { errorMessage, progress } from './output-handler.js';
@@ -201,7 +201,7 @@ async function checkModelPicker(page: Page): Promise<DoctorCheck> {
 /**
  * Check if the Google Drive menu item is accessible via the composer + menu.
  */
-async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
+export async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
   try {
     const plusBtn = page.locator(SELECTORS.COMPOSER_PLUS_BUTTON);
     const plusCount = await plusBtn.count();
@@ -213,15 +213,33 @@ async function checkGoogleDrive(page: Page): Promise<DoctorCheck> {
       };
     }
 
-    // Google Drive is a menu item inside the + menu, but opening the menu
-    // to verify the Drive entry would be invasive (clicks, side-effects).
-    // We only verify the entry point (+ button) as a non-intrusive proxy.
-    return { name: 'gdrive_picker', status: 'skip', detail: 'Composer + button found but Drive menu entry not verified' };
+    await plusBtn.first().click();
+    try {
+      await page.locator(SELECTORS.MENU_ITEM).first().waitFor({
+        state: 'visible',
+        timeout: DOCTOR_CHECK_TIMEOUT_MS,
+      });
+      const labels = MENU_LABELS.ADD_FROM_GOOGLE_DRIVE;
+      const visibleMatches = await Promise.all(
+        labels.map((label) => page.locator(SELECTORS.MENU_ITEM).filter({ hasText: label }).first().isVisible()),
+      );
+      if (visibleMatches.some((visible) => visible)) {
+        return { name: 'gdrive_picker', status: 'pass', detail: 'Google Drive menu entry found' };
+      }
+      return {
+        name: 'gdrive_picker',
+        status: 'skip',
+        detail: 'Composer + menu opened but Google Drive menu entry was not found',
+      };
+    } finally {
+      await page.keyboard.press('Escape');
+    }
   } catch (error: unknown) {
     return {
       name: 'gdrive_picker',
-      status: 'skip',
-      detail: `Check failed: ${errorMessage(error)}`,
+      status: 'fail',
+      detail: `Failed to verify Google Drive menu: ${errorMessage(error)}`,
+      action: 'Verify the composer + menu is visible and check the Chrome console for errors',
     };
   }
 }
@@ -293,13 +311,13 @@ async function runPlaywrightChecks(page: Page): Promise<DoctorCheck[]> {
     ];
   }
 
-  // Run interactive checks in parallel
-  const [prompt, model, gdrive, github] = await Promise.all([
+  // Run passive checks in parallel, then the menu-opening check by itself.
+  const [prompt, model, github] = await Promise.all([
     checkPromptTextarea(page),
     checkModelPicker(page),
-    checkGoogleDrive(page),
     checkGitHub(page),
   ]);
+  const gdrive = await checkGoogleDrive(page);
 
   return [cloudflare, auth, prompt, model, gdrive, github];
 }
