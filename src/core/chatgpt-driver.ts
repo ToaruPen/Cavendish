@@ -28,6 +28,11 @@ import { progress } from './output-handler.js';
 export type { ConversationItem, ConversationMessage, DeepResearchExportFormat, ProjectItem, WaitForResponseOptions, WaitForResponseResult } from './chatgpt-types.js';
 export type { ThinkingEffortLevel } from './model-config.js';
 
+/** Total budget for confirming a deleted conversation has stayed removed. */
+const DELETE_VERIFY_TIMEOUT_MS = 5_000;
+/** Consecutive zero-count polls required to consider the absence stable. */
+const DELETE_VERIFY_STABILITY_TARGET = 3;
+
 export class ChatGPTDriver {
   private readonly page: Page;
 
@@ -197,7 +202,7 @@ export class ChatGPTDriver {
   async deleteConversation(id: string, quiet = false): Promise<void> {
     progress(`Deleting conversation: ${id}`, quiet);
     const link = await this.openConversationMenu(id, quiet);
-    await this.confirmDeleteAndWait(link);
+    await this.confirmDeleteAndWait(link, id);
     progress('Conversation deleted', quiet);
   }
 
@@ -275,7 +280,7 @@ export class ChatGPTDriver {
   async deleteProjectConversation(id: string, quiet = false): Promise<void> {
     progress(`Deleting project conversation: ${id}`, quiet);
     const link = await this.openProjectConversationMenu(id);
-    await this.confirmDeleteAndWait(link);
+    await this.confirmDeleteAndWait(link, id);
     progress('Project conversation deleted', quiet);
   }
 
@@ -580,10 +585,50 @@ export class ChatGPTDriver {
 
   // ── Private ────────────────────────────────────────────────
 
-  private async confirmDeleteAndWait(link: Locator): Promise<void> {
-    await this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION).click();
-    await this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM).click();
-    await link.waitFor({ state: 'detached', timeout: 10_000 });
+  private async confirmDeleteAndWait(link: Locator, id: string): Promise<void> {
+    const deleteOption = this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION);
+    await deleteOption.waitFor({ state: 'visible', timeout: 5_000 });
+    await deleteOption.click();
+
+    // Confirming the delete is split from observing the result so a
+    // transient sidebar re-render between the two clicks cannot be
+    // mistaken for the conversation having actually been removed.
+    const confirmButton = this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM);
+    await confirmButton.waitFor({ state: 'visible', timeout: 5_000 });
+    await confirmButton.click();
+    await confirmButton.waitFor({ state: 'detached', timeout: 10_000 });
+
+    await this.expectConversationLinkGone(link, id);
+  }
+
+  /**
+   * Verify the conversation link is consistently absent from the DOM.
+   *
+   * The sidebar can transiently detach a link during re-render even
+   * when the conversation persists, so a single `state: 'detached'`
+   * observation is not enough.  Require the absence to be stable
+   * across several consecutive polls before declaring success.
+   */
+  private async expectConversationLinkGone(link: Locator, id: string): Promise<void> {
+    const deadline = Date.now() + DELETE_VERIFY_TIMEOUT_MS;
+    let stableObservations = 0;
+
+    while (Date.now() < deadline) {
+      const count = await link.count();
+      if (count === 0) {
+        stableObservations++;
+        if (stableObservations >= DELETE_VERIFY_STABILITY_TARGET) {
+          return;
+        }
+      } else {
+        stableObservations = 0;
+      }
+      await delay(POLL_INTERVAL_MS);
+    }
+
+    throw new Error(
+      `Delete verification failed: conversation "${id}" reappeared in the sidebar after ${String(DELETE_VERIFY_TIMEOUT_MS / 1000)}s.`,
+    );
   }
 
   private async waitForSidebarContainer(quiet: boolean): Promise<void> {
