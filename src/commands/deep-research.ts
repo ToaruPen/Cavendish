@@ -323,11 +323,18 @@ async function handleDryRunOrDetach(
 }
 
 /**
- * Send the DR query/action and return a pre-action text snapshot.
- * For follow-up/refresh, the snapshot is taken after navigation but before
- * the action (send/click) so stale-content detection works correctly.
+ * Send the DR query/action and return a pre-action snapshot of iframe state.
+ * For follow-up/refresh, the snapshot (text + export-button visibility) is
+ * taken after navigation but before the action so stale-content / stale-
+ * export detection works correctly. For initial mode there is no prior
+ * state so the snapshot is empty / `false`.
  */
-async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, timeoutMs: number): Promise<string> {
+async function sendQuery(
+  driver: ChatGPTDriver,
+  mode: RunMode,
+  quiet: boolean,
+  timeoutMs: number,
+): Promise<{ text: string; hasExport: boolean }> {
   const deadline = Date.now() + timeoutMs;
   switch (mode.kind) {
     case 'refresh': {
@@ -345,7 +352,7 @@ async function sendQuery(driver: ChatGPTDriver, mode: RunMode, quiet: boolean, t
       }
       progress('Sending Deep Research query...', quiet);
       await driver.sendDeepResearchMessage(mode.prompt);
-      return '';
+      return { text: '', hasExport: false };
   }
 }
 
@@ -466,7 +473,7 @@ export const deepResearchCommand = defineCommand({
     await withDriver(quiet, async (driver) => {
       if (stream) { emitState('sending'); }
       verbose('Sending Deep Research query...', isVerbose);
-      const preActionText = await sendQuery(driver, mode, quiet, timeoutMs);
+      const preAction = await sendQuery(driver, mode, quiet, timeoutMs);
 
       if (stream) { emitState('researching'); }
       verbose('Waiting for Deep Research response...', isVerbose);
@@ -475,7 +482,7 @@ export const deepResearchCommand = defineCommand({
         timeout: timeoutMs,
         quiet,
         skipStartPhase: isFollowUpOrRefresh,
-        preActionText: isFollowUpOrRefresh ? preActionText : undefined,
+        preAction: isFollowUpOrRefresh ? preAction : undefined,
       });
 
       const chatId = resolveChatId(driver, mode, quiet);
