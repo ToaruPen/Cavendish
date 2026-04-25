@@ -17,7 +17,7 @@ import { assertValidChatId, CHATGPT_BASE_URL, conversationLinkById, conversation
 
 import type { ConversationItem, ConversationMessage, DeepResearchExportFormat, ProjectItem, WaitForResponseOptions, WaitForResponseResult } from './chatgpt-types.js';
 import { attachFiles as attachFilesImpl, attachGitHubRepo as attachGitHubRepoImpl, attachGoogleDriveFile as attachGoogleDriveFileImpl, enableAgentMode as enableAgentModeImpl } from './driver/attachments.js';
-import { copyDeepResearchContent as copyDRContent, exportDeepResearch as exportDR, getDeepResearchResponse as getDRResponse, navigateToDeepResearch as navToDR, refreshDeepResearch as refreshDR, sendDeepResearchFollowUp as sendDRFollowUp, sendDeepResearchMessage as sendDRMsg, waitForDeepResearchResponse as waitForDRResponse } from './driver/deep-research.js';
+import { copyDeepResearchContent as copyDRContent, type DeepResearchPreActionState, exportDeepResearch as exportDR, getDeepResearchResponse as getDRResponse, navigateToDeepResearch as navToDR, refreshDeepResearch as refreshDR, sendDeepResearchFollowUp as sendDRFollowUp, sendDeepResearchMessage as sendDRMsg, waitForDeepResearchResponse as waitForDRResponse } from './driver/deep-research.js';
 import { clickReadySendButton, delay, isTimeoutError, POLL_INTERVAL_MS } from './driver/helpers.js';
 import { getAssistantMessageCount as getAssistantMsgCount, getLastResponse as getLastResp, waitForResponse as waitForResp } from './driver/response-handler.js';
 import { EFFORT_LABEL_CANDIDATES, MODEL_EFFORT_LEVELS, resolveModelCategory } from './model-config.js';
@@ -163,7 +163,7 @@ export class ChatGPTDriver {
     text: string,
     quiet = false,
     deadline?: number,
-  ): Promise<string> {
+  ): Promise<DeepResearchPreActionState> {
     await this.navigateToChat(chatId, quiet);
     return sendDRFollowUp(this.page, text, { quiet, deadline });
   }
@@ -172,7 +172,7 @@ export class ChatGPTDriver {
     chatId: string,
     quiet = false,
     deadline?: number,
-  ): Promise<string> {
+  ): Promise<DeepResearchPreActionState> {
     await this.navigateToChat(chatId, quiet);
     return refreshDR(this.page, { quiet, deadline });
   }
@@ -185,7 +185,7 @@ export class ChatGPTDriver {
     timeout?: number;
     quiet?: boolean;
     skipStartPhase?: boolean;
-    preActionText?: string;
+    preAction?: DeepResearchPreActionState;
   }): Promise<WaitForResponseResult> {
     return waitForDRResponse(this.page, options);
   }

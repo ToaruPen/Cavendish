@@ -12,7 +12,7 @@ import type { DeepResearchExportFormat, WaitForResponseResult } from '../chatgpt
 import { progress } from '../output-handler.js';
 import { registerCleanup } from '../shutdown.js';
 
-import { DEFAULT_TIMEOUT_MS, computeIframeWaitDeadline, computePhaseDeadline, delay, isFrameDetachedError, isTimeoutError, POLL_INTERVAL_MS } from './helpers.js';
+import { DEFAULT_TIMEOUT_MS, clickReadySendButton, computeIframeWaitDeadline, computePhaseDeadline, delay, isFrameDetachedError, isTimeoutError, POLL_INTERVAL_MS } from './helpers.js';
 
 // ── Navigation ──────────────────────────────────────────────
 
@@ -45,23 +45,47 @@ export async function sendDeepResearchMessage(page: Page, text: string): Promise
   await sendBtn.click();
 }
 
+/**
+ * Snapshot of iframe state captured immediately before a DR action so the
+ * wait logic can disambiguate stale UI from fresh signals.  `hasExport` is
+ * key for follow-ups: the previous report's export button is typically
+ * visible on entry, so we initialise the polling state to "transition not
+ * yet observed" and require seeing the export button absent during polling
+ * before treating any later visible-export as completion.
+ */
+export interface DeepResearchPreActionState {
+  text: string;
+  hasExport: boolean;
+}
+
+async function snapshotPreActionState(page: Page): Promise<DeepResearchPreActionState> {
+  const [text, hasExport] = await Promise.all([
+    getDeepResearchResponse(page),
+    hasDeepResearchExportButton(page),
+  ]);
+  return { text, hasExport };
+}
+
 export async function sendDeepResearchFollowUp(
   page: Page,
   text: string,
   opts: { quiet?: boolean; deadline?: number },
-): Promise<string> {
+): Promise<DeepResearchPreActionState> {
   const { quiet = false, deadline } = opts;
 
   await waitForDeepResearchFrame(page, deadline);
 
-  const preActionText = await getDeepResearchResponse(page);
+  const preAction = await snapshotPreActionState(page);
 
   const input = page.locator(SELECTORS.PROMPT_INPUT);
   await input.fill(text);
 
-  const sendBtn = page.locator(SELECTORS.SEND_BUTTON_ENABLED);
+  // Reuse the regular-chat send-button helper which checks width/height,
+  // disabled, and aria-disabled before clicking.  The previous implementation
+  // hand-rolled `:not([disabled])` + `force: true`, which silently no-op'd
+  // when the button was still aria-disabled (React enable not yet flushed).
   try {
-    await sendBtn.waitFor({ state: 'visible', timeout: 5_000 });
+    await clickReadySendButton(page, SELECTORS.SEND_BUTTON_ENABLED, 5_000);
   } catch (e: unknown) {
     if (isTimeoutError(e)) {
       throw new Error(
@@ -70,18 +94,17 @@ export async function sendDeepResearchFollowUp(
     }
     throw e;
   }
-  await sendBtn.click({ force: true });
   progress('Follow-up sent', quiet);
-  return preActionText;
+  return preAction;
 }
 
 export async function refreshDeepResearch(
   page: Page,
   opts: { quiet?: boolean; deadline?: number },
-): Promise<string> {
+): Promise<DeepResearchPreActionState> {
   const contentFrame = await waitForDeepResearchFrame(page, opts.deadline);
 
-  const preActionText = await getDeepResearchResponse(page);
+  const preAction = await snapshotPreActionState(page);
 
   const updateBtn = contentFrame.locator(SELECTORS.DEEP_RESEARCH_UPDATE_BUTTON);
   try {
@@ -96,7 +119,7 @@ export async function refreshDeepResearch(
   }
   await updateBtn.first().scrollIntoViewIfNeeded();
   await updateBtn.first().click({ force: true });
-  return preActionText;
+  return preAction;
 }
 
 // ── Response extraction ─────────────────────────────────────
@@ -125,18 +148,73 @@ export async function getDeepResearchResponse(page: Page): Promise<string> {
 
 // ── Wait for completion ─────────────────────────────────────
 
+/** Result of the stop-detect phase. */
+interface StopDetectResult {
+  researchStarted: boolean;
+  exportAbsentObserved: boolean;
+}
+
+async function detectResearchStart(
+  page: Page,
+  deadline: number,
+  quiet: boolean,
+  initialExportAbsentObserved: boolean,
+): Promise<StopDetectResult> {
+  // Phase 2: Wait for research to start (stop button appears in iframe).
+  // While we wait, also watch for the export button transitioning to absent;
+  // a follow-up whose research finishes inside this window may never expose
+  // the stop button to phase 4 polling, but the export disappearance still
+  // marks a confirmed fresh-completion signal.
+  const STOP_DETECT_MS = 60_000;
+  const stopDetectDeadline = computePhaseDeadline(Date.now(), deadline, STOP_DETECT_MS);
+  let exportAbsentObserved = initialExportAbsentObserved;
+  while (Date.now() < stopDetectDeadline) {
+    await delay(POLL_INTERVAL_MS * 5);
+    const [stopVisible, exportVisible] = await Promise.all([
+      hasDeepResearchStopButton(page),
+      exportAbsentObserved ? Promise.resolve(true) : hasDeepResearchExportButton(page),
+    ]);
+    if (stopVisible) {
+      progress('Researching...', quiet);
+      return { researchStarted: true, exportAbsentObserved: true };
+    }
+    if (!exportVisible) {
+      exportAbsentObserved = true;
+    }
+  }
+  progress('Stop button not observed, checking for report...', quiet);
+  return { researchStarted: false, exportAbsentObserved };
+}
+
+async function waitForResearchEnd(page: Page, deadline: number, quiet: boolean): Promise<void> {
+  let lastLoggedAt = Date.now();
+  while (Date.now() < deadline) {
+    await delay(POLL_INTERVAL_MS * 5);
+    if (!await hasDeepResearchStopButton(page)) {
+      progress('Research phase complete, waiting for report...', quiet);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastLoggedAt > 30_000) {
+      progress('Still researching...', quiet);
+      lastLoggedAt = now;
+    }
+  }
+}
+
 export async function waitForDeepResearchResponse(
   page: Page,
   options: {
     timeout?: number;
     quiet?: boolean;
     skipStartPhase?: boolean;
-    preActionText?: string;
+    preAction?: DeepResearchPreActionState;
   },
 ): Promise<WaitForResponseResult> {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const quiet = options.quiet ?? false;
-  const preActionText = options.preActionText ?? '';
+  const preActionText = options.preAction?.text ?? '';
+  const preActionHasExport = options.preAction?.hasExport ?? false;
 
   progress('Waiting for Deep Research response...', quiet);
 
@@ -147,42 +225,21 @@ export async function waitForDeepResearchResponse(
     await clickDeepResearchStart(page, deadline, quiet);
   }
 
-  // Phase 2: Wait for research to start (stop button appears in iframe).
-  const STOP_DETECT_MS = 60_000;
-  const stopDetectDeadline = computePhaseDeadline(Date.now(), deadline, STOP_DETECT_MS);
-  let researchStarted = false;
-  while (Date.now() < stopDetectDeadline) {
-    await delay(POLL_INTERVAL_MS * 5);
-    if (await hasDeepResearchStopButton(page)) {
-      researchStarted = true;
-      progress('Researching...', quiet);
-      break;
-    }
-  }
+  // Phase 2: Wait for research to start.
+  const { researchStarted, exportAbsentObserved } = await detectResearchStart(
+    page,
+    deadline,
+    quiet,
+    !preActionHasExport,
+  );
 
-  if (!researchStarted) {
-    progress('Stop button not observed, checking for report...', quiet);
-  }
-
-  // Phase 3: Wait for research to complete (stop button disappears)
+  // Phase 3: Wait for research to complete (stop button disappears).
   if (researchStarted) {
-    let lastLoggedAt = Date.now();
-    while (Date.now() < deadline) {
-      await delay(POLL_INTERVAL_MS * 5);
-      if (!await hasDeepResearchStopButton(page)) {
-        progress('Research phase complete, waiting for report...', quiet);
-        break;
-      }
-      const now = Date.now();
-      if (now - lastLoggedAt > 30_000) {
-        progress('Still researching...', quiet);
-        lastLoggedAt = now;
-      }
-    }
+    await waitForResearchEnd(page, deadline, quiet);
   }
 
-  // Phase 4: Wait for the final report to render
-  return waitForDeepResearchReport(page, deadline, timeout, quiet, researchStarted, preActionText);
+  // Phase 4: Wait for the final report to render.
+  return waitForDeepResearchReport(page, deadline, timeout, quiet, researchStarted, preActionText, exportAbsentObserved);
 }
 
 // ── Copy & export ───────────────────────────────────────────
@@ -387,18 +444,37 @@ async function waitForDeepResearchFrame(page: Page, deadline?: number): Promise<
 
 // ── Private helpers ─────────────────────────────────────────
 
-async function hasDeepResearchStopButton(page: Page): Promise<boolean> {
+async function hasVisibleDRControl(page: Page, selector: string): Promise<boolean> {
   const contentFrame = getDeepResearchContentFrame(page);
   if (!contentFrame) {
     return false;
   }
   try {
-    const count = await contentFrame.locator(SELECTORS.DEEP_RESEARCH_STOP_BUTTON).count();
-    return count > 0;
+    const locator = contentFrame.locator(selector);
+    const count = await locator.count();
+    // Visibility check matters: the stop button can linger in the DOM
+    // (hidden) after research completes, and the export button only
+    // becomes visible once the final report is rendered.  A `count() > 0`
+    // check is not enough.  Iterate over all matches so a hidden stale
+    // element earlier in the DOM does not mask a later visible control.
+    for (let i = 0; i < count; i++) {
+      if (await locator.nth(i).isVisible()) {
+        return true;
+      }
+    }
+    return false;
   } catch (error: unknown) {
     if (isFrameDetachedError(error)) { return false; }
     throw error;
   }
+}
+
+async function hasDeepResearchStopButton(page: Page): Promise<boolean> {
+  return hasVisibleDRControl(page, SELECTORS.DEEP_RESEARCH_STOP_BUTTON);
+}
+
+async function hasDeepResearchExportButton(page: Page): Promise<boolean> {
+  return hasVisibleDRControl(page, SELECTORS.DEEP_RESEARCH_EXPORT_BUTTON);
 }
 
 async function clickDeepResearchStart(
@@ -451,7 +527,8 @@ async function waitForDeepResearchReport(
   timeout: number,
   quiet: boolean,
   seenStopButton: boolean,
-  preActionText = '',
+  preActionText: string,
+  exportAbsentObserved: boolean,
 ): Promise<WaitForResponseResult> {
   const initialText = await getDeepResearchResponse(page);
 
@@ -463,67 +540,53 @@ async function waitForDeepResearchReport(
     return { text: initialText, completed: true };
   }
 
-  return pollForDeepResearchReport(page, deadline, timeout, quiet, seenStopButton, initialText, preActionText);
+  return pollForDeepResearchReport(page, deadline, timeout, quiet, seenStopButton, preActionText, exportAbsentObserved);
 }
 
 export interface ReportPollState {
-  stableCount: number;
-  previousText: string;
-  sawTransition: boolean;
+  /**
+   * True once `hasExport=false` has been observed since the action was sent
+   * (during the detect window, the research-end wait, or polling).  The
+   * export button is part of the final-report UI, so a confirmed absence is
+   * the only reliable proof that any later `hasExport=true` reflects a
+   * freshly rendered report rather than a stale button from the previous run.
+   */
+  exportObservedAbsent: boolean;
 }
 
 /**
  * Evaluate a single poll iteration for DR report readiness.
+ *
+ * Completion is gated on one of:
+ *   1. The export button is visible AND `state.exportObservedAbsent` is
+ *      true — only the final report exposes the export menu, and the
+ *      observed-absent flag confirms the signal is fresh.
+ *   2. The stop button cycle (`seenStopButton` true) completed and text
+ *      now differs from `preActionText` — the cycle "stop button appeared
+ *      then disappeared" only completes once the final report has rendered.
  *
  * @returns The final report text if complete, or `null` to keep polling.
  */
 export function evaluateReportPoll(
   text: string,
   hasStop: boolean,
+  hasExport: boolean,
   seenStopButton: boolean,
   preActionText: string,
   state: ReportPollState,
 ): string | null {
-  const STABLE_THRESHOLD = 3;
-
-  if (hasStop) {
-    state.sawTransition = true;
-    state.stableCount = 0;
+  if (!hasExport) {
+    state.exportObservedAbsent = true;
+  }
+  if (hasStop || text.length === 0) {
     return null;
   }
-  if (text.length === 0) {
-    state.sawTransition = true;
-    state.stableCount = 0;
-    state.previousText = '';
-    return null;
+  if (hasExport && state.exportObservedAbsent) {
+    return text;
   }
-  if (text !== preActionText) {
-    state.sawTransition = true;
-  }
-  // Still showing the pre-action text with no transition — keep waiting.
-  if (!seenStopButton && !state.sawTransition && text === preActionText) {
-    state.stableCount = 0;
-    return null;
-  }
-  // Stop button was seen → research cycle completed; any new text is final.
   if (seenStopButton && text !== preActionText) {
     return text;
   }
-  // Stop button was seen but text is still the pre-action content → keep waiting.
-  if (seenStopButton && text === preActionText && preActionText.length > 0) {
-    state.stableCount = 0;
-    return null;
-  }
-  // Stop button was NOT seen → require stability before declaring complete.
-  if (text === state.previousText) {
-    state.stableCount++;
-    if (state.stableCount >= STABLE_THRESHOLD) {
-      return text;
-    }
-  } else {
-    state.stableCount = 0;
-  }
-  state.previousText = text;
   return null;
 }
 
@@ -533,24 +596,18 @@ async function pollForDeepResearchReport(
   timeout: number,
   quiet: boolean,
   seenStopButton: boolean,
-  initialText: string,
   preActionText: string,
+  exportAbsentObserved: boolean,
 ): Promise<WaitForResponseResult> {
-  // When the stop button was observed, the research cycle is confirmed complete,
-  // so the first non-empty changed text is the final report.
-  // When the stop button was NOT observed (skipped or missed), we require
-  // consecutive identical reads to avoid returning a mid-generation report.
-  const state: ReportPollState = {
-    stableCount: 0,
-    previousText: initialText,
-    sawTransition: false,
-  };
+  const state: ReportPollState = { exportObservedAbsent: exportAbsentObserved };
 
   while (Date.now() < deadline) {
     await delay(POLL_INTERVAL_MS * 5);
     const hasStop = await hasDeepResearchStopButton(page);
-    const text = hasStop ? '' : await getDeepResearchResponse(page);
-    const result = evaluateReportPoll(text, hasStop, seenStopButton, preActionText, state);
+    const [hasExport, text] = hasStop
+      ? [false, '']
+      : await Promise.all([hasDeepResearchExportButton(page), getDeepResearchResponse(page)]);
+    const result = evaluateReportPoll(text, hasStop, hasExport, seenStopButton, preActionText, state);
     if (result !== null) {
       progress('Response complete', quiet);
       return { text: result, completed: true };
