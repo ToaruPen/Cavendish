@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **process-lock**: A race where two concurrent processes both believed they had claimed the same stale lock is closed by a serialised replacement gate (`~/.cavendish/cavendish.lock.gate`). The gate is itself self-healing: if the takeover process dies before cleanup, the next acquirer reclaims the gate from the dead holder. ([#231](https://github.com/ToaruPen/Cavendish/pull/231))
 - **deep-research**: Follow-up queries now reliably register the send button click instead of silently no-oping when the button is still aria-disabled; hidden stale stop/export controls no longer mask the real ones; completion detection no longer promotes plan text as the final report on the first poll. ([#233](https://github.com/ToaruPen/Cavendish/pull/233))
 
-## [2.1.2] - Earlier
+## 2.1.2 and earlier
 
 See git history for releases before the introduction of this changelog.
 
