@@ -5,6 +5,7 @@
   "type": "module",
   "files": [
     "dist/",
+    "skills/",
     "README.md",
     "LICENSE"
   ],
