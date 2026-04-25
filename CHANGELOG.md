@@ -16,6 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.2] - Earlier
 
-See git history for releases prior to the introduction of this changelog.
+See git history for releases before the introduction of this changelog.
 
 [2.1.3]: https://github.com/ToaruPen/Cavendish/compare/v2.1.2...v2.1.3
