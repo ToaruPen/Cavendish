@@ -7,6 +7,7 @@ Run `cavendish <command> --help` for full flag details.
 | Code | Category | Recovery |
 |------|----------|----------|
 | 0 | Success | — |
+| 1 | `unknown` | Check the error message for details |
 | 2 | `cdp_unavailable` | `cavendish init` |
 | 3 | `chrome_not_found` | Install Google Chrome |
 | 4 | `auth_expired` | Re-login in Chrome |
@@ -15,6 +16,9 @@ Run `cavendish <command> --help` for full flag details.
 | 7 | `timeout` | Drop `--timeout` (or increase it) |
 | 8 | `chrome_launch_failed` | `cavendish init` |
 | 9 | `chrome_close_failed` | Close Chrome manually |
+| 10 | `browser_disconnected` | Restart Chrome and re-run the command |
+| 11 | `runner_killed` | Restart the detached job |
+| 12 | `job_no_progress` | Inspect job events, restart Chrome and retry |
 
 JSON error output (stderr, with `--format json`):
 
