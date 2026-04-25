@@ -266,7 +266,7 @@ CLI (citty)
 | **ChatGPTDriver** | DOM operations (message send, response capture, file attach, model select, deep research) |
 | **JobRunner** | Sequential detached-job execution, queue ownership, and retry-on-lock handoff for background jobs |
 | **OutputHandler** | Response formatting (text/json/ndjson to stdout, structured errors to stderr) |
-| **ProcessLock** | Atomic file-based lock preventing parallel execution; stale lock recovery via PID check |
+| **ProcessLock** | Atomic file-based lock preventing parallel execution; stale lock recovery serialised through a recoverable replacement gate (`cavendish.lock.gate`) |
 | **Shutdown** | Signal handler registration (SIGINT/SIGTERM) with cleanup callbacks, lock release, 3s timeout |
 | **DoctorChecks** | System health diagnostics (CDP, auth, selectors, integrations) |
 | **CavendishError** | Structured error types with categories and exit codes |
@@ -370,7 +370,7 @@ The Chrome profile (`~/.cavendish/chrome-profile`) contains your ChatGPT session
 
 ### Process Lock
 
-Cavendish uses an **atomic file-based lock** (`~/.cavendish/cavendish.lock`) to prevent parallel execution. Only one Cavendish command can interact with the Chrome instance at a time. The lock contains the owning process's PID and is automatically released on exit or signal (SIGINT/SIGTERM). Stale locks from crashed processes are detected and reclaimed.
+Cavendish uses an **atomic file-based lock** (`~/.cavendish/cavendish.lock`) to prevent parallel execution. Only one Cavendish command can interact with the Chrome instance at a time. The lock contains the owning process's PID and is automatically released on exit or signal (SIGINT/SIGTERM). Stale locks from crashed processes are detected and reclaimed; the takeover is serialised through an exclusive replacement-gate file (`~/.cavendish/cavendish.lock.gate`) so two processes that simultaneously notice the same stale lock can never both succeed. The gate is itself self-healing: if the takeover process dies before cleanup, the next acquirer reclaims the gate from a dead holder PID.
 
 ### Clipboard Permissions
 
