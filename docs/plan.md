@@ -291,6 +291,8 @@ cavendish projects --name "For-Agents" --chats
 
 - Chromeプロファイル: `~/.cavendish/chrome-profile/`
 - CDPエンドポイント: `~/.cavendish/cdp-endpoint.json`
+- プロセスロック: `~/.cavendish/cavendish.lock`
+- ロック置換ゲート: `~/.cavendish/cavendish.lock.gate`（stale lock の引き継ぎを直列化するための排他ファイル。引き継ぎ中のみ存在し、保持プロセスが死亡した場合は次の取得者が回収する）
 
 ### 5.5 ErrorHandler (errors.ts)
 
