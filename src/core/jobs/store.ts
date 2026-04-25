@@ -239,11 +239,16 @@ function staleRunningReason(job: JobRecord, nowMs: number): string | undefined {
   if (job.status !== 'running') {
     return undefined;
   }
-  if (job.workerPid !== undefined) {
-    return !isWorkerPidAlive(job.workerPid)
-      ? `worker process ${String(job.workerPid)} is no longer running`
-      : undefined;
+  if (job.workerPid !== undefined && !isWorkerPidAlive(job.workerPid)) {
+    return `worker process ${String(job.workerPid)} is no longer running`;
   }
+  // Even when the PID is alive we still apply the no-progress check.  A live
+  // PID does not prove activity — the worker can hang on a network call,
+  // locked resource, or infinite loop.  Long-running Deep Research is not a
+  // false-positive risk because the worker emits "Still researching..."
+  // progress every 30s; appendStderrEvent writes that line to events.ndjson,
+  // refreshing its mtime which `latestJobProgressMs` reads.  A worker silent
+  // for 30 minutes has missed ~60 heartbeats and is genuinely wedged.
   const progressMs = latestJobProgressMs(job);
   if (progressMs !== undefined && nowMs - progressMs >= STALE_RUNNING_JOB_MS) {
     return `no progress for ${String(Math.round((nowMs - progressMs) / 1000))}s`;
@@ -299,6 +304,15 @@ export function readNextQueuedJob(): JobRecord | undefined {
     }
     const staleReason = staleRunningReason(job, nowMs);
     if (staleReason !== undefined) {
+      // We deliberately do NOT SIGKILL the prior workerPid even when it's
+      // still alive: PIDs are reused by the kernel after process exit, so
+      // a worker that crashed without updating job state may have its PID
+      // assigned to an unrelated user process by the time recovery runs.
+      // Killing-by-PID without an OS-portable identity check (ps/tasklist
+      // wrapper) risks terminating that unrelated process.  In the rare
+      // case the original worker is still genuinely active, the next
+      // worker's Playwright/Chrome interactions will surface any real
+      // conflict via the existing error paths.
       const recovered = recoverStaleRunningJob(job, staleReason);
       if (recovered.status === 'queued') {
         return recovered;
