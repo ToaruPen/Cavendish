@@ -28,6 +28,61 @@ import { progress } from './output-handler.js';
 export type { ConversationItem, ConversationMessage, DeepResearchExportFormat, ProjectItem, WaitForResponseOptions, WaitForResponseResult } from './chatgpt-types.js';
 export type { ThinkingEffortLevel } from './model-config.js';
 
+/** Total budget for confirming a deleted conversation has stayed removed. */
+export const DELETE_VERIFY_TIMEOUT_MS = 5_000;
+/** Consecutive zero-count polls required to consider the absence stable. */
+export const DELETE_VERIFY_STABILITY_TARGET = 3;
+
+/**
+ * Verify a conversation link is consistently absent from the DOM.
+ *
+ * The sidebar (and the project main area) can transiently detach a link
+ * during re-render even when the conversation persists, so a single
+ * `state: 'detached'` observation is not enough.  Poll until the absence
+ * is stable across `stabilityTarget` consecutive observations or throw on
+ * timeout.
+ *
+ * Exported as a free function so it can be unit-tested with a mocked
+ * `count` callback and a mocked `sleep`.
+ */
+export async function expectConversationLinkGone(
+  count: () => Promise<number>,
+  id: string,
+  options: {
+    timeoutMs?: number;
+    stabilityTarget?: number;
+    pollIntervalMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? DELETE_VERIFY_TIMEOUT_MS;
+  const stabilityTarget = options.stabilityTarget ?? DELETE_VERIFY_STABILITY_TARGET;
+  const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
+  const sleep = options.sleep ?? delay;
+  const now = options.now ?? Date.now;
+
+  const deadline = now() + timeoutMs;
+  let stableObservations = 0;
+
+  while (now() < deadline) {
+    const observed = await count();
+    if (observed === 0) {
+      stableObservations++;
+      if (stableObservations >= stabilityTarget) {
+        return;
+      }
+    } else {
+      stableObservations = 0;
+    }
+    await sleep(pollIntervalMs);
+  }
+
+  throw new Error(
+    `Delete verification failed: conversation "${id}" was not reliably removed within ${String(timeoutMs / 1000)}s.`,
+  );
+}
+
 export class ChatGPTDriver {
   private readonly page: Page;
 
@@ -197,7 +252,7 @@ export class ChatGPTDriver {
   async deleteConversation(id: string, quiet = false): Promise<void> {
     progress(`Deleting conversation: ${id}`, quiet);
     const link = await this.openConversationMenu(id, quiet);
-    await this.confirmDeleteAndWait(link);
+    await this.confirmDeleteAndWait(link, id);
     progress('Conversation deleted', quiet);
   }
 
@@ -275,7 +330,7 @@ export class ChatGPTDriver {
   async deleteProjectConversation(id: string, quiet = false): Promise<void> {
     progress(`Deleting project conversation: ${id}`, quiet);
     const link = await this.openProjectConversationMenu(id);
-    await this.confirmDeleteAndWait(link);
+    await this.confirmDeleteAndWait(link, id);
     progress('Project conversation deleted', quiet);
   }
 
@@ -580,10 +635,20 @@ export class ChatGPTDriver {
 
   // ── Private ────────────────────────────────────────────────
 
-  private async confirmDeleteAndWait(link: Locator): Promise<void> {
-    await this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION).click();
-    await this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM).click();
-    await link.waitFor({ state: 'detached', timeout: 10_000 });
+  private async confirmDeleteAndWait(link: Locator, id: string): Promise<void> {
+    const deleteOption = this.page.locator(SELECTORS.CONVERSATION_DELETE_OPTION);
+    await deleteOption.waitFor({ state: 'visible', timeout: 5_000 });
+    await deleteOption.click();
+
+    // Confirming the delete is split from observing the result so a
+    // transient sidebar re-render between the two clicks cannot be
+    // mistaken for the conversation having actually been removed.
+    const confirmButton = this.page.locator(SELECTORS.CONVERSATION_DELETE_CONFIRM);
+    await confirmButton.waitFor({ state: 'visible', timeout: 5_000 });
+    await confirmButton.click();
+    await confirmButton.waitFor({ state: 'detached', timeout: 10_000 });
+
+    await expectConversationLinkGone(() => link.count(), id);
   }
 
   private async waitForSidebarContainer(quiet: boolean): Promise<void> {
