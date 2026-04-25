@@ -29,9 +29,59 @@ export type { ConversationItem, ConversationMessage, DeepResearchExportFormat, P
 export type { ThinkingEffortLevel } from './model-config.js';
 
 /** Total budget for confirming a deleted conversation has stayed removed. */
-const DELETE_VERIFY_TIMEOUT_MS = 5_000;
+export const DELETE_VERIFY_TIMEOUT_MS = 5_000;
 /** Consecutive zero-count polls required to consider the absence stable. */
-const DELETE_VERIFY_STABILITY_TARGET = 3;
+export const DELETE_VERIFY_STABILITY_TARGET = 3;
+
+/**
+ * Verify a conversation link is consistently absent from the DOM.
+ *
+ * The sidebar (and the project main area) can transiently detach a link
+ * during re-render even when the conversation persists, so a single
+ * `state: 'detached'` observation is not enough.  Poll until the absence
+ * is stable across `stabilityTarget` consecutive observations or throw on
+ * timeout.
+ *
+ * Exported as a free function so it can be unit-tested with a mocked
+ * `count` callback and a mocked `sleep`.
+ */
+export async function expectConversationLinkGone(
+  count: () => Promise<number>,
+  id: string,
+  options: {
+    timeoutMs?: number;
+    stabilityTarget?: number;
+    pollIntervalMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? DELETE_VERIFY_TIMEOUT_MS;
+  const stabilityTarget = options.stabilityTarget ?? DELETE_VERIFY_STABILITY_TARGET;
+  const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
+  const sleep = options.sleep ?? delay;
+  const now = options.now ?? Date.now;
+
+  const deadline = now() + timeoutMs;
+  let stableObservations = 0;
+
+  while (now() < deadline) {
+    const observed = await count();
+    if (observed === 0) {
+      stableObservations++;
+      if (stableObservations >= stabilityTarget) {
+        return;
+      }
+    } else {
+      stableObservations = 0;
+    }
+    await sleep(pollIntervalMs);
+  }
+
+  throw new Error(
+    `Delete verification failed: conversation "${id}" was not reliably removed within ${String(timeoutMs / 1000)}s.`,
+  );
+}
 
 export class ChatGPTDriver {
   private readonly page: Page;
@@ -598,37 +648,7 @@ export class ChatGPTDriver {
     await confirmButton.click();
     await confirmButton.waitFor({ state: 'detached', timeout: 10_000 });
 
-    await this.expectConversationLinkGone(link, id);
-  }
-
-  /**
-   * Verify the conversation link is consistently absent from the DOM.
-   *
-   * The sidebar can transiently detach a link during re-render even
-   * when the conversation persists, so a single `state: 'detached'`
-   * observation is not enough.  Require the absence to be stable
-   * across several consecutive polls before declaring success.
-   */
-  private async expectConversationLinkGone(link: Locator, id: string): Promise<void> {
-    const deadline = Date.now() + DELETE_VERIFY_TIMEOUT_MS;
-    let stableObservations = 0;
-
-    while (Date.now() < deadline) {
-      const count = await link.count();
-      if (count === 0) {
-        stableObservations++;
-        if (stableObservations >= DELETE_VERIFY_STABILITY_TARGET) {
-          return;
-        }
-      } else {
-        stableObservations = 0;
-      }
-      await delay(POLL_INTERVAL_MS);
-    }
-
-    throw new Error(
-      `Delete verification failed: conversation "${id}" reappeared in the sidebar after ${String(DELETE_VERIFY_TIMEOUT_MS / 1000)}s.`,
-    );
+    await expectConversationLinkGone(() => link.count(), id);
   }
 
   private async waitForSidebarContainer(quiet: boolean): Promise<void> {
