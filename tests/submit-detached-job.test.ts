@@ -180,6 +180,13 @@ describe('submitDetachedJob', () => {
       kind: 'ask',
       status: 'failed',
       exitCode: 1,
+      error: {
+        error: true,
+        category: 'unknown',
+        message: 'Detached runner exited during startup (code: 1, signal: null)',
+        exitCode: 1,
+        action: 'Fix the detached runner launch failure and retry the command.',
+      },
       argv: [],
       submittedAt: '2026-03-14T00:00:00.000Z',
       updatedAt: '2026-03-14T00:00:00.000Z',
@@ -201,6 +208,10 @@ describe('submitDetachedJob', () => {
         status: 'failed',
         exitCode: 1,
       });
+      expect(record.error?.category).toBe('unknown');
+      expect(record.error?.exitCode).toBe(1);
+      expect(record.error?.action).toBe('Fix the detached runner launch failure and retry the command.');
+      expect(record.error?.message).toContain('Detached runner exited during startup');
       expect(writeJobErrorMock).toHaveBeenCalledOnce();
       const writeCall = writeJobErrorMock.mock.calls[0] as [string, StructuredErrorPayload] | undefined;
       expect(writeCall?.[0]).toBe('job-123');

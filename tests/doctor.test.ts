@@ -17,6 +17,16 @@ interface MockFilteredMenuItem {
   };
 }
 
+interface GoogleDrivePageMock {
+  page: Parameters<typeof checkGoogleDrive>[0];
+  interactions: string[];
+}
+
+interface GoogleDrivePageMockOptions {
+  menuItemForLabel?: (label: string) => MockFilteredMenuItem;
+  plusClick?: (interactions: string[]) => Promise<void>;
+}
+
 function isGoogleDriveMenuLabel(label: string): boolean {
   return MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((candidate) => candidate === label);
 }
@@ -28,6 +38,50 @@ function makeFilteredMenuItem(count: number, visible: boolean): MockFilteredMenu
       isVisible: () => Promise.resolve(visible),
     }),
   };
+}
+
+function defaultPlusClick(interactions: string[]): Promise<void> {
+  interactions.push('click:plus');
+  return Promise.resolve();
+}
+
+function createGoogleDrivePageMock(options: GoogleDrivePageMockOptions = {}): GoogleDrivePageMock {
+  const interactions: string[] = [];
+  const click = (): Promise<void> => (options.plusClick ?? defaultPlusClick)(interactions);
+  const menuItemForLabel = options.menuItemForLabel
+    ?? ((label: string): MockFilteredMenuItem => makeFilteredMenuItem(
+      isGoogleDriveMenuLabel(label) ? 1 : 0,
+      isGoogleDriveMenuLabel(label),
+    ));
+  const page = {
+    keyboard: {
+      press: (key: string): Promise<void> => {
+        interactions.push(`key:${key}`);
+        return Promise.resolve();
+      },
+    },
+    locator: (selector: string) => {
+      if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
+        return {
+          count: () => Promise.resolve(1),
+          click,
+          first: () => ({
+            click,
+          }),
+        };
+      }
+      if (selector === SELECTORS.MENU_ITEM) {
+        return {
+          first: () => ({
+            waitFor: () => Promise.resolve(),
+          }),
+          filter: ({ hasText }: { hasText: string }) => menuItemForLabel(hasText),
+        };
+      }
+      throw new Error(`Unexpected selector: ${selector}`);
+    },
+  };
+  return { page: page as unknown as Parameters<typeof checkGoogleDrive>[0], interactions };
 }
 
 describe('buildSummary', () => {
@@ -71,44 +125,9 @@ describe('buildDoctorResult', () => {
 
 describe('checkGoogleDrive', () => {
   it('opens the composer plus menu and passes when the Google Drive entry is visible', async () => {
-    const interactions: string[] = [];
-    const page = {
-      keyboard: {
-        press: (key: string): Promise<void> => {
-          interactions.push(`key:${key}`);
-          return Promise.resolve();
-        },
-      },
-      locator: (selector: string) => {
-        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
-          const firstClick = (): Promise<void> => {
-            interactions.push('click:plus');
-            return Promise.resolve();
-          };
-          return {
-            count: () => Promise.resolve(1),
-            click: firstClick,
-            first: () => ({
-              click: firstClick,
-            }),
-          };
-        }
-        if (selector === SELECTORS.MENU_ITEM) {
-          return {
-            first: () => ({
-              waitFor: () => Promise.resolve(),
-            }),
-            filter: ({ hasText }: { hasText: string }) => makeFilteredMenuItem(
-              isGoogleDriveMenuLabel(hasText) ? 1 : 0,
-              isGoogleDriveMenuLabel(hasText),
-            ),
-          };
-        }
-        throw new Error(`Unexpected selector: ${selector}`);
-      },
-    };
+    const { page, interactions } = createGoogleDrivePageMock();
 
-    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+    const result = await checkGoogleDrive(page);
 
     expect(result).toEqual({
       name: 'gdrive_picker',
@@ -119,46 +138,16 @@ describe('checkGoogleDrive', () => {
   });
 
   it('skips when the composer plus menu opens but the Google Drive entry is absent', async () => {
-    const interactions: string[] = [];
-    const page = {
-      keyboard: {
-        press: (key: string): Promise<void> => {
-          interactions.push(`key:${key}`);
-          return Promise.resolve();
-        },
-      },
-      locator: (selector: string) => {
-        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
-          const click = (): Promise<void> => {
-            interactions.push('click:plus');
-            return Promise.resolve();
-          };
-          return {
-            count: () => Promise.resolve(1),
-            click,
-            first: () => ({
-              click,
-            }),
-          };
+    const { page, interactions } = createGoogleDrivePageMock({
+      menuItemForLabel: (label) => {
+        if (!isGoogleDriveMenuLabel(label)) {
+          throw new Error(`Unexpected menu label: ${label}`);
         }
-        if (selector === SELECTORS.MENU_ITEM) {
-          return {
-            first: () => ({
-              waitFor: () => Promise.resolve(),
-            }),
-            filter: ({ hasText }: { hasText: string }) => {
-              if (!MENU_LABELS.ADD_FROM_GOOGLE_DRIVE.some((label) => label === hasText)) {
-                throw new Error(`Unexpected menu label: ${hasText}`);
-              }
-              return makeFilteredMenuItem(0, false);
-            },
-          };
-        }
-        throw new Error(`Unexpected selector: ${selector}`);
+        return makeFilteredMenuItem(0, false);
       },
-    };
+    });
 
-    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+    const result = await checkGoogleDrive(page);
 
     expect(result).toEqual({
       name: 'gdrive_picker',
@@ -169,42 +158,14 @@ describe('checkGoogleDrive', () => {
   });
 
   it('skips when the Google Drive entry exists in DOM but is hidden', async () => {
-    const interactions: string[] = [];
-    const page = {
-      keyboard: {
-        press: (key: string): Promise<void> => {
-          interactions.push(`key:${key}`);
-          return Promise.resolve();
-        },
-      },
-      locator: (selector: string) => {
-        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
-          return {
-            count: () => Promise.resolve(1),
-            first: () => ({
-              click: () => {
-                interactions.push('click:plus');
-                return Promise.resolve();
-              },
-            }),
-          };
-        }
-        if (selector === SELECTORS.MENU_ITEM) {
-          return {
-            first: () => ({
-              waitFor: () => Promise.resolve(),
-            }),
-            filter: ({ hasText }: { hasText: string }) => makeFilteredMenuItem(
-              isGoogleDriveMenuLabel(hasText) ? 1 : 0,
-              false,
-            ),
-          };
-        }
-        throw new Error(`Unexpected selector: ${selector}`);
-      },
-    };
+    const { page, interactions } = createGoogleDrivePageMock({
+      menuItemForLabel: (label) => makeFilteredMenuItem(
+        isGoogleDriveMenuLabel(label) ? 1 : 0,
+        false,
+      ),
+    });
 
-    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+    const result = await checkGoogleDrive(page);
 
     expect(result.status).toBe('skip');
     expect(result.detail).toBe('Composer + menu opened but Google Drive menu entry was not found');
@@ -212,36 +173,12 @@ describe('checkGoogleDrive', () => {
   });
 
   it('fails with actionable detail when the composer plus menu cannot open', async () => {
-    const page = {
-      keyboard: {
-        press: () => Promise.resolve(),
-      },
-      locator: (selector: string) => {
-        if (selector === SELECTORS.COMPOSER_PLUS_BUTTON) {
-          const click = (): Promise<void> => Promise.reject(new Error('menu blocked'));
-          return {
-            count: () => Promise.resolve(1),
-            click,
-            first: () => ({
-              click,
-            }),
-          };
-        }
-        if (selector === SELECTORS.MENU_ITEM) {
-          return {
-            first: () => ({
-              waitFor: () => Promise.resolve(),
-            }),
-            filter: () => ({
-              count: () => Promise.resolve(0),
-            }),
-          };
-        }
-        throw new Error(`Unexpected selector: ${selector}`);
-      },
-    };
+    const { page } = createGoogleDrivePageMock({
+      plusClick: () => Promise.reject(new Error('menu blocked')),
+      menuItemForLabel: () => makeFilteredMenuItem(0, false),
+    });
 
-    const result = await checkGoogleDrive(page as unknown as Parameters<typeof checkGoogleDrive>[0]);
+    const result = await checkGoogleDrive(page);
 
     expect(result.name).toBe('gdrive_picker');
     expect(result.status).toBe('fail');
