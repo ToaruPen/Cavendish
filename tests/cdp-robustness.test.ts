@@ -113,9 +113,9 @@ interface MinimalBrowser {
 }
 
 /** Mock child_process.spawn to return a fake Chrome process. */
-function mockSpawn(pid: number): void {
+function mockSpawn(pid: number, profilePids: number[] = []): void {
   vi.doMock('node:child_process', () => ({
-    execFileSync: (): string => '',
+    execFileSync: (): string => profilePids.map((profilePid) => String(profilePid)).join('\n'),
     spawn: (): { pid: number; unref: () => void; once: (evt: string, cb: () => void) => void } => ({
       pid,
       unref: (): void => { /* noop stub */ },
@@ -184,17 +184,18 @@ function stubProcessKill(killOverride?: (pid: number, signal?: NodeJS.Signals | 
  */
 async function importWithMocks(options: {
   fetchBehavior: (url: string, init?: RequestInit) => Promise<Response>;
-  connectBehavior?: 'success' | 'fail';
+  connectBehavior?: 'success' | 'fail' | 'fail-once';
   spawnPid?: number;
   endpointPid?: number;
   killOverride?: (pid: number, signal?: NodeJS.Signals | number) => true;
+  profilePids?: number[];
 }): Promise<{ BrowserManager: typeof import('../src/core/browser-manager.js').BrowserManager }> {
   vi.resetModules();
 
   const pid = options.spawnPid ?? 12345;
-  const connectFails = options.connectBehavior === 'fail';
+  let connectAttempts = 0;
 
-  mockSpawn(pid);
+  mockSpawn(pid, options.profilePids);
   mockFsForLaunch(options.endpointPid);
   mockOutputHandler();
 
@@ -206,6 +207,10 @@ async function importWithMocks(options: {
   vi.doMock('playwright-core', () => ({
     chromium: {
       connectOverCDP: (): Promise<MinimalBrowser> => {
+        connectAttempts += 1;
+        const connectFails =
+          options.connectBehavior === 'fail'
+          || (options.connectBehavior === 'fail-once' && connectAttempts === 1);
         if (connectFails) {
           return Promise.reject(new Error('connectOverCDP failed'));
         }
@@ -376,5 +381,38 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
     await expect(bm.launch(true)).rejects.toThrow(/Failed to connect to Chrome via CDP/);
     // EPERM means Chrome is likely still running — do NOT remove endpoint
     expect(unlinkSyncCalls.length).toBe(0);
+  });
+
+  it('cleans up the current endpoint before relaunching after reconnect failure', async () => {
+    const { BrowserManager } = await importWithMocks({
+      fetchBehavior: (): Promise<Response> =>
+        Promise.resolve(new Response('{}', { status: 200 })),
+      connectBehavior: 'fail-once',
+      spawnPid: 33333,
+      endpointPid: 22222,
+    });
+
+    const bm = new BrowserManager();
+
+    await (bm as unknown as { ensureConnected(quiet: boolean): Promise<void> }).ensureConnected(true);
+
+    expect(processKillCalls.some((c) => c.pid === 22222)).toBe(true);
+    expect(unlinkSyncCalls.length).toBeGreaterThan(0);
+  });
+
+  it('cleans up Chrome processes for the profile when reconnect fails without an endpoint', async () => {
+    const { BrowserManager } = await importWithMocks({
+      fetchBehavior: (): Promise<Response> =>
+        Promise.resolve(new Response('{}', { status: 200 })),
+      connectBehavior: 'success',
+      spawnPid: 33333,
+      profilePids: [22222],
+    });
+
+    const bm = new BrowserManager();
+
+    await (bm as unknown as { ensureConnected(quiet: boolean): Promise<void> }).ensureConnected(true);
+
+    expect(processKillCalls.some((c) => c.pid === 22222)).toBe(true);
   });
 });

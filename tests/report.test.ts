@@ -11,6 +11,7 @@ import {
   determineBroken,
   formatReportText,
   validateAllSelectors,
+  waitForReportReady,
 } from '../src/core/report.js';
 
 // ── categorizeSelector ────────────────────────────────────
@@ -83,6 +84,27 @@ describe('validateAllSelectors', () => {
     expect(deepResearchReportRoot).toEqual(expect.objectContaining({
       count: 0,
     }));
+  });
+});
+
+describe('waitForReportReady', () => {
+  it('waits for the prompt composer before report selector validation', async () => {
+    const calls: string[] = [];
+    const page = {
+      locator: (selector: string) => {
+        calls.push(selector);
+        return {
+          waitFor: ({ state, timeout }: { state: string; timeout: number }) => {
+            calls.push(`${state}:${String(timeout)}`);
+            return Promise.resolve();
+          },
+        };
+      },
+    };
+
+    await waitForReportReady(page as unknown as Parameters<typeof waitForReportReady>[0], true, 1234);
+
+    expect(calls).toEqual(['#prompt-textarea', 'visible:1234']);
   });
 });
 
@@ -200,6 +222,19 @@ describe('determineBroken', () => {
     const broken = determineBroken(selectors, baseline);
     expect(broken).toHaveLength(1);
     expect(broken[0].name).toBe('COPY_BUTTON');
+  });
+
+  it('does not mark Deep Research contextual selectors as broken on non-Deep-Research reports', () => {
+    const selectors: SelectorResult[] = [
+      { name: 'DEEP_RESEARCH_REPORT_ROOT', selector: 'main', count: 0, category: 'contextual' },
+    ];
+    const baseline: BaselineComparison = {
+      newMisses: ['DEEP_RESEARCH_REPORT_ROOT'],
+      newHits: [],
+      unchanged: 0,
+    };
+    const broken = determineBroken(selectors, baseline);
+    expect(broken).toHaveLength(0);
   });
 
   it('does not mark contextual selectors as broken without baseline', () => {

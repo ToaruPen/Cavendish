@@ -109,4 +109,45 @@ describe('ChatGPTDriver.selectModel()', () => {
 
     expect(options[2]?.clicked).toBe(true);
   });
+
+  it('opens the current composer pill model picker when the legacy data-testid is absent', async () => {
+    const options: FakeModelOption[] = [
+      { text: 'Instant', clicked: false },
+      { text: 'Thinking', clicked: false },
+      { text: 'Pro • Extended', clicked: false },
+    ];
+    const clickedSelectors: string[] = [];
+
+    const page = {
+      locator: vi.fn((selector: string) => {
+        if (selector === SELECTORS.PROMPT_INPUT) {
+          return new FakeClickableLocator();
+        }
+        if (selector === SELECTORS.MODEL_SELECTOR_BUTTON) {
+          return {
+            click: () => {
+              clickedSelectors.push(selector);
+              return Promise.resolve();
+            },
+          };
+        }
+        if (selector === SELECTORS.MODEL_MENU) {
+          return new FakeModelMenuLocator(options);
+        }
+        throw new Error(`Unexpected selector: ${selector}`);
+      }),
+      keyboard: {
+        press: vi.fn().mockResolvedValue(undefined),
+      },
+    } as const;
+
+    const driver = new ChatGPTDriver(page as unknown as Page);
+    vi.spyOn(driver, 'waitForReady').mockResolvedValue(undefined);
+
+    await driver.selectModel('Pro', true);
+
+    expect(clickedSelectors).toEqual([SELECTORS.MODEL_SELECTOR_BUTTON]);
+    expect(SELECTORS.MODEL_SELECTOR_BUTTON).toContain('__composer-pill');
+    expect(options[2]?.clicked).toBe(true);
+  });
 });

@@ -307,7 +307,7 @@ describe('waitForResponse()', () => {
     }
   });
 
-  it('times out when activity stalls while the stop button remains visible', async () => {
+  it('does not stall while the stop button remains visible during long Pro thinking', async () => {
     const { waitForResponse } = await import('../src/core/driver/response-handler.js');
     const now = vi.spyOn(Date, 'now');
     let tick = 0;
@@ -322,14 +322,20 @@ describe('waitForResponse()', () => {
         { text: 'Thinking...', count: 1, stopVisible: true, copyVisible: false },
         { text: 'Thinking...', count: 1, stopVisible: true, copyVisible: false },
         { text: 'Thinking...', count: 1, stopVisible: true, copyVisible: false },
+        { text: 'Final answer', count: 1, stopVisible: false, copyVisible: true },
       ]) as unknown as Parameters<typeof waitForResponse>[0];
 
-      await expect(waitForResponse(page, {
-        timeout: 30_000,
+      const result = await waitForResponse(page, {
+        timeout: 60_000,
         stallTimeoutMs: 5_000,
         initialMsgCount: 0,
         quiet: true,
-      })).rejects.toThrow('Response stalled');
+      });
+
+      expect(result).toEqual({
+        text: 'Final answer',
+        completed: true,
+      });
     } finally {
       now.mockRestore();
     }
