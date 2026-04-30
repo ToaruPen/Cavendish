@@ -20,6 +20,7 @@ export const DOM_SNAPSHOT_FILE = join(CAVENDISH_DIR, 'dom-snapshot.json');
 export const SNAPSHOT_VERSION = 1;
 const FILE_MODE = 0o600;
 const MAX_DOM_ELEMENTS = 300;
+const REPORT_READY_TIMEOUT_MS = 10_000;
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -121,6 +122,18 @@ export function categorizeSelector(name: string): SelectorCategory {
   if (HOMEPAGE_SELECTORS.has(name)) {return 'homepage';}
   if (AUTH_SELECTORS.has(name)) {return 'auth';}
   return 'contextual';
+}
+
+export async function waitForReportReady(
+  page: Page,
+  quiet: boolean,
+  timeout = REPORT_READY_TIMEOUT_MS,
+): Promise<void> {
+  try {
+    await page.locator(SELECTORS.PROMPT_INPUT).waitFor({ state: 'visible', timeout });
+  } catch (error: unknown) {
+    progress('Warning: prompt composer was not ready before report validation: ' + errorMessage(error), quiet);
+  }
 }
 
 // ── Selector validation ───────────────────────────────────
@@ -284,6 +297,7 @@ export function determineBroken(
   const baselineMisses = new Set(baseline?.newMisses ?? []);
   return selectors.filter((s) => {
     if (s.count > 0) {return false;}
+    if (isDeepResearchSelector(s.name as SelectorKey)) {return false;}
     return s.category === 'homepage' || baselineMisses.has(s.name);
   });
 }

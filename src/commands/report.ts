@@ -26,6 +26,7 @@ import {
   loadBaseline,
   saveBaseline,
   validateAllSelectors,
+  waitForReportReady,
 } from '../core/report.js';
 
 const REPORT_ARGS = {
@@ -100,6 +101,7 @@ export const reportCommand = defineCommand({
       const page = await browser.getPage(quiet);
 
       await ensureChatGptPage(page, quiet);
+      await waitForReportReady(page, quiet);
       const result = await buildReport(page, quiet);
 
       // Output

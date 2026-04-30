@@ -48,6 +48,25 @@ const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
 const CDP_FETCH_TIMEOUT_MS = 5_000;
 
+export function escapePowerShellWqlLikeLiteral(value: string): string {
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "''")
+    .replaceAll('[', '[[]')
+    .replaceAll('%', '[%]')
+    .replaceAll('_', '[_]')
+    .replaceAll('`', '``')
+    .replaceAll('$', '`$');
+}
+
+export function isRecoverableCdpRelaunchError(error: unknown): boolean {
+  if (error instanceof CavendishError && error.category === 'cdp_unavailable') {
+    return /CDP endpoint not found/i.test(error.message);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /Browser\.setDownloadBehavior|Browser context management is not supported|ECONNREFUSED|ECONNRESET|socket hang up|WebSocket.*(?:closed|failed|refused)|Target page, context or browser has been closed/i.test(message);
+}
+
 interface CdpEndpointData {
   url?: string;
   port: number;
@@ -336,10 +355,96 @@ export class BrowserManager {
   private async ensureConnected(quiet: boolean): Promise<void> {
     try {
       await this.connect(quiet);
-    } catch {
+    } catch (error: unknown) {
+      if (isRecoverableCdpRelaunchError(error)) {
+        this.cleanupSavedEndpointChrome(quiet);
+        this.cleanupProfileChromeProcesses(quiet);
+      }
       progress('CDP connection failed, launching new Chrome...', quiet);
       await this.launch(quiet);
     }
+  }
+
+  /**
+   * Stop the Chrome process referenced by the saved endpoint before launching
+   * a replacement. A reachable CDP port can still be unusable for Playwright
+   * (for example when Chrome rejects context-management commands), and leaving
+   * that process alive makes a new Chrome invocation reuse the same profile and
+   * endpoint.
+   */
+  private cleanupSavedEndpointChrome(quiet: boolean): void {
+    const endpoint = readCdpEndpoint();
+    const pid = endpoint?.pid ?? 0;
+    if (pid <= 0) {
+      return;
+    }
+    if (this.killOrphanChrome(pid, quiet)) {
+      this.removeStaleCdpEndpoint(pid, quiet);
+    }
+  }
+
+  private cleanupProfileChromeProcesses(quiet: boolean): void {
+    const pids = this.findChromePidsByProfileDir();
+    if (pids === null || pids.length === 0) {
+      return;
+    }
+    for (const pid of pids) {
+      this.killOrphanChrome(pid, quiet);
+    }
+  }
+
+  private findChromePidsByProfileDir(): number[] | null {
+    const scanner = this.resolveProfileProcessScanner();
+    if (!scanner) {
+      return null;
+    }
+    try {
+      const output = execFileSync(scanner.cmd, scanner.args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 5_000,
+      });
+      return output
+        .split('\n')
+        .map((line) => parseInt(line.trim(), 10))
+        .filter((pid) => !isNaN(pid) && pid > 0);
+    } catch (error: unknown) {
+      const exitCode = (error as NodeJS.ErrnoException & { status?: number }).status;
+      if (scanner.noMatchExitCode !== null && exitCode === scanner.noMatchExitCode) {
+        return [];
+      }
+      return null;
+    }
+  }
+
+  private resolveProfileProcessScanner(): { cmd: string; args: string[]; noMatchExitCode: number | null } | null {
+    if (process.platform === 'win32') {
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows';
+      const psPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+      if (!existsSync(psPath)) {
+        return null;
+      }
+      const escapedDir = escapePowerShellWqlLikeLiteral(CHROME_PROFILE_DIR);
+      return {
+        cmd: psPath,
+        args: [
+          '-NoProfile', '-Command',
+          `Get-CimInstance Win32_Process -Filter "Name like '%chrome%' AND CommandLine like '%--user-data-dir=${escapedDir}%'" | Select-Object -ExpandProperty ProcessId`,
+        ],
+        noMatchExitCode: null,
+      };
+    }
+
+    const pgrepPath = ['/usr/bin/pgrep', '/bin/pgrep', '/sbin/pgrep'].find((p) => existsSync(p));
+    if (!pgrepPath) {
+      return null;
+    }
+    const escapedDir = CHROME_PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return {
+      cmd: pgrepPath,
+      args: ['-fi', '--', `(chrome|chromium).*--user-data-dir=${escapedDir}( |$)`],
+      noMatchExitCode: 1,
+    };
   }
 
   /**

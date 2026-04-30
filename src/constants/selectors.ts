@@ -16,7 +16,8 @@ export const SELECTORS = {
 
   // ── Model selection ──────────────────────────────────────
   /** Button that opens the model picker dropdown */
-  MODEL_SELECTOR_BUTTON: '[data-testid="model-switcher-dropdown-button"]',
+  MODEL_SELECTOR_BUTTON:
+    '[data-testid="model-switcher-dropdown-button"], form:has(#prompt-textarea) button.__composer-pill[aria-haspopup="menu"]',
 
   /** Model picker dropdown menu */
   MODEL_MENU: '[role="menu"]',
@@ -62,11 +63,13 @@ export const SELECTORS = {
   THINKING_INDICATOR: '.agent-turn',
 
   // ── Thinking effort ────────────────────────────────────────
-  /** Container for composer footer action pills (model features) */
-  COMPOSER_FOOTER_ACTIONS: '[data-testid="composer-footer-actions"]',
+  /** Composer footer actions container, or current-model action pill wrapper in the latest ChatGPT DOM */
+  COMPOSER_FOOTER_ACTIONS:
+    '[data-testid="composer-footer-actions"], form:has(#prompt-textarea) span:has(> button.__composer-pill[aria-haspopup="menu"])',
 
   /** Thinking effort pill button in the composer footer */
-  THINKING_EFFORT_PILL: '[data-testid="composer-footer-actions"] button[aria-haspopup="menu"]',
+  THINKING_EFFORT_PILL:
+    '[data-testid="composer-footer-actions"] button[aria-haspopup="menu"], form:has(#prompt-textarea) button.__composer-pill[aria-haspopup="menu"]',
 
   /** Menu items inside the thinking effort dropdown */
   THINKING_EFFORT_MENUITEM: '[role="menuitemradio"]',
@@ -204,7 +207,8 @@ export const SELECTORS = {
 
   // ── GitHub integration ────────────────────────────────────
   /** GitHub pill button in composer footer (after GitHub is enabled) */
-  GITHUB_FOOTER_BUTTON: '[data-testid="composer-footer-actions"] button:has-text("GitHub")',
+  GITHUB_FOOTER_BUTTON:
+    '[data-testid="composer-footer-actions"] button:has-text("GitHub"), form:has(#prompt-textarea) button:has-text("GitHub")',
 
   /** Repository search input in the GitHub picker popover */
   GITHUB_REPO_SEARCH: 'input[placeholder="リポジトリを検索..."], input[placeholder="Search repositories..."]',
