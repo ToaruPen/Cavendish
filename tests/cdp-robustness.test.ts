@@ -426,7 +426,6 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
     const { BrowserManager } = await importWithMocks({
       fetchBehavior: (): Promise<Response> =>
         Promise.resolve(new Response('{}', { status: 200 })),
-      connectBehavior: 'success',
       spawnPid: 33333,
       profilePids: [22222],
     });

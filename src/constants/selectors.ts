@@ -63,9 +63,9 @@ export const SELECTORS = {
   THINKING_INDICATOR: '.agent-turn',
 
   // ── Thinking effort ────────────────────────────────────────
-  /** Composer footer actions container, or current-model action pill in the latest ChatGPT DOM */
+  /** Composer footer actions container, or current-model action pill wrapper in the latest ChatGPT DOM */
   COMPOSER_FOOTER_ACTIONS:
-    '[data-testid="composer-footer-actions"], form:has(#prompt-textarea) button.__composer-pill[aria-haspopup="menu"]',
+    '[data-testid="composer-footer-actions"], form:has(#prompt-textarea) span:has(> button.__composer-pill[aria-haspopup="menu"])',
 
   /** Thinking effort pill button in the composer footer */
   THINKING_EFFORT_PILL:
