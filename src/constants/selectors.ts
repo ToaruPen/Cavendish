@@ -63,9 +63,9 @@ export const SELECTORS = {
   THINKING_INDICATOR: '.agent-turn',
 
   // ── Thinking effort ────────────────────────────────────────
-  /** Container for composer footer action pills (model features) */
+  /** Composer footer actions container, or current-model action pill in the latest ChatGPT DOM */
   COMPOSER_FOOTER_ACTIONS:
-    '[data-testid="composer-footer-actions"], form:has(#prompt-textarea)',
+    '[data-testid="composer-footer-actions"], form:has(#prompt-textarea) button.__composer-pill[aria-haspopup="menu"]',
 
   /** Thinking effort pill button in the composer footer */
   THINKING_EFFORT_PILL:

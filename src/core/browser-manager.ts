@@ -48,6 +48,25 @@ const CDP_MAX_RETRIES = 3;
 const CDP_RETRY_INTERVAL_MS = 5_000;
 const CDP_FETCH_TIMEOUT_MS = 5_000;
 
+export function escapePowerShellWqlLikeLiteral(value: string): string {
+  return value
+    .replaceAll('\\', '\\\\')
+    .replaceAll("'", "''")
+    .replaceAll('[', '[[]')
+    .replaceAll('%', '[%]')
+    .replaceAll('_', '[_]')
+    .replaceAll('`', '``')
+    .replaceAll('$', '`$');
+}
+
+export function isRecoverableCdpRelaunchError(error: unknown): boolean {
+  if (error instanceof CavendishError && error.category === 'cdp_unavailable') {
+    return /CDP endpoint not found/i.test(error.message);
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return /Browser\.setDownloadBehavior|Browser context management is not supported|ECONNREFUSED|ECONNRESET|socket hang up|WebSocket.*(?:closed|failed|refused)|Target page, context or browser has been closed/i.test(message);
+}
+
 interface CdpEndpointData {
   url?: string;
   port: number;
@@ -336,9 +355,11 @@ export class BrowserManager {
   private async ensureConnected(quiet: boolean): Promise<void> {
     try {
       await this.connect(quiet);
-    } catch {
-      this.cleanupSavedEndpointChrome(quiet);
-      this.cleanupProfileChromeProcesses(quiet);
+    } catch (error: unknown) {
+      if (isRecoverableCdpRelaunchError(error)) {
+        this.cleanupSavedEndpointChrome(quiet);
+        this.cleanupProfileChromeProcesses(quiet);
+      }
       progress('CDP connection failed, launching new Chrome...', quiet);
       await this.launch(quiet);
     }
@@ -403,12 +424,7 @@ export class BrowserManager {
       if (!existsSync(psPath)) {
         return null;
       }
-      const escapedDir = CHROME_PROFILE_DIR
-        .replaceAll('\\', '\\\\')
-        .replaceAll("'", "''")
-        .replaceAll('[', '[[]')
-        .replaceAll('%', '[%]')
-        .replaceAll('_', '[_]');
+      const escapedDir = escapePowerShellWqlLikeLiteral(CHROME_PROFILE_DIR);
       return {
         cmd: psPath,
         args: [

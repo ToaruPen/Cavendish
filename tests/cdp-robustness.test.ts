@@ -185,6 +185,7 @@ function stubProcessKill(killOverride?: (pid: number, signal?: NodeJS.Signals | 
 async function importWithMocks(options: {
   fetchBehavior: (url: string, init?: RequestInit) => Promise<Response>;
   connectBehavior?: 'success' | 'fail' | 'fail-once';
+  connectErrorMessage?: string;
   spawnPid?: number;
   endpointPid?: number;
   killOverride?: (pid: number, signal?: NodeJS.Signals | number) => true;
@@ -212,7 +213,7 @@ async function importWithMocks(options: {
           options.connectBehavior === 'fail'
           || (options.connectBehavior === 'fail-once' && connectAttempts === 1);
         if (connectFails) {
-          return Promise.reject(new Error('connectOverCDP failed'));
+          return Promise.reject(new Error(options.connectErrorMessage ?? 'connectOverCDP failed'));
         }
         return Promise.resolve(stubBrowser);
       },
@@ -388,6 +389,8 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
       fetchBehavior: (): Promise<Response> =>
         Promise.resolve(new Response('{}', { status: 200 })),
       connectBehavior: 'fail-once',
+      connectErrorMessage:
+        'browserType.connectOverCDP: Protocol error (Browser.setDownloadBehavior): Browser context management is not supported.',
       spawnPid: 33333,
       endpointPid: 22222,
     });
@@ -398,6 +401,25 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
 
     expect(processKillCalls.some((c) => c.pid === 22222)).toBe(true);
     expect(unlinkSyncCalls.length).toBeGreaterThan(0);
+  });
+
+  it('does not kill the saved endpoint for generic reconnect failures', async () => {
+    const { BrowserManager } = await importWithMocks({
+      fetchBehavior: (): Promise<Response> =>
+        Promise.resolve(new Response('{}', { status: 200 })),
+      connectBehavior: 'fail-once',
+      connectErrorMessage: 'connectOverCDP failed',
+      spawnPid: 33333,
+      endpointPid: 22222,
+      profilePids: [22222],
+    });
+
+    const bm = new BrowserManager();
+
+    await (bm as unknown as { ensureConnected(quiet: boolean): Promise<void> }).ensureConnected(true);
+
+    expect(processKillCalls.some((c) => c.pid === 22222)).toBe(false);
+    expect(unlinkSyncCalls.length).toBe(0);
   });
 
   it('cleans up Chrome processes for the profile when reconnect fails without an endpoint', async () => {
@@ -414,5 +436,17 @@ describe('launch() kills orphan Chrome on CDP failure (#136)', () => {
     await (bm as unknown as { ensureConnected(quiet: boolean): Promise<void> }).ensureConnected(true);
 
     expect(processKillCalls.some((c) => c.pid === 22222)).toBe(true);
+  });
+});
+
+describe('PowerShell WQL escaping for Chrome profile scans', () => {
+  it('escapes WQL wildcard characters and PowerShell metacharacters', async () => {
+    mockOutputHandler();
+
+    const { escapePowerShellWqlLikeLiteral } = await import('../src/core/browser-manager.js');
+
+    expect(escapePowerShellWqlLikeLiteral(String.raw`C:\Users\o'hara[a]_%$` + '`')).toBe(
+      String.raw`C:\\Users\\o''hara[[]a][_][%]` + '`$``',
+    );
   });
 });
